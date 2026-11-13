@@ -2,9 +2,19 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import copy
+import json
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
+
+from corral.epistemic_analysis.decision_applicability import SAVED_FIELDS
+from corral.epistemic_analysis.schema import (
+    GroupingMetadata,
+    NormalizedTrace,
+    SourceReference,
+    content_hash,
+)
 
 from .langfuse import LangfuseLocator, parse_langfuse_url
 
@@ -79,3 +89,152 @@ def resolve_inputs(
     if not entries:
         raise ValueError("No analysis inputs selected")
     return entries
+
+
+CONTEXT_FIELDS = frozenset(
+    {
+        "recorded_initial_instructions",
+        "recovered_task_context",
+        "public_task_context",
+        "configured_tools",
+        "capture_limitations",
+        "source_evidence",
+    }
+)
+
+
+@dataclass
+class CheckInput:
+    trace: NormalizedTrace
+    context: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        if not self.trace.messages:
+            raise ValueError("A check input requires saved messages")
+        # Do not accept entire task configurations or benchmark rows as evidence.
+        if set(self.context) - CONTEXT_FIELDS:
+            raise ValueError("Context must contain only explicit public context fields")
+        self.context = copy.deepcopy(self.context)
+        for key in ("recovered_task_context", "public_task_context"):
+            value = self.context.get(key)
+            if value is not None and (
+                not isinstance(value, dict)
+                or set(value) - {"text", "source_evidence"}
+                or not isinstance(value.get("text"), str)
+                or not value.get("source_evidence")
+            ):
+                raise ValueError(f"{key} requires public text and source evidence")
+
+    @classmethod
+    def from_document(cls, document, context=None):
+        """Accept a normalized snapshot or a saved trial; never copy scores/targets."""
+        if "message_sources" in document:
+            trace = NormalizedTrace(
+                copy.deepcopy(document["messages"]),
+                SourceReference(**document["source"]),
+                copy.deepcopy(document["message_sources"]),
+                grouping=GroupingMetadata(**document.get("grouping", {})),
+                completion_status=document.get("completion_status", "unspecified"),
+                reconstruction_status=document.get(
+                    "reconstruction_status", "unspecified"
+                ),
+            )
+        else:
+            messages, sources = [], []
+            for i, message in enumerate(document["messages"]):
+                value = message.get("content")
+                text = (
+                    value
+                    if isinstance(value, str)
+                    else json.dumps(value, ensure_ascii=False)
+                )
+                fields = {
+                    k: message[k]
+                    for k in (
+                        "tool_calls",
+                        "function_call",
+                        "name",
+                        "tool_call_id",
+                        "agent_run_id",
+                        "branch_id",
+                    )
+                    if k in message
+                }
+                if fields:
+                    text += SAVED_FIELDS + json.dumps(fields, ensure_ascii=False)
+                messages.append(
+                    {"role": str(message.get("role", "unknown")), "content": text}
+                )
+                sources.append(
+                    {
+                        "index": i,
+                        **{
+                            k: v
+                            for k, v in fields.items()
+                            if k not in {"tool_calls", "function_call"}
+                        },
+                    }
+                )
+            trace = NormalizedTrace(
+                messages,
+                SourceReference(
+                    document.get("execution_id", "saved-trace"),
+                    "saved-trial",
+                    content_hash(document),
+                ),
+                sources,
+                grouping=GroupingMetadata(**document.get("grouping", {})),
+                completion_status=document.get("completion_status", "unspecified"),
+                reconstruction_status=document.get(
+                    "reconstruction_status", "unspecified"
+                ),
+            )
+        return cls(trace, context or {})
+
+    def public_state(self):
+        initial = []
+        for i, message in enumerate(self.trace.messages):
+            if message["role"] == "assistant":
+                break
+            if message["role"] in {"system", "user", "developer"}:
+                initial.append(
+                    {
+                        "msg_idx": i,
+                        "message_id": f"m{i}",
+                        "start": 0,
+                        "end": len(message["content"]),
+                        **message,
+                        "source": self.trace.message_sources[i],
+                    }
+                )
+        # Exclude arbitrary SourceReference.details and grouping/score metadata from prompts.
+        return {
+            "context": self.context,
+            "initial_instructions": initial,
+            "instruction_authority": "Recorded runtime instructions take precedence over recovered task configuration.",
+            "capture": {
+                "completion_status": self.trace.completion_status,
+                "reconstruction_status": self.trace.reconstruction_status,
+                "limitations": self.context.get("capture_limitations", []),
+            },
+            "source_hashes": {
+                "saved_source": self.trace.source.content_hash,
+                "messages": content_hash(self.trace.messages),
+                "mappings": content_hash(self.trace.message_sources),
+                "context": content_hash(self.context),
+            },
+        }
+
+    def snapshot(self):
+        return {
+            "grouping": asdict(self.trace.grouping),
+            "messages": self.trace.messages,
+            "message_sources": self.trace.message_sources,
+            "source": asdict(self.trace.source),
+            "completion_status": self.trace.completion_status,
+            "reconstruction_status": self.trace.reconstruction_status,
+        }
+
+    @property
+    def fingerprint(self):
+        return content_hash({"trace": self.snapshot(), "context": self.public_state()})

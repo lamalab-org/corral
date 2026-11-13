@@ -1,28 +1,23 @@
 import asyncio
-import copy
 import json
 from dataclasses import replace
 
 import pytest
 
 from corral.epistemic_analysis import (
-    AnnotatedGraph,
     AnnotationBackend,
     AnnotationConfig,
     GroupingMetadata,
     NormalizedTrace,
     SourceReference,
-    aggregate,
-    analyze_graph,
     annotate_trace,
     ontology,
     read_graph,
-    schema,
 )
 from corral.epistemic_analysis.annotators import llm
 from corral.epistemic_analysis.annotators.jev import JevAnnotator
 from corral.epistemic_analysis.annotators.llm import LLMAnnotator
-from corral.epistemic_analysis.pipeline import annotation_fingerprint, can_reuse
+from corral.epistemic_analysis.pipeline import can_reuse
 
 
 def trace():
@@ -93,9 +88,6 @@ def test_corrected_and_added_observation_nodes_reach_both_backends(monkeypatch, 
                 return answers
 
         backend = JevAnnotator(Decisions()).backend()
-    backend = replace(
-        backend, extract_trace_checks=None
-    )  # Graph postprocessing fixture.
     graph = asyncio.run(
         annotate_trace(
             source, backend, AnnotationConfig("annotator-model", window=20, overlap=5)
@@ -119,6 +111,23 @@ def fake_backend():
         return [{"src": "N1", "dst": "absent", "relation": "tests", "support": []}], []
 
     return AnnotationBackend(nodes, edges, {"annotator": "fake", "threshold": 0.5})
+
+
+@pytest.mark.parametrize("kind", ["llm", "jev"])
+def test_check_rubric_changes_do_not_invalidate_graph_annotations(monkeypatch, kind):
+    from corral.epistemic_analysis import epistemic_prompts
+    from corral.epistemic_analysis.pipeline import annotation_fingerprint
+
+    def backend():
+        return (LLMAnnotator() if kind == "llm" else JevAnnotator(None)).backend()
+
+    source, config = trace(), AnnotationConfig("model")
+    before = annotation_fingerprint(source, backend(), config)
+    name = "insufficient_validation"
+    monkeypatch.setitem(epistemic_prompts.TRACE_CHECK_DEFINITIONS, name, "New rubric")
+    monkeypatch.setitem(epistemic_prompts.TRACE_CHECK_EXAMPLES, name, "New examples")
+    assert annotation_fingerprint(source, backend(), config) == before
+    assert "trace_checks" not in before["configuration"]
 
 
 def test_fingerprint_matches_and_invalidates_all_annotation_dependencies(monkeypatch):
@@ -150,14 +159,7 @@ def test_fingerprint_matches_and_invalidates_all_annotation_dependencies(monkeyp
     assert not can_reuse(replace(graph, provenance={}), source, backend, config)
 
 
-def test_analysis_versions_do_not_invalidate_annotations(monkeypatch):
-    source, backend, config = trace(), fake_backend(), AnnotationConfig("model")
-    before = annotation_fingerprint(source, backend, config)
-    monkeypatch.setattr(schema, "PATTERN_VERSION", "future")
-    assert annotation_fingerprint(source, backend, config) == before
-
-
-def test_iteration_limit_run_can_be_annotated_and_counted_without_changing_outcome():
+def test_iteration_limit_run_can_be_annotated_without_changing_outcome():
     source = replace(trace(), completion_status="failed")
     source.source = replace(
         source.source,
@@ -166,19 +168,12 @@ def test_iteration_limit_run_can_be_annotated_and_counted_without_changing_outco
     backend, config = fake_backend(), AnnotationConfig("model")
     graph = asyncio.run(annotate_trace(source, backend, config))
     restored = read_graph(json.loads(json.dumps(graph.to_dict())))
-    result = analyze_graph(restored)
 
     assert restored.nodes
     assert restored.completion_status == "failed"
     assert restored.reconstruction_status == "complete"
     assert restored.source.details == source.source.details
-    assert restored.annotation_status == result.status == "complete"
-    assert result.eligible
-    assert result.row["completion_status"] == "failed"
-    summary = aggregate([result])
-    stats = next(iter(summary.configurations.values()))["overall"]
-    assert stats["n_traces"] == 1
-    assert stats["n_excluded"] == 0
+    assert restored.annotation_status == "complete"
     assert can_reuse(restored, source, backend, config)
     assert not can_reuse(
         restored, replace(source, completion_status="complete"), backend, config
@@ -186,10 +181,6 @@ def test_iteration_limit_run_can_be_annotated_and_counted_without_changing_outco
     assert not can_reuse(
         restored, replace(source, reconstruction_status="incomplete"), backend, config
     )
-    for annotation_status in ("failed", "incomplete"):
-        rejected = analyze_graph(replace(restored, annotation_status=annotation_status))
-        assert rejected.status == annotation_status
-        assert not rejected.eligible
 
 
 @pytest.mark.parametrize(
@@ -214,56 +205,6 @@ def test_invalid_trace_is_rejected_before_backend_calls(completion, reconstructi
     backend = AnnotationBackend(unexpected_call, unexpected_call, {"annotator": "fake"})
     with pytest.raises(ValueError, match="incomplete or unsupported trace"):
         asyncio.run(annotate_trace(source, backend, AnnotationConfig("model")))
-    graph = AnnotatedGraph(
-        [node("N1", "T", 2, source.messages)],
-        [],
-        completion_status=completion,
-        reconstruction_status=reconstruction,
-    )
-    assert not analyze_graph(graph).eligible
-
-
-def test_status_denominators_configuration_partitioning_and_snapshot_selection():
-    source, backend = trace(), fake_backend()
-    graph = asyncio.run(annotate_trace(source, backend, AnnotationConfig("model")))
-    empty = AnnotatedGraph(
-        [],
-        [],
-        source=replace(source.source, identity="empty"),
-        provenance=copy.deepcopy(graph.provenance),
-    )
-    failed = replace(
-        empty,
-        annotation_status="failed",
-        source=replace(source.source, identity="failed"),
-    )
-    incomplete = replace(
-        graph,
-        completion_status="incomplete",
-        source=replace(source.source, identity="incomplete"),
-    )
-    results = [analyze_graph(g) for g in (graph, empty, failed, incomplete)]
-    assert results[1].row["ap_global_fixed_belief_trace"] is True
-    summary = aggregate(results)
-    stats = next(iter(summary.configurations.values()))["overall"]
-    assert stats["n_traces"] == 1
-    assert stats["n_excluded"] == 3
-    assert stats["status_counts"] == {
-        "complete": 1,
-        "uninformative": 1,
-        "failed": 1,
-        "incomplete": 1,
-    }
-    other = asyncio.run(
-        annotate_trace(source, backend, AnnotationConfig("another-model"))
-    )
-    assert (
-        len(aggregate([analyze_graph(graph), analyze_graph(other)]).configurations) == 2
-    )
-    changed = replace(graph, source=replace(graph.source, content_hash="changed"))
-    with pytest.raises(ValueError, match="Multiple snapshots"):
-        aggregate([analyze_graph(graph), analyze_graph(changed)])
-    assert aggregate([analyze_graph(graph)] * 2).n_selected == 1
 
 
 @pytest.mark.parametrize(

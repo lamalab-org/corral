@@ -1,14 +1,15 @@
-"""Jev's span-classification workflow, backed by OpenAI's Decisions API."""
+"""Jev's shared span-classification workflow and Decisions API client."""
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 import json
 import math
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -33,8 +34,10 @@ from corral.epistemic_analysis.context import (
     current_context,
     message_support,
     observation_indices,
+    task_message_indices,
     view_instructions,
 )
+from corral.epistemic_analysis.decision_applicability import SAVED_FIELDS
 from corral.epistemic_analysis.epistemic_prompts import (
     EDGE_ONTOLOGY,
     NODE_ONTOLOGY,
@@ -43,26 +46,19 @@ from corral.epistemic_analysis.epistemic_prompts import (
     jev_edge_question,
     jev_edge_support_question,
     jev_node_question,
-    trace_check_criteria,
 )
 from corral.epistemic_analysis.graph import coerce_edge, coerce_node, is_runtime_notice
+from corral.epistemic_analysis.graph_semantics import (
+    GRAPH_SEMANTICS_VERSION,
+    claim_ranges,
+)
 from corral.epistemic_analysis.ontology import (
-    ALLOWED_EDGE_TYPE_COMBOS,
     EDGE_RELATIONS,
     NODE_TYPES,
     PASS_A_INSTRUCTIONS,
     PASS_A_SYSTEM,
     PASS_B_INSTRUCTIONS,
-)
-from corral.epistemic_analysis.trace_check_explanations import (
-    DEFAULT_EXPLANATION_CONCURRENCY,
-    EXPLANATION_RULES,
-    explain_trace_checks,
-)
-from corral.epistemic_analysis.trace_checks import (
-    TRACE_CHECK_DEFINITIONS,
-    trace_check_prompt,
-    trace_check_state,
+    relation_allowed,
 )
 
 from .base import record_model
@@ -228,15 +224,11 @@ class JevClient:
         model: str,
         state: dict[str, Any],
         questions: dict[str, dict[str, Any]],
-        *,
-        single_shot: bool = False,
     ) -> dict[str, dict[str, Any]]:
         if questions and not self.api_key:
             raise JevError("Set OPENAI_API_KEY to run the Jev workflow with Decisions")
         answers: dict[str, dict[str, Any]] = {}
         items = list(questions.items())
-        if single_shot and len(items) > MAX_QUESTIONS:
-            raise JevError("Too many questions for a single-shot Decisions request")
         context = current_context()
         budget = (
             context.config.max_request_tokens if context else self.max_request_tokens
@@ -275,13 +267,11 @@ class JevClient:
                 record_request(
                     {
                         **diagnostic,
-                        "outcome": "split"
-                        if len(batch) > 1 and not single_shot
-                        else "oversized",
+                        "outcome": "split" if len(batch) > 1 else "oversized",
                         "reason": reason,
                     }
                 )
-                if len(batch) == 1 or single_shot:
+                if len(batch) == 1:
                     raise RequestBudgetExceeded({**diagnostic, "reason": reason})
                 entries = list(batch.items())
                 middle = len(entries) // 2
@@ -344,9 +334,7 @@ class JevClient:
                 logger.warning(f"Decisions request retry {attempt + 1}: {error}")
                 await asyncio.sleep(min(2 ** (attempt + 1), 30))
 
-        batch_size = (
-            max(1, len(items)) if single_shot else min(self.batch_size, MAX_QUESTIONS)
-        )
+        batch_size = min(self.batch_size, MAX_QUESTIONS)
         for offset in range(0, len(items), batch_size):
             await evaluate_batch(dict(items[offset : offset + batch_size]))
         return answers
@@ -358,6 +346,7 @@ class Span:
     offset: int
     quote: str
     kind: str
+    tool_name: str | None = None
 
     @property
     def key(self) -> str:
@@ -365,6 +354,25 @@ class Span:
 
     @property
     def support(self) -> list[dict[str, Any]]:
+        context = current_context()
+        if context is not None:
+            retained = []
+            for r in context.view.mappings[self.msg_idx]["retained_ranges"]:
+                start = max(self.offset, r["view_start"])
+                end = min(self.offset + len(self.quote), r["view_end"])
+                if start < end:
+                    original = r["original_start"] + start - r["view_start"]
+                    retained.append(
+                        {
+                            "msg_idx": self.msg_idx,
+                            "quote": self.quote[
+                                start - self.offset : end - self.offset
+                            ],
+                            "start": original,
+                            "end": original + end - start,
+                        }
+                    )
+            return retained
         return [
             {
                 "msg_idx": self.msg_idx,
@@ -375,34 +383,34 @@ class Span:
         ]
 
 
-def candidate_spans(messages: list[dict[str, Any]], max_chars: int) -> list[Span]:
+def _prose_spans(
+    messages: list[dict[str, Any]], max_chars: int, *, observations=None, tasks=None
+) -> list[Span]:
     """Split prose into exact substrings; preserve actions and their arguments."""
     spans = []
 
     def add_prose(idx: int, text: str, offset: int, kind: str = "prose") -> None:
         for match in re.finditer(r"\S[\s\S]*?(?=\n|(?<=[.!?])\s+|$)", text):
             quote = match.group()
-            for start in range(0, len(quote), max_chars):
-                part = quote[start : start + max_chars]
-                if part.strip():
-                    spans.append(Span(idx, offset + match.start() + start, part, kind))
+            for low, high in claim_ranges(quote):
+                for start in range(low, high, max_chars):
+                    part = quote[start : min(high, start + max_chars)]
+                    if part.strip():
+                        spans.append(
+                            Span(idx, offset + match.start() + start, part, kind)
+                        )
 
-    observations = observation_indices(messages)
-    task_idx = next(
-        (
-            i
-            for i, m in enumerate(messages)
-            if m.get("role", "").lower() == "user" and i not in observations
-        ),
-        None,
+    observations = (
+        observation_indices(messages) if observations is None else observations
     )
+    tasks = task_message_indices(messages, observations) if tasks is None else tasks
     for idx, message in enumerate(messages):
         content = str(message.get("content", "") or "")
         if idx in observations:
             spans.append(Span(idx, 0, content, "observation"))
             continue
-        if idx == task_idx and content.strip():
-            spans.append(Span(idx, 0, content, "task"))
+        if idx in tasks and content.strip():
+            add_prose(idx, content, 0, "task")
             continue
         # System instructions and later user messages supply context.
         if message.get("role", "").lower() != "assistant":
@@ -424,6 +432,136 @@ def candidate_spans(messages: list[dict[str, Any]], max_chars: int) -> list[Span
     return spans
 
 
+def _saved_json_members(text):
+    """Return exact top-level JSON member bounds, including escaped string values."""
+    decoder = json.JSONDecoder()
+    position = text.index("{") + 1
+    while True:
+        while text[position].isspace() or text[position] == ",":
+            position += 1
+        if text[position] == "}":
+            return
+        key, position = decoder.raw_decode(text, position)
+        while text[position].isspace():
+            position += 1
+        if text[position] != ":":
+            raise ValueError("Invalid saved JSON member")
+        position += 1
+        while text[position].isspace():
+            position += 1
+        start = position
+        value, position = decoder.raw_decode(text, position)
+        yield key, value, start, position
+
+
+def candidate_spans(messages, max_chars):
+    """Preserve original substrings; never classify serialized metadata as prose."""
+    prose = copy.deepcopy(messages)
+    calls = []
+    for index, message in enumerate(messages):
+        if message.get("role", "").lower() != "assistant":
+            continue
+        content, marker, suffix = str(message.get("content", "") or "").rpartition(
+            SAVED_FIELDS
+        )
+        if not marker:
+            continue
+        try:
+            fields = json.loads(suffix)
+        except ValueError:
+            continue  # Keep malformed text visible rather than discard it.
+        if not isinstance(fields, dict):
+            continue
+        prose[index]["content"] = "" if content.strip() == "null" else content
+        # ReAct dispatch fields duplicate the actual action tags, whose original
+        # source spans already identify the calls, including folded call batches.
+        tagged = list(
+            re.finditer(
+                r"<action>(.*?)</action>\s*<action_input>(.*?)</action_input>",
+                content,
+                re.DOTALL,
+            )
+        )
+        duplicates = []
+        for match in tagged:
+            with contextlib.suppress(ValueError):
+                duplicates.append((match[1].strip(), json.loads(match[2])))
+        base = len(content) + len(marker)
+        for key, value, start, end in _saved_json_members(suffix):
+            entries = []
+            if key == "function_call" and isinstance(value, dict):
+                entries.append((value, start, end))
+            elif key == "tool_calls" and isinstance(value, list):
+                position = start + 1
+                for _ in value:
+                    while suffix[position].isspace() or suffix[position] == ",":
+                        position += 1
+                    item, following = json.JSONDecoder().raw_decode(suffix, position)
+                    entries.append((item, position, following))
+                    position = following
+            for item, left, right in entries:
+                if not isinstance(item, dict):
+                    continue
+                function = item.get("function", item)
+                if not isinstance(function, dict) or not isinstance(
+                    function.get("name"), str
+                ):
+                    continue
+                arguments = function.get("arguments")
+                if isinstance(arguments, str):
+                    with contextlib.suppress(ValueError):
+                        arguments = json.loads(arguments)
+                pair = (function["name"], arguments)
+                if pair in duplicates:
+                    duplicates.remove(pair)
+                    continue
+                calls.append(
+                    Span(
+                        index,
+                        base + left,
+                        suffix[left:right],
+                        "action",
+                        function["name"],
+                    )
+                )
+    spans = sorted(
+        [
+            *_prose_spans(
+                prose,
+                max_chars,
+                observations=observation_indices(messages),
+                tasks=task_message_indices(messages),
+            ),
+            *calls,
+        ],
+        key=lambda s: (s.msg_idx, s.offset),
+    )
+    context = current_context()
+    if context is None or messages is not context.view.messages:
+        return spans
+    retained = []
+    for span in spans:
+        if span.kind == "observation":
+            retained.append(span)
+            continue
+        for r in context.view.mappings[span.msg_idx]["retained_ranges"]:
+            start = max(span.offset, r["view_start"])
+            end = min(span.offset + len(span.quote), r["view_end"])
+            quote = span.quote[start - span.offset : end - span.offset]
+            if start < end and quote.strip():
+                intact = start == span.offset and end == span.offset + len(span.quote)
+                retained.append(
+                    replace(
+                        span,
+                        offset=start,
+                        quote=quote,
+                        kind=span.kind if intact or span.kind == "task" else "prose",
+                        tool_name=span.tool_name if intact else None,
+                    )
+                )
+    return retained
+
+
 def window_state(
     messages: list[dict[str, Any]], start: int, end: int
 ) -> dict[str, Any]:
@@ -438,98 +576,60 @@ def window_state(
 
 
 class JevAnnotator:
+    @staticmethod
+    def submission_span(span):
+        return span.tool_name == "submit_answer" or (
+            span.kind == "action" and SUBMIT_ANSWER_ACTION.match(span.quote)
+        )
+
     def __init__(
         self,
-        client: JevClient | None,
+        client,
         min_confidence: float = 0.5,
         max_span_chars: int = 1200,
-        explanation_concurrency: int = DEFAULT_EXPLANATION_CONCURRENCY,
     ):
-        if (
-            isinstance(explanation_concurrency, bool)
-            or not isinstance(explanation_concurrency, int)
-            or explanation_concurrency < 1
-        ):
-            raise ValueError("explanation_concurrency must be a positive integer")
         self.client = client
         self.min_confidence = min_confidence
         self.max_span_chars = max_span_chars
-        self.explanation_concurrency = explanation_concurrency
 
-    def backend(self) -> AnnotationBackend:
-        return AnnotationBackend(
+    def backend(self, *, stop_at_submission=True) -> AnnotationBackend:
+        backend = AnnotationBackend(
             extract_nodes=self.extract_nodes,
             extract_edges=self.extract_edges,
-            extract_trace_checks=self.extract_trace_checks,
             provenance={
                 "annotator": "jev",
                 "api": "openai-decisions",
-                "candidate_extractor": "multilabel_spans_v4",
+                "candidate_extractor": GRAPH_SEMANTICS_VERSION,
+                "edge_coverage": "source-aware-eligible-pairs-in-windows-v2",
+                "stop_at_submission": stop_at_submission,
                 "node_postprocessing": "test_precedence_neutral_fallback_v1",
                 "node_decisions": "independent_choices_v1",
+                "judgment_consolidation": "same_assessment_complete_link_v1",
+                "duplicate_prompt_sha1": sha1_hex(
+                    json.dumps(
+                        {
+                            t: jev_duplicate_question("first", "second", t)
+                            for t in NODE_TYPES
+                        },
+                        sort_keys=True,
+                    )
+                ),
                 "min_confidence": self.min_confidence,
                 "max_span_chars": self.max_span_chars,
-                "trace_check_explanations": {
-                    "policy": "present-check-responses-v1",
-                    "concurrency": self.explanation_concurrency,
-                    "prompt_sha1": sha1_hex(EXPLANATION_RULES),
-                },
                 "endpoint": getattr(self.client, "endpoint", DEFAULT_ENDPOINT),
                 "batch_size": getattr(self.client, "batch_size", 32),
                 "timeout_s": getattr(self.client, "timeout_s", 120),
                 "max_retries": getattr(self.client, "max_retries", 5),
                 "decision_prompt_sha1": sha1_hex(
-                    PASS_A_SYSTEM
-                    + NODE_ONTOLOGY
-                    + NODE_RULES
-                    + EDGE_ONTOLOGY
-                    + "".join(
-                        trace_check_prompt(name) for name in TRACE_CHECK_DEFINITIONS
-                    )
+                    PASS_A_SYSTEM + NODE_ONTOLOGY + NODE_RULES + EDGE_ONTOLOGY
                 ),
                 "ontology_sha1": sha1_hex(PASS_A_INSTRUCTIONS + PASS_B_INSTRUCTIONS),
             },
         )
-
-    async def extract_trace_checks(self, trace, nodes, edges, model):
-        if self.client is None:
-            raise JevError("Jev client is required for annotation")
-        checks = []
-        for name in TRACE_CHECK_DEFINITIONS:
-            question = {
-                "type": "choice",
-                "instructions": trace_check_prompt(name),
-                "criteria": trace_check_criteria(name),
-            }
-            answers = await self.client.evaluate(
-                model,
-                trace_check_state(trace, nodes, edges, name),
-                {name: question},
-                single_shot=True,
-            )
-            answer = answers[name]
-            status = (
-                answer["choice"]
-                if answer["confidence"] >= self.min_confidence
-                else "uncertain"
-            )
-            checks.append(
-                {"name": name, "status": status, "support": [], "jev": answer}
-            )
-        return await explain_trace_checks(
-            trace,
-            nodes,
-            edges,
-            model,
-            checks,
-            api_key=self.client.api_key,
-            base_url=self.client.endpoint.rsplit("/", 1)[0] + "/",
-            timeout_s=self.client.timeout_s,
-            # Jev counts attempts; the SDK counts retries after the first attempt.
-            max_retries=self.client.max_retries - 1,
-            max_request_tokens=self.client.max_request_tokens,
-            concurrency=self.explanation_concurrency,
-        )
+        # Client metadata identifies the wire protocol independently of the
+        # shared Jev extraction algorithm. Workflow options belong to this call.
+        backend.provenance.update(getattr(self.client, "provenance", {}))
+        return backend
 
     async def extract_nodes(
         self,
@@ -567,7 +667,9 @@ class JevAnnotator:
             }
             questions = {}
             for span in current:
-                for node_type in NODE_TYPES:
+                for node_type in (
+                    ("E",) if span.kind in {"task", "observation"} else NODE_TYPES
+                ):
                     questions[f"{span.key}_{node_type}"] = jev_node_question(
                         span.key, node_type
                     )
@@ -576,9 +678,7 @@ class JevAnnotator:
             for span in current:
                 seen.add(span.key)
                 selected = {}
-                submission = span.kind == "action" and SUBMIT_ANSWER_ACTION.match(
-                    span.quote
-                )
+                submission = self.submission_span(span)
                 test_over_neutral = (
                     span.kind == "action"
                     and not submission
@@ -588,7 +688,9 @@ class JevAnnotator:
                     )
                 )
                 for node_type in NODE_TYPES:
-                    answer = answers[f"{span.key}_{node_type}"]
+                    answer = answers.get(f"{span.key}_{node_type}")
+                    if answer is None:
+                        continue
                     if answer["choice"] != "present":
                         continue
                     if answer["confidence"] < self.min_confidence and not (
@@ -635,6 +737,10 @@ class JevAnnotator:
                         "jev": answer,
                         "candidate_kind": span.kind,
                     }
+                    if node_type == "E":
+                        node["evidence_origin"] = (
+                            "task_given" if span.kind == "task" else "tool_observation"
+                        )
                     if node_type == "T" and test_over_neutral:
                         node["postprocessing"] = "test_over_neutral"
                     elif node_type == "N" and neutral_fallback:
@@ -652,10 +758,7 @@ class JevAnnotator:
                 )
             nodes.extend(extracted[:max_nodes_per_window])
         for idx in {
-            s.msg_idx
-            for s in spans
-            if s.kind == "final"
-            or (s.kind == "action" and SUBMIT_ANSWER_ACTION.match(s.quote))
+            s.msg_idx for s in spans if s.kind == "final" or self.submission_span(s)
         }:
             if not any(n["time"] == idx and n["type"] == "F" for n in nodes):
                 review(f"Final-answer message {idx} has no F node.")
@@ -663,7 +766,8 @@ class JevAnnotator:
         return nodes, warnings
 
     async def _merge_duplicates(self, model, state, nodes):
-        """Merge repeated instances within a message, preserving distinct claims."""
+        """Consolidate assessments and merge repeated instances before edge extraction."""
+        originals = {n["node_id"]: copy.deepcopy(n) for n in nodes if n["type"] == "J"}
         questions, pairs = {}, {}
         for i, first in enumerate(nodes):
             for second in nodes[i + 1 :]:
@@ -698,6 +802,27 @@ class JevAnnotator:
             )
             if kept is removed:
                 continue
+            if kept["type"] == "J":
+                left = {key for key, value in representatives.items() if value is kept}
+                right = {
+                    key for key, value in representatives.items() if value is removed
+                }
+                # A transitive chain of "same" votes must not override a distinct
+                # or uncertain assessment pair elsewhere in the proposed group.
+                crossing = [
+                    answers[name]
+                    for name, (a, b) in pairs.items()
+                    if (a["node_id"] in left and b["node_id"] in right)
+                    or (a["node_id"] in right and b["node_id"] in left)
+                ]
+                if any(
+                    a["choice"] != "same" or a["confidence"] < self.min_confidence
+                    for a in crossing
+                ):
+                    warnings.append(
+                        f"Judgment group {key} has conflicting or uncertain pairs; retained separate assessments."
+                    )
+                    continue
             planned_and_executed = kept["type"] == "T" and (
                 (kept.get("candidate_kind") == "action")
                 != (removed.get("candidate_kind") == "action")
@@ -712,6 +837,29 @@ class JevAnnotator:
             for identity, representative in representatives.items():
                 if representative is removed:
                     representatives[identity] = kept
+        for node in nodes:
+            if node["type"] != "J" or representatives[node["node_id"]] is not node:
+                continue
+            members = [key for key in originals if representatives[key] is node]
+            if len(members) < 2:
+                continue
+            node["support"].sort(key=lambda s: (s["msg_idx"], s.get("start", 0)))
+            node["text"] = normalize_whitespace(
+                " ".join(s["quote"] for s in node["support"])
+            )
+            node["merged_nodes"] = [key for key in members if key != node["node_id"]]
+            node["judgment_consolidation"] = {
+                "method": "model_same_assessment_v1",
+                "original_nodes": [originals[key] for key in members],
+                "decisions": [
+                    {"nodes": [a["node_id"], b["node_id"]], "answer": answers[name]}
+                    for name, (a, b) in pairs.items()
+                    if a["node_id"] in members and b["node_id"] in members
+                ],
+            }
+            # The representative fragment's type score is not a score for the
+            # whole assessment. Preserve individual scores in the audit above.
+            node.pop("jev", None)
         return [n for n in nodes if representatives[n["node_id"]] is n], warnings
 
     async def extract_edges(
@@ -732,7 +880,20 @@ class JevAnnotator:
             state = window_state(messages, start, end)
             state["edge_ontology"] = EDGE_ONTOLOGY
             state["nodes"] = {
-                n["node_id"]: {k: n[k] for k in ("type", "time", "text", "support")}
+                n["node_id"]: {
+                    k: n[k]
+                    for k in (
+                        "type",
+                        "time",
+                        "text",
+                        "support",
+                        "evidence_origin",
+                        "evidence_source_id",
+                        "shared_support_id",
+                        "epistemic_role",
+                    )
+                    if k in n
+                }
                 for n in current
             }
             questions = {}
@@ -744,11 +905,7 @@ class JevAnnotator:
                         continue
                     relations = []
                     for rel in EDGE_RELATIONS:
-                        if (
-                            rel,
-                            src["type"],
-                            dst["type"],
-                        ) not in ALLOWED_EDGE_TYPE_COMBOS:
+                        if not relation_allowed(rel, src, dst):
                             continue
                         # Use the canonical directions described in Pass B.
                         if rel == "tests" and src["type"] == "T":
@@ -806,4 +963,40 @@ class JevAnnotator:
                 warnings.extend(qc)
                 if coerced is not None:
                     edges.append(coerced)
+        # Record candidate-pair coverage. Local windows never imply that distant
+        # nodes are unrelated, and their omissions remain reviewable.
+        windows = iter_windows(len(messages), window, overlap)
+        allowed = considered = 0
+        for i, first in enumerate(nodes):
+            for j, second in enumerate(nodes):
+                if i == j or (first["type"] == second["type"] and i > j):
+                    continue
+                if not any(
+                    relation_allowed(rel, first, second)
+                    and not (rel == "tests" and first["type"] == "T")
+                    for rel in EDGE_RELATIONS
+                ):
+                    continue
+                allowed += 1
+                considered += any(
+                    start <= first["time"] < end and start <= second["time"] < end
+                    for start, end in windows
+                )
+        context = current_context()
+        if context is not None:
+            context.diagnostics.append(
+                {
+                    "stage": "edges",
+                    "allowed_node_pairs": allowed,
+                    "considered_node_pairs": considered,
+                    "unexamined_node_pairs": allowed - considered,
+                    "window_messages": window,
+                    "overlap_messages": overlap,
+                }
+            )
+        if allowed > considered:
+            issue = f"{allowed - considered} eligible node pairs cross graph windows and were not examined."
+            warnings.append(issue)
+            if context is not None:
+                context.review_issues.append(issue)
         return edges, warnings

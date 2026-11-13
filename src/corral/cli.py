@@ -874,10 +874,14 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     from corral.epistemic_analysis.cli import add_arguments as add_analysis_arguments
 
-    analyze = commands.add_parser(
-        "analyze", help="Annotate traces and analyze epistemic patterns."
-    )
+    analyze = commands.add_parser("analyze", help="Annotate epistemic nodes and edges.")
     add_analysis_arguments(analyze)
+    from corral.epistemic_analysis.cli import add_check_arguments
+
+    checks = commands.add_parser(
+        "annotate-checks", help="Run independent KnowLine labels and Gemma evidence."
+    )
+    add_check_arguments(checks)
     run = commands.add_parser(
         "run",
         help="Run one independent task without benchmark evaluation.",

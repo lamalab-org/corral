@@ -1,24 +1,6 @@
-"""Epistemic annotation and analysis, independent of trace sources and providers."""
-
-from .aggregation import aggregate
-from .analysis import analyze_graph
-from .annotators.base import AnnotationBackend
-from .decisions import DecisionsAnnotator, EpistemicReport, MotifAssessment
-from .pipeline import annotate_trace
-from .schema import (
-    AggregateResult,
-    AnalysisResult,
-    AnnotatedGraph,
-    AnnotationConfig,
-    GroupingMetadata,
-    NormalizedTrace,
-    SourceReference,
-    read_graph,
-)
+"""Epistemic graph annotation and trace checks, independent of trace providers."""
 
 __all__ = [
-    "AggregateResult",
-    "AnalysisResult",
     "AnnotatedGraph",
     "AnnotationBackend",
     "AnnotationConfig",
@@ -28,8 +10,26 @@ __all__ = [
     "MotifAssessment",
     "NormalizedTrace",
     "SourceReference",
-    "aggregate",
-    "analyze_graph",
     "annotate_trace",
     "read_graph",
 ]
+
+
+def __getattr__(name):
+    # Checks-only use must not initialize graph or live-agent integrations.
+    from importlib import import_module
+
+    modules = {
+        "AnnotationBackend": "annotators.base",
+        "annotate_trace": "pipeline",
+        "DecisionsAnnotator": "decisions",
+        "EpistemicReport": "decisions",
+        "MotifAssessment": "decisions",
+    }
+    if name in __all__:
+        value = getattr(
+            import_module(f"{__name__}.{modules.get(name, 'schema')}"), name
+        )
+        globals()[name] = value
+        return value
+    raise AttributeError(name)

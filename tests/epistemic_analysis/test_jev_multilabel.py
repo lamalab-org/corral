@@ -1,11 +1,8 @@
 """Behavioral checks for overlapping nodes and inspectable Jev decisions."""
 
-import ast
 import asyncio
 import json
-import re
 from dataclasses import replace
-from pathlib import Path
 
 import pytest
 
@@ -20,6 +17,7 @@ from corral.epistemic_analysis import (
 from corral.epistemic_analysis.annotators.jev import JevAnnotator, JevClient
 from corral.epistemic_analysis.cli import validate_options
 from corral.epistemic_analysis.graph import validate_support_quotes
+from corral.epistemic_analysis.overflow import long_message_view, tool_excerpt_view
 from corral.epistemic_analysis.pipeline import can_reuse
 from corral.epistemic_analysis.storage import save_annotation_artifacts
 
@@ -76,35 +74,12 @@ def annotate(messages, decisions, **options):
     trace = NormalizedTrace(messages, SourceReference("test", "test.json", "hash"))
     client = JevClient("not-saved", batch_size=8)
     client._post = decisions.post
-    backend = replace(JevAnnotator(client).backend(), extract_trace_checks=None)
+    backend = JevAnnotator(client).backend()
     config = AnnotationConfig("jev", **options)
     return asyncio.run(annotate_trace(trace, backend, config)), trace, backend, config
 
 
 def test_current_definitions_are_sent_for_every_node_decision():
-    original = Path(__file__).resolve().parents[2] / "reasoning_reports/analyze.py"
-    assignments = {
-        target.id: ast.literal_eval(statement.value)
-        for statement in ast.parse(original.read_text()).body
-        if isinstance(statement, ast.Assign)
-        for target in statement.targets
-        if isinstance(target, ast.Name)
-        and target.id in {"PASS_A_SYSTEM", "PASS_A_INSTRUCTIONS"}
-    }
-    # Preserve the legacy structure while sharing current action and commitment
-    # definitions across LLM and Jev annotation.
-    assignments["PASS_A_INSTRUCTIONS"] = assignments["PASS_A_INSTRUCTIONS"].replace(
-        "tag <final_answer>", "action `submit_answer`"
-    )
-    for kind in ("T", "N", "C"):
-        assignments["PASS_A_INSTRUCTIONS"] = re.sub(
-            rf"^{kind} = .+$",
-            f"{kind} = {ontology.NODE_CRITERIA[kind]}",
-            assignments["PASS_A_INSTRUCTIONS"],
-            flags=re.MULTILINE,
-        )
-    assert assignments["PASS_A_SYSTEM"] == ontology.PASS_A_SYSTEM
-    assert assignments["PASS_A_INSTRUCTIONS"] == ontology.PASS_A_INSTRUCTIONS
     decisions = Decisions(lambda candidate: {"H", "J", "C"}, confidence=0.7)
     graph, _, _, _ = annotate(
         [
@@ -128,9 +103,9 @@ def test_current_definitions_are_sent_for_every_node_decision():
             all_types.add(key.rsplit("_", 1)[1])
             assert (
                 state["node_ontology"]
-                == assignments["PASS_A_INSTRUCTIONS"].split("Return JSON with keys:")[0]
+                == ontology.PASS_A_INSTRUCTIONS.split("Return JSON with keys:")[0]
             )
-            assert state["annotation_rules"] == assignments["PASS_A_SYSTEM"]
+            assert state["annotation_rules"] == ontology.PASS_A_SYSTEM
             assert (
                 next(
                     c["description"]
@@ -163,6 +138,129 @@ def test_same_type_distinct_instances_and_duplicate_support(same, expected):
     assert all(
         validate_support_quotes(graph.messages, n["support"])[0] for n in graph.nodes
     )
+
+
+def test_judgment_consolidation_preserves_all_reasons_before_edges():
+    message = (
+        "The measured peak agrees with this structure, and the carbon count also agrees. "
+        "Proposed structure is A."
+    )
+    decisions = Decisions(
+        lambda c: (
+            {"E"}
+            if c["kind"] == "observation"
+            else {"H"}
+            if c["quote"] == "Proposed structure is A."
+            else {"J"}
+        ),
+        same=True,
+    )
+    graph, _, _, _ = annotate(
+        [
+            {"role": "tool", "content": "Measured spectrum."},
+            {"role": "assistant", "content": message},
+        ],
+        decisions,
+    )
+    judgment = next(n for n in graph.nodes if n["type"] == "J")
+    assert [n["type"] for n in graph.nodes].count("J") == 1
+    assert [n["type"] for n in graph.nodes].count("H") == 1
+    assert judgment["text"] == message.removesuffix(" Proposed structure is A.")
+    assert len(judgment["support"]) == 2
+    assert validate_support_quotes(graph.messages, judgment["support"])[0]
+    assert "jev" not in judgment
+    audit = judgment["judgment_consolidation"]
+    assert len(audit["original_nodes"]) == 2
+    assert all(n["jev"]["choice"] == "present" for n in audit["original_nodes"])
+    assert audit["decisions"][0]["answer"]["choice"] == "same"
+    saw_merge = saw_edges = False
+    for body in decisions.bodies:
+        state = json.loads(body["input"])
+        keys = [q["name"] for q in body["questions"]]
+        if any(k.startswith("same_") for k in keys):
+            saw_merge = True
+            assert state["messages"]["m1"]["content"] == message
+        if any(k.startswith("edge_") for k in keys):
+            saw_edges = True
+            js = [n for n in state["nodes"].values() if n["type"] == "J"]
+            assert len(js) == 1
+            assert js[0]["text"] == judgment["text"]
+    assert saw_merge
+    assert saw_edges
+
+
+@pytest.mark.parametrize("conflict", ["distinct", "uncertain"])
+def test_judgment_group_cannot_bridge_distinct_or_uncertain_assessments(conflict):
+    class PairChoices:
+        async def evaluate(self, model, state, questions):
+            answers = {}
+            for key in questions:
+                answer = {"choice": "same", "confidence": 0.9}
+                if key == "same_N1_N3":
+                    answer = (
+                        {"choice": "distinct", "confidence": 0.9}
+                        if conflict == "distinct"
+                        else {"choice": "same", "confidence": 0.55}
+                    )
+                answers[key] = answer
+            return answers
+
+    nodes = [
+        {
+            "node_id": f"N{i}",
+            "type": "J",
+            "time": 0,
+            "text": text,
+            "support": [{"msg_idx": 0, "start": i * 10, "quote": text}],
+            "jev": {"choice": "present", "confidence": 0.9},
+        }
+        for i, text in enumerate(
+            ["First reason", "Second reason", "Separate assessment"], 1
+        )
+    ]
+    result, warnings = asyncio.run(
+        JevAnnotator(PairChoices(), min_confidence=0.6)._merge_duplicates(
+            "test", {}, nodes
+        )
+    )
+    assert len(result) == 2
+    assert result[0]["merged_nodes"] == ["N2"]
+    assert result[1]["node_id"] == "N3"
+    assert warnings
+
+
+def test_judgment_group_audit_retains_original_offsets_after_message_trimming():
+    quotes = ["The measured peak agrees.", "The count also agrees."]
+    text = quotes[0] + "\n" * 10000 + quotes[1]
+    source = NormalizedTrace(
+        [{"role": "assistant", "content": text}],
+        SourceReference("grouped", "grouped.json", "hash"),
+    )
+    view = long_message_view(source, tool_excerpt_view(source))
+    assert len(view.messages[0]["content"]) < len(text)
+    decisions = Decisions(lambda c: {"J"} if c["quote"] in quotes else set(), same=True)
+    client = JevClient("not-saved")
+    client._post = decisions.post
+    graph = asyncio.run(
+        annotate_trace(
+            source,
+            JevAnnotator(client).backend(),
+            AnnotationConfig("jev"),
+            prepared_view=view,
+        )
+    )
+    assert len(graph.nodes) == 1
+    judgment = graph.nodes[0]
+    originals = judgment["judgment_consolidation"]["original_nodes"]
+    for i, q in enumerate(quotes):
+        expected = {
+            "msg_idx": 0,
+            "quote": q,
+            "start": text.index(q),
+            "end": text.index(q) + len(q),
+        }
+        assert judgment["support"][i] == expected
+        assert originals[i]["support"] == [expected]
 
 
 def test_final_answer_contents_can_also_be_hypothesis_judgment_and_commitment():
@@ -230,6 +328,7 @@ def test_test_plan_and_action_count_once_and_neutral_result_stays_evidence():
             {"role": "tool", "content": "Observation: copied."},
         ],
         Decisions(classify, same=True),
+        window=4,
     )
     assert [n["type"] for n in graph.nodes] == ["T", "E", "N", "E"]
     assert graph.nodes[0]["support"][0]["quote"] == "<action>measure</action>"
@@ -280,6 +379,12 @@ def test_defaults_bounded_windows_clipping_and_full_decision_artifacts(tmp_path)
     )
     assert saved == graph.annotation_requests
     assert read_graph(graph.to_dict()).annotation_requests == saved
+    # Both transports now report eligible pairs missed by graph windows.
+    assert graph.annotation_status == "incomplete"
+    assert any("cross graph windows" in issue for issue in graph.qc["review_issues"])
+    assert not can_reuse(graph, trace, backend, config)
+    # A complete window remains reusable, and configuration changes invalidate it.
+    graph, trace, backend, config = annotate(trace.messages, decisions, window=4)
     assert can_reuse(graph, trace, backend, config)
     old = replace(
         backend,

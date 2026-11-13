@@ -66,3 +66,22 @@ ALLOWED_EDGE_TYPE_COMBOS: set[tuple[str, str, str]] = {
     ("informs", "J", "H"),
     ("informs", "J", "J"),
 }
+
+
+def relation_allowed(relation, source, target):
+    if (
+        relation,
+        source.get("type"),
+        target.get("type"),
+    ) not in ALLOWED_EDGE_TYPE_COMBOS:
+        return False
+    if relation == "observes" and target.get("evidence_origin") == "task_given":
+        return False
+    # Two labels on one passage do not establish successive reasoning steps.
+    return not (
+        relation == "informs"
+        and source.get("type") == "J"
+        and target.get("type") == "H"
+        and source.get("shared_support_id")
+        and source.get("shared_support_id") == target.get("shared_support_id")
+    )

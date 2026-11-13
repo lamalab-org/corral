@@ -2,18 +2,72 @@
 
 from __future__ import annotations
 
+import json
 import re
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
 from corral.epistemic_analysis.epistemic_prompts import VIEW_INSTRUCTIONS
 
 from .schema import AnnotationConfig, Message, NormalizedTrace, content_hash
 
-VIEW_VERSION = "head-tail-submit-answer-v2"
+VIEW_VERSION = "head-tail-structured-submit-answer-v3"
+SUBMISSION_SCOPE_VERSION = "through-first-submit-answer-v1"
 SUBMIT_ANSWER_ACTION = re.compile(r"<action>\s*submit_answer\s*</action>")
+SUBMIT_ANSWER_NATIVE = re.compile(
+    r"<\|tool_call_begin\|>\s*(?:functions\.)?submit_answer(?=\s|<\||$)"
+)
+
+
+def is_submission_call(message: dict, source: dict | None = None) -> bool:
+    """Recognize assistant submissions, never acceptance results or tool mentions.
+
+    Recorded dispatch metadata takes precedence over ReAct proposals. Legacy
+    traces without dispatch fields retain support for explicit action syntax.
+    """
+    if message.get("role", "").lower() != "assistant" or is_tool_result(
+        message, source
+    ):
+        return False
+    text = message.get("content", "")
+    prose, marker, suffix = text.rpartition("\n[saved message fields]\n")
+    fields = message
+    if marker:
+        try:
+            saved = json.loads(suffix)
+        except ValueError:
+            saved = None
+        if isinstance(saved, dict):
+            fields = {**message, **saved}
+            text = prose
+    if "tool_calls" in fields or "function_call" in fields:
+        calls = fields.get("tool_calls", [])
+        calls = calls if isinstance(calls, list) else []
+        functions = [c.get("function", {}) for c in calls if isinstance(c, dict)]
+        functions.append(fields.get("function_call", {}))
+        return any(
+            isinstance(f, dict) and f.get("name") == "submit_answer" for f in functions
+        )
+    return bool(SUBMIT_ANSWER_ACTION.search(text) or SUBMIT_ANSWER_NATIVE.search(text))
+
+
+def submission_end(trace: NormalizedTrace) -> int:
+    """Exclusive graph boundary, including the first submit_answer call."""
+    for index, message in enumerate(trace.messages):
+        source = (
+            trace.message_sources[index] if index < len(trace.message_sources) else {}
+        )
+        if is_submission_call(message, source):
+            return index + 1
+    return len(trace.messages)
+
+
+def through_submission(view: AnnotationView, trace: NormalizedTrace) -> AnnotationView:
+    """Apply the source boundary even when preprocessing removed the call text."""
+    end = submission_end(trace)
+    return replace(view, messages=view.messages[:end], mappings=view.mappings[:end])
 
 
 def is_tool_result(message: dict, source: dict | None = None) -> bool:
@@ -56,15 +110,21 @@ class AnnotationView:
     @property
     def coverage(self) -> dict[str, Any]:
         outputs = [m for m in self.mappings if m["is_tool_result"]]
-        omitted = sum(m["omitted_chars"] for m in outputs)
-        original = sum(m["original_length"] for m in outputs)
+        omitted = sum(m.get("tool_omitted_chars", m["omitted_chars"]) for m in outputs)
+        message_omitted = sum(m.get("message_omitted_chars", 0) for m in self.mappings)
+        original = sum(
+            m.get("tool_original_chars", m["original_length"]) for m in outputs
+        )
         return {
-            "clipped_outputs": sum(m["omitted_chars"] > 0 for m in outputs),
+            "clipped_outputs": sum(
+                m.get("tool_omitted_chars", m["omitted_chars"]) > 0 for m in outputs
+            ),
             "original_tool_chars": original,
             "retained_tool_chars": original - omitted,
             "omitted_tool_chars": omitted,
             "effective_tool_output_max_chars": self.effective_cap,
-            "reduced_context": omitted > 0,
+            "reduced_context": omitted + message_omitted > 0,
+            **({"omitted_message_chars": message_omitted} if message_omitted else {}),
         }
 
     def support(self, idx: int) -> list[dict[str, Any]]:
@@ -174,11 +234,7 @@ def build_annotation_view(
                 "omitted_chars": omitted,
             }
         )
-        if (
-            stop_at_submission
-            and message["role"].lower() == "assistant"
-            and SUBMIT_ANSWER_ACTION.search(original)
-        ):
+        if stop_at_submission and is_submission_call(message, source):
             break
     return AnnotationView(
         messages,
@@ -236,6 +292,21 @@ def observation_indices(messages):
     if context is not None and messages is context.view.messages:
         return {m["msg_idx"] for m in context.view.mappings if m["is_tool_result"]}
     return {i for i, message in enumerate(messages) if is_tool_result(message)}
+
+
+def task_message_indices(messages, observations=None):
+    """Initial supplied context may contain data as well as instructions."""
+    observations = (
+        observation_indices(messages) if observations is None else observations
+    )
+    indices = set()
+    for index, message in enumerate(messages):
+        role = message.get("role", "").lower()
+        if role == "assistant":
+            break
+        if role in {"user", "system", "developer"} and index not in observations:
+            indices.add(index)
+    return indices
 
 
 def view_instructions() -> str:

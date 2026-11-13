@@ -10,7 +10,6 @@ from corral.epistemic_analysis.epistemic_prompts import (
 )
 from corral.epistemic_analysis.graph import (
     build_index,
-    earliest_time_of_type,
     node_time,
 )
 
@@ -67,9 +66,6 @@ ANTIPATTERN_FAMILIES: dict[str, list[str]] = {
 }
 
 
-ANTIPATTERN_FAMILY_NAMES = list(ANTIPATTERN_FAMILIES.keys())
-
-
 SUBGRAPH_FAMILIES: dict[str, list[str]] = {
     "hypothesis_generation": [
         SG_REFUTATION_DRIVEN_BELIEF_REVISION,
@@ -85,9 +81,6 @@ SUBGRAPH_FAMILIES: dict[str, list[str]] = {
         SG_EVIDENCE_GUIDED_TEST_REDESIGN,
     ],
 }
-
-
-SUBGRAPH_FAMILY_NAMES = list(SUBGRAPH_FAMILIES.keys())
 
 
 def _nodes_of_type(ntype: str, node_type_map: dict[str, str]) -> list[str]:
@@ -300,86 +293,6 @@ def detect_subgraphs_local(nodes: list, edges: list) -> dict[str, int]:
         name: matcher(node_type_map, node_by_id, out_edges)
         for name, matcher in _SUBGRAPH_MATCHERS.items()
     }
-
-
-def _typed_edge_exists(src_type, dst_type, relation, node_by_id, out_edges):
-    node_type_map = {nid: n.get("type") for nid, n in node_by_id.items()}
-    for nid, ntype in node_type_map.items():
-        if ntype != src_type:
-            continue
-        for e in out_edges.get(nid, []):
-            if (
-                e.get("relation") == relation
-                and node_type_map.get(e.get("dst")) == dst_type
-            ):
-                return True
-    return False
-
-
-def _fan_out_global(src_type, dst_type, relation, node_by_id, out_edges):
-    node_type_map = {nid: n.get("type") for nid, n in node_by_id.items()}
-    best = 0
-    for nid, ntype in node_type_map.items():
-        if ntype != src_type:
-            continue
-        targets = {
-            e.get("dst")
-            for e in out_edges.get(nid, [])
-            if e.get("relation") == relation
-            and node_type_map.get(e.get("dst")) == dst_type
-        }
-        best = max(best, len(targets))
-    return best
-
-
-def detect_subgraphs_global(nodes: list, edges: list) -> dict[str, int]:
-    node_by_id, out_edges, _in_edges = build_index(nodes, edges)
-    node_type_map = {nid: n.get("type") for nid, n in node_by_id.items()}
-
-    n_H = sum(1 for t in node_type_map.values() if t == "H")
-    n_T = sum(1 for t in node_type_map.values() if t == "T")
-
-    t_first_H = earliest_time_of_type(nodes, "H")
-    t_first_T = earliest_time_of_type(nodes, "T")
-    t_first_E = earliest_time_of_type(nodes, "E")
-
-    has_HT_tests = _typed_edge_exists("H", "T", "tests", node_by_id, out_edges)
-    has_TE_observes = _typed_edge_exists("T", "E", "observes", node_by_id, out_edges)
-    has_HH_updates = _typed_edge_exists("H", "H", "updates_to", node_by_id, out_edges)
-    has_JT_tests = _typed_edge_exists("J", "T", "tests", node_by_id, out_edges)
-    has_HH_competes = _typed_edge_exists(
-        "H", "H", "competes_with", node_by_id, out_edges
-    )
-    fan_out_H_T = _fan_out_global("H", "T", "tests", node_by_id, out_edges)
-    has_EJ_informs = _typed_edge_exists(
-        "E", "J", "informs", node_by_id, out_edges
-    ) or _typed_edge_exists("J", "E", "informs", node_by_id, out_edges)
-
-    results: dict[str, int] = {}
-    results[SG_REFUTATION_DRIVEN_BELIEF_REVISION] = int(
-        has_HT_tests and has_TE_observes and has_HH_updates and n_H >= 2
-    )
-    results[SG_FIXED_HYPOTHESIS_TEST_TUNING] = int(
-        n_H <= 1
-        and n_T >= 2
-        and has_HT_tests
-        and has_TE_observes
-        and has_EJ_informs
-        and not has_HH_updates
-    )
-    results[SG_EXPLORE_THEN_TEST_TRANSITION] = int(
-        t_first_T is not None
-        and t_first_H is not None
-        and t_first_T < t_first_H
-        and has_HT_tests
-    )
-    results[SG_HYPOTHESIS_RERANKING] = int(n_H >= 2 and has_HH_competes)
-    results[SG_EVIDENCE_LED_HYPOTHESIS_GENERATION] = int(
-        t_first_E is not None and t_first_H is not None and t_first_E < t_first_H
-    )
-    results[SG_CONVERGENT_MULTI_TEST_EVIDENCE] = int(fan_out_H_T >= 3)
-    results[SG_EVIDENCE_GUIDED_TEST_REDESIGN] = int(has_JT_tests and has_TE_observes)
-    return results
 
 
 def _ap_untested_hypothesis(node_type_map, _node_by_id, out_edges, in_edges):
@@ -615,170 +528,3 @@ def detect_antipatterns_local(nodes: list, edges: list) -> dict[str, int]:
         name: matcher(node_type_map, node_by_id, out_edges, in_edges)
         for name, matcher in _ANTIPATTERN_MATCHERS.items()
     }
-
-
-def detect_antipatterns_global(
-    nodes: list, edges: list
-) -> tuple[dict[str, bool], dict[str, int]]:
-    node_by_id, out_edges, in_edges = build_index(nodes, edges)
-    node_type_map = {nid: n.get("type") for nid, n in node_by_id.items()}
-
-    n_H = sum(1 for t in node_type_map.values() if t == "H")
-    n_T = sum(1 for t in node_type_map.values() if t == "T")
-    n_E = sum(1 for t in node_type_map.values() if t == "E")
-
-    # Count updates_to edges for fixed_belief_trace check
-    n_updates_to = sum(1 for e in edges if e.get("relation") == "updates_to")
-
-    h_tested = 0
-    for h in _nodes_of_type("H", node_type_map):
-        tested = any(e.get("relation") == "tests" for e in out_edges.get(h, []))
-        if not tested:
-            tested = any(e.get("relation") == "tests" for e in in_edges.get(h, []))
-        if tested:
-            h_tested += 1
-
-    e_used = 0
-    for ev in _nodes_of_type("E", node_type_map):
-        used = any(
-            e.get("relation") == "informs"
-            and node_type_map.get(e.get("dst")) in {"J", "H"}
-            for e in out_edges.get(ev, [])
-        )
-        if not used:
-            used = any(
-                e.get("relation") == "informs"
-                and node_type_map.get(e.get("src")) in {"J", "H"}
-                for e in in_edges.get(ev, [])
-            )
-        if used:
-            e_used += 1
-
-    t_with_ev = 0
-    for t in _nodes_of_type("T", node_type_map):
-        has_ev = any(
-            e.get("relation") in ("observes", "tests")
-            and node_type_map.get(e.get("dst")) == "E"
-            for e in out_edges.get(t, [])
-        )
-        if not has_ev:
-            has_ev = any(
-                e.get("relation") in ("observes", "tests")
-                and node_type_map.get(e.get("src")) == "E"
-                for e in in_edges.get(t, [])
-            )
-        if has_ev:
-            t_with_ev += 1
-
-    n_contradicts = 0
-    n_unresolved = 0
-    for nid in node_type_map:
-        for e in out_edges.get(nid, []):
-            if e.get("relation") != "contradicts":
-                continue
-            dst = e.get("dst")
-            if node_type_map.get(dst) != "H":
-                continue
-            n_contradicts += 1
-            resolved = any(
-                ie.get("relation") in ("updates_to", "competes_with")
-                for ie in in_edges.get(dst, [])
-            )
-            if not resolved:
-                resolved = any(
-                    oe.get("relation") == "competes_with"
-                    for oe in out_edges.get(dst, [])
-                )
-            if not resolved:
-                n_unresolved += 1
-
-    # Premature commitment: H linked to C via shared J, but H has no tests
-    h_linked_to_c: set[str] = set()
-    for j in _nodes_of_type("J", node_type_map):
-        j_informs_c = any(
-            e.get("relation") == "informs" and node_type_map.get(e.get("dst")) == "C"
-            for e in out_edges.get(j, [])
-        )
-        if not j_informs_c:
-            continue
-        for e in out_edges.get(j, []):
-            if (
-                e.get("relation") == "informs"
-                and node_type_map.get(e.get("dst")) == "H"
-            ):
-                h_linked_to_c.add(e["dst"])
-    h_to_c_untested = 0
-    for h in h_linked_to_c:
-        tested = any(e.get("relation") == "tests" for e in out_edges.get(h, []))
-        if not tested:
-            tested = any(e.get("relation") == "tests" for e in in_edges.get(h, []))
-        if not tested:
-            h_to_c_untested += 1
-
-    e_orphan = sum(
-        1
-        for ev in _nodes_of_type("E", node_type_map)
-        if not out_edges.get(ev) and not in_edges.get(ev)
-    )
-
-    j_without_e = 0
-    for j in _nodes_of_type("J", node_type_map):
-        has_e = any(
-            e.get("relation") == "informs" and node_type_map.get(e.get("dst")) == "E"
-            for e in out_edges.get(j, [])
-        )
-        if not has_e:
-            has_e = any(
-                e.get("relation") == "informs"
-                and node_type_map.get(e.get("src")) == "E"
-                for e in in_edges.get(j, [])
-            )
-        if not has_e:
-            j_without_e += 1
-
-    # Stalled revision: revised H (target of updates_to) with no outgoing tests
-    dead_revised = 0
-    for h in _nodes_of_type("H", node_type_map):
-        is_revised = any(e.get("relation") == "updates_to" for e in in_edges.get(h, []))
-        if not is_revised:
-            continue
-        has_test = any(e.get("relation") == "tests" for e in out_edges.get(h, []))
-        if not has_test:
-            dead_revised += 1
-    ap_local_counts = detect_antipatterns_local(nodes, edges)
-
-    # Precommitted test plan: C appears before any E
-    t_first_C = earliest_time_of_type(nodes, "C")
-    t_first_E = earliest_time_of_type(nodes, "E")
-    precommitted = (
-        t_first_C is not None and t_first_E is not None and t_first_C < t_first_E
-    )
-
-    binary: dict[str, bool] = {
-        AP_UNTESTED_CLAIM: (n_H - h_tested) > 0,
-        AP_EVIDENCE_NON_UPTAKE: (n_E - e_used) > 0,
-        AP_UNSUPPORTED_JUDGMENT: j_without_e > 0,
-        AP_STALLED_REVISION: dead_revised > 0,
-        AP_CONTRADICTION_WITHOUT_REPAIR: n_unresolved > 0,
-        AP_PREMATURE_COMMITMENT: h_to_c_untested > 0,
-        AP_UNINFORMATIVE_TEST: (n_T - t_with_ev) > 0,
-        AP_FIXED_BELIEF_TRACE: n_updates_to == 0,
-        AP_DISCONNECTED_EVIDENCE: e_orphan > 0,
-        AP_ONE_SIDED_CONFIRMATION: ap_local_counts.get(AP_ONE_SIDED_CONFIRMATION, 0)
-        > 0,
-        AP_PRECOMMITTED_TEST_PLAN: precommitted,
-    }
-    counts: dict[str, int] = {
-        AP_UNTESTED_CLAIM: n_H - h_tested,
-        AP_EVIDENCE_NON_UPTAKE: n_E - e_used,
-        AP_UNSUPPORTED_JUDGMENT: j_without_e,
-        AP_STALLED_REVISION: dead_revised,
-        AP_CONTRADICTION_WITHOUT_REPAIR: n_unresolved,
-        AP_PREMATURE_COMMITMENT: h_to_c_untested,
-        AP_UNINFORMATIVE_TEST: n_T - t_with_ev,
-        AP_FIXED_BELIEF_TRACE: 1 if n_updates_to == 0 else 0,
-        AP_DISCONNECTED_EVIDENCE: e_orphan,
-        AP_ONE_SIDED_CONFIRMATION: ap_local_counts.get(AP_ONE_SIDED_CONFIRMATION, 0),
-        AP_PRECOMMITTED_TEST_PLAN: 1 if precommitted else 0,
-    }
-    return binary, counts

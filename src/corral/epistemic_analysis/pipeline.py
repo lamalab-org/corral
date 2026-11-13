@@ -6,7 +6,7 @@ corrected observation nodes before extracting any edges.
 
 from __future__ import annotations
 
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any
 
@@ -15,11 +15,15 @@ from .annotators.base import AnnotationBackend, reset_models
 from .annotators.jev import MAX_WINDOW
 from .budget import RequestBudgetExceeded, estimator_configuration
 from .context import (
+    SUBMISSION_SCOPE_VERSION,
     VIEW_INSTRUCTIONS,
     VIEW_VERSION,
+    AnnotationView,
     annotation_context,
     build_annotation_view,
     cap_sequence,
+    submission_end,
+    through_submission,
 )
 from .graph import (
     _filter_invalid_edges,
@@ -27,6 +31,7 @@ from .graph import (
     _postprocess_runtime_notices,
     validate_support_quotes,
 )
+from .graph_semantics import GRAPH_SEMANTICS_VERSION, annotate_node_semantics
 from .schema import (
     ANALYZABLE_COMPLETION_STATUSES,
     ANNOTATION_VERSION,
@@ -35,13 +40,6 @@ from .schema import (
     AnnotationConfig,
     NormalizedTrace,
     content_hash,
-)
-from .trace_checks import (
-    TRACE_CHECK_DEFINITIONS,
-    TRACE_CHECK_NAMES,
-    TRACE_CHECK_VERSION,
-    trace_check_prompt,
-    validate_trace_checks,
 )
 
 COVERAGE_POLICY = "unlabelled-messages-allowed-v2"
@@ -87,15 +85,8 @@ def annotation_configuration(
             ]
         ),
         "implementation_version": ANNOTATION_VERSION,
-        "trace_checks": {
-            "enabled": annotator.extract_trace_checks is not None,
-            "policy": TRACE_CHECK_VERSION,
-            "definitions_hash": content_hash(TRACE_CHECK_DEFINITIONS),
-            "rules_hash": content_hash(
-                [trace_check_prompt(name) for name in TRACE_CHECK_NAMES]
-            ),
-        },
         "coverage_policy": COVERAGE_POLICY,
+        "graph_semantics": GRAPH_SEMANTICS_VERSION,
         "graph_schema_version": GRAPH_SCHEMA_VERSION,
         "annotation_view_policy_version": VIEW_VERSION,
         "annotation_view_instructions_hash": content_hash(VIEW_INSTRUCTIONS),
@@ -128,17 +119,13 @@ def can_reuse(
     saved = graph.provenance.get("fingerprint")
     try:
         view = build_annotation_view(
-            trace, config, graph.provenance["effective_tool_output_max_chars"]
+            trace,
+            config,
+            graph.provenance["effective_tool_output_max_chars"],
+            stop_at_submission=annotator.provenance.get("stop_at_submission", True),
         )
     except (KeyError, TypeError, ValueError):
         return False
-    if annotator.extract_trace_checks is not None:
-        if graph.trace_checks_status != "complete":
-            return False
-        try:
-            validate_trace_checks(graph.trace_checks, trace.messages)
-        except (TypeError, ValueError):
-            return False
     return (
         graph.schema_version == GRAPH_SCHEMA_VERSION
         and graph.annotation_status == "complete"
@@ -174,7 +161,12 @@ def _resolved_models(value: Any) -> set[str]:
 
 
 async def _annotate_messages(
-    messages, backend: AnnotationBackend, config: AnnotationConfig, view, originals
+    messages,
+    backend: AnnotationBackend,
+    config: AnnotationConfig,
+    view,
+    originals,
+    trace,
 ):
     """Extract nodes, normalize observations, then extract and validate edges."""
     model, window, overlap = config.model, config.window, config.overlap
@@ -233,6 +225,7 @@ async def _annotate_messages(
     limited_view = view.coverage["reduced_context"] or len(messages) < len(originals)
     if strict_support or limited_view:
         nodes = visible_items(nodes)
+    nodes = annotate_node_semantics(nodes, trace, view)
 
     edges, wB = await edge_pass(
         messages=messages,
@@ -262,7 +255,11 @@ async def _annotate_messages(
 
 
 async def annotate_trace(
-    trace: NormalizedTrace, annotator: AnnotationBackend, config: AnnotationConfig
+    trace: NormalizedTrace,
+    annotator: AnnotationBackend,
+    config: AnnotationConfig,
+    *,
+    prepared_view: AnnotationView | None = None,
 ) -> AnnotatedGraph:
     if annotator.provenance.get("annotator") == "jev" and config.window > MAX_WINDOW:
         raise ValueError(f"Decisions graph annotation requires window <= {MAX_WINDOW}")
@@ -273,10 +270,39 @@ async def annotate_trace(
         raise ValueError("Cannot annotate an incomplete or unsupported trace")
     messages = trace.messages
     diagnostics, attempts, requests = [], [], []
-    caps = cap_sequence(config.tool_output_max_chars)
+    stop_at_submission = annotator.provenance.get("stop_at_submission", True)
+    if prepared_view is not None:
+        lengths = {len(messages)}
+        if stop_at_submission:
+            lengths.add(submission_end(trace))
+        if len(prepared_view.messages) not in lengths or len(
+            prepared_view.mappings
+        ) != len(prepared_view.messages):
+            raise ValueError("Prepared graph view has different message coverage")
+        for i, mapping in enumerate(prepared_view.mappings):
+            if mapping["msg_idx"] != i:
+                raise ValueError(
+                    "Prepared graph view must retain a contiguous source prefix"
+                )
+            if mapping["original_content_hash"] != content_hash(messages[i]["content"]):
+                raise ValueError("Prepared graph view belongs to a different source")
+            prepared_view.map_support(prepared_view.support(i), messages)
+    caps = (
+        [prepared_view.effective_cap]
+        if prepared_view is not None
+        else cap_sequence(config.tool_output_max_chars)
+    )
+    if prepared_view is not None and stop_at_submission:
+        prepared_view = through_submission(prepared_view, trace)
     failed_view_hash = None
     for index, cap in enumerate(caps):
-        view = build_annotation_view(trace, config, cap)
+        view = (
+            prepared_view
+            if prepared_view is not None
+            else build_annotation_view(
+                trace, config, cap, stop_at_submission=stop_at_submission
+            )
+        )
         if content_hash(view.messages) == failed_view_hash:
             continue
         reset_models()
@@ -284,7 +310,7 @@ async def annotate_trace(
         try:
             with annotation_context(view, config, diagnostics, requests, review_issues):
                 nodes, edges, warnings = await _annotate_messages(
-                    view.messages, annotator, config, view, messages
+                    view.messages, annotator, config, view, messages, trace
                 )
         except RequestBudgetExceeded as exc:
             attempts.append(
@@ -297,7 +323,11 @@ async def annotate_trace(
             # A cap change must alter the actual view; never retry the same input.
             failed_view_hash = content_hash(view.messages)
             if not any(
-                content_hash(build_annotation_view(trace, config, remaining).messages)
+                content_hash(
+                    build_annotation_view(
+                        trace, config, remaining, stop_at_submission=stop_at_submission
+                    ).messages
+                )
                 != failed_view_hash
                 for remaining in caps[index + 1 :]
             ):
@@ -308,36 +338,6 @@ async def annotate_trace(
         else:
             attempts.append({"effective_cap": cap, "status": "complete"})
             break
-    # Pass C is deliberately outside the graph's cap-reduction loop. Each check
-    # gets its own request with the complete trace, including messages after submit_answer. A failed
-    # pass must never be retried with windows or a smaller annotation view.
-    trace_checks, trace_checks_status, trace_checks_error = [], "unspecified", None
-    if annotator.extract_trace_checks is not None:
-        full_config = replace(config, tool_output_max_chars=0)
-        full_view = build_annotation_view(trace, full_config, stop_at_submission=False)
-        request_start, diagnostic_start = len(requests), len(diagnostics)
-        try:
-            with annotation_context(
-                full_view, full_config, diagnostics, requests, review_issues
-            ):
-                trace_checks = validate_trace_checks(
-                    await annotator.extract_trace_checks(
-                        trace=trace, nodes=nodes, edges=edges, model=config.model
-                    ),
-                    messages,
-                )
-            trace_checks_status = "complete"
-        except Exception as exc:
-            trace_checks_status = "failed"
-            trace_checks_error = {"type": type(exc).__name__, "message": str(exc)}
-            if isinstance(exc, RequestBudgetExceeded):
-                trace_checks_error["diagnostic"] = exc.diagnostic
-            issue = f"Whole-trace behavioral checks failed: {type(exc).__name__}: {exc}"
-            warnings.append(issue)
-            review_issues.append(issue)
-        finally:
-            for entry in requests[request_start:] + diagnostics[diagnostic_start:]:
-                entry["stage"] = "trace_checks"
     coverage = message_coverage(view.messages, nodes)
     uncovered = coverage["unlabelled_messages"]
     if uncovered:
@@ -350,15 +350,14 @@ async def annotate_trace(
             "Annotation used reduced tool context. Omitted middle text is unknown; absence-based measurements may change."
         )
     fingerprint = annotation_fingerprint(trace, annotator, config)
+    if prepared_view is not None:
+        fingerprint["prepared_annotation_view_hash"] = prepared_view.digest
     resolved = sorted(
-        _resolved_models(nodes + edges + trace_checks)
-        | set(annotator.resolved_models())
+        _resolved_models(nodes + edges) | set(annotator.resolved_models())
     )
     return AnnotatedGraph(
         nodes=nodes,
         edges=edges,
-        trace_checks=trace_checks,
-        trace_checks_status=trace_checks_status,
         input_file=trace.source.locator,
         source=trace.source,
         messages=messages,
@@ -370,8 +369,21 @@ async def annotate_trace(
         annotation_requests=requests,
         annotation_status="incomplete" if review_issues else "complete",
         provenance={
+            "graph_semantics": GRAPH_SEMANTICS_VERSION,
             **asdict(config),
             **annotator.provenance,
+            **(
+                {
+                    "graph_scope": {
+                        "policy": SUBMISSION_SCOPE_VERSION,
+                        "application": "annotation_input",
+                        "message_count": len(view.messages),
+                        "excluded_message_count": len(messages) - len(view.messages),
+                    }
+                }
+                if stop_at_submission
+                else {}
+            ),
             "fingerprint": fingerprint,
             "fingerprint_hash": content_hash(fingerprint),
             "configuration_id": content_hash(fingerprint["configuration"]),
@@ -397,6 +409,5 @@ async def annotate_trace(
             "uncovered_messages": uncovered,
             "message_coverage": coverage,
             "review_issues": review_issues,
-            "trace_checks_error": trace_checks_error,
         },
     )

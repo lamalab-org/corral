@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import logging
 import re
@@ -274,7 +275,10 @@ class RunStore:
         return self.root / DOWNLOADS[kind] / f"{identity}.json"
 
 
-def handler_for(store):
+def handler_for(store, *, base_path=""):
+    if base_path and not re.fullmatch(r"/[A-Za-z0-9_-]+", base_path):
+        raise ValueError("Invalid viewer mount path")
+
     class Handler(BaseHTTPRequestHandler):
         def send_bytes(self, body, content_type, *, filename=None):
             self.send_response(200)
@@ -298,16 +302,70 @@ def handler_for(store):
 
         def do_GET(self):
             path = unquote(urlsplit(self.path).path)
+            if base_path:
+                if path == base_path:
+                    query = urlsplit(self.path).query
+                    self.send_response(302)
+                    self.send_header(
+                        "Location", base_path + "/" + ("?" + query if query else "")
+                    )
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                if not path.startswith(base_path + "/"):
+                    self.send_error(404)
+                    return
+                path = path[len(base_path) :]
             parts = path.strip("/").split("/")
             try:
+                if path == "/connection-check":
+                    self.send_bytes(
+                        (
+                            "<!doctype html><html lang='en'><meta charset='utf-8'>"
+                            "<title>Corral connection check</title>"
+                            "<h1>Corral graph server reached</h1>"
+                            f"<p>The viewer on server port {self.server.server_port} "
+                            "received this request. This page uses no JavaScript or "
+                            "external resources.</p>"
+                            f"<p><a href='{base_path}/'>Open graph viewer</a></p></html>"
+                        ).encode(),
+                        "text/html; charset=utf-8",
+                    )
+                    return
                 static = {
                     "/": ("index.html", "text/html; charset=utf-8"),
                     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+                    "/startup.js": ("startup.js", "text/javascript; charset=utf-8"),
                     "/styles.css": ("styles.css", "text/css; charset=utf-8"),
                 }
                 if path in static:
                     filename, kind = static[path]
-                    self.send_bytes((ASSETS / filename).read_bytes(), kind)
+                    body = (ASSETS / filename).read_bytes()
+                    if filename == "index.html":
+                        version = hashlib.sha256(
+                            b"".join(
+                                (ASSETS / asset).read_bytes()
+                                for asset in (
+                                    "index.html",
+                                    "startup.js",
+                                    "app.js",
+                                    "styles.css",
+                                )
+                            )
+                        ).hexdigest()[:12]
+                        body = body.replace(b"__VIEWER_VERSION__", version.encode())
+                    if filename == "index.html" and base_path:
+                        body = (
+                            body.decode()
+                            .replace(
+                                'name="app-base" content=""',
+                                f'name="app-base" content="{base_path}"',
+                            )
+                            .replace('href="/', f'href="{base_path}/')
+                            .replace('src="/', f'src="{base_path}/')
+                            .encode()
+                        )
+                    self.send_bytes(body, kind)
                     return
                 if path == "/api/catalog":
                     payload = store.catalog()
@@ -353,9 +411,15 @@ def main():
     parser.add_argument("--port", type=int, default=8766)
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
-    server = ThreadingHTTPServer(
-        ("127.0.0.1", args.port), handler_for(RunStore(args.run))
-    )
+    if (args.run / "queue-request.json").exists():
+        if __package__:
+            from .graph_run import GraphRunStore
+        else:
+            from graph_run import GraphRunStore
+        store = GraphRunStore(args.run)
+    else:
+        store = RunStore(args.run)
+    server = ThreadingHTTPServer(("127.0.0.1", args.port), handler_for(store))
     logger.info(
         "Annotation viewer: http://127.0.0.1:%s · %s", args.port, args.run.resolve()
     )

@@ -10,12 +10,17 @@ from corral.epistemic_analysis._utils import (
     sha1_hex,
 )
 from corral.epistemic_analysis.ontology import (
-    ALLOWED_EDGE_TYPE_COMBOS,
     EDGE_RELATIONS_SET,
     NODE_TYPES_SET,
 )
 
-from .context import current_context, message_support, observation_indices
+from .context import (
+    current_context,
+    message_support,
+    observation_indices,
+    task_message_indices,
+)
+from .ontology import relation_allowed
 
 
 def is_runtime_notice(content: str) -> bool:
@@ -187,19 +192,6 @@ def coerce_edge(
     return edge, warns
 
 
-def build_adjacency(
-    edges: list[dict[str, Any]],
-) -> tuple[dict[str, list[dict[str, Any]]], dict[str, list[dict[str, Any]]]]:
-    out_edges: dict[str, list[dict[str, Any]]] = {}
-    in_edges: dict[str, list[dict[str, Any]]] = {}
-    for e in edges:
-        s = e["src"]
-        d = e["dst"]
-        out_edges.setdefault(s, []).append(e)
-        in_edges.setdefault(d, []).append(e)
-    return out_edges, in_edges
-
-
 def build_index(
     nodes: list[dict[str, Any]], edges: list[dict[str, Any]]
 ) -> tuple[
@@ -227,11 +219,6 @@ def node_time(n: dict[str, Any]) -> int:
         return 0
 
 
-def earliest_time_of_type(nodes: list[dict[str, Any]], t: str) -> int | None:
-    ts = [node_time(n) for n in nodes if n.get("type") == t]
-    return min(ts) if ts else None
-
-
 def _postprocess_observation_nodes(
     nodes: list[dict[str, Any]],
     messages: list[dict[str, Any]],
@@ -253,17 +240,7 @@ def _postprocess_observation_nodes(
     # Identify observation message indices
     obs_indices = observation_indices(messages)
 
-    if not obs_indices:
-        return nodes, warnings
-
-    task_idx = next(
-        (
-            i
-            for i, m in enumerate(messages)
-            if m.get("role", "").lower() == "user" and i not in obs_indices
-        ),
-        None,
-    )
+    task_indices = task_message_indices(messages, obs_indices)
 
     # Compute max node id for generating new ones
     max_id = max(
@@ -310,7 +287,7 @@ def _postprocess_observation_nodes(
                     f"Removed extra node {n.get('node_id')} ({ntype}) "
                     f"at observation message {t}: only one node per observation."
                 )
-        elif ntype == "E" and t != task_idx:
+        elif ntype == "E" and t not in task_indices:
             warnings.append(
                 f"Removed Evidence node {n.get('node_id')} at message {t}: "
                 f"not an Observation message."
@@ -349,7 +326,8 @@ def _filter_invalid_edges(
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Remove edges whose (relation, src_type, dst_type) is not in ALLOWED_EDGE_TYPE_COMBOS."""
     warnings: list[str] = []
-    node_type_map = {n["node_id"]: n.get("type") for n in nodes if "node_id" in n}
+    node_map = {n["node_id"]: n for n in nodes if "node_id" in n}
+    node_type_map = {key: n.get("type") for key, n in node_map.items()}
 
     valid_edges: list[dict[str, Any]] = []
     for e in edges:
@@ -363,10 +341,10 @@ def _filter_invalid_edges(
             warnings.append(f"Removed edge {src}->{dst} ({rel}): unknown node type.")
             continue
 
-        if (rel, src_type, dst_type) not in ALLOWED_EDGE_TYPE_COMBOS:
+        if not relation_allowed(rel, node_map[src], node_map[dst]):
             warnings.append(
                 f"Removed edge {src}({src_type})->{dst}({dst_type}) ({rel}): "
-                f"disallowed type combination."
+                f"disallowed type combination or source/claim relationship."
             )
             continue
 

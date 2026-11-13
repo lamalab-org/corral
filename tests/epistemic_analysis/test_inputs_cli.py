@@ -8,7 +8,6 @@ import pytest
 
 from corral.cli import build_parser
 from corral.epistemic_analysis import (
-    AnnotatedGraph,
     AnnotationBackend,
     AnnotationConfig,
     cli,
@@ -21,13 +20,12 @@ from corral.epistemic_analysis.annotators.jev import (
     JevClient,
 )
 from corral.epistemic_analysis.decisions import DEFAULT_DECISIONS_MODEL
-from corral.epistemic_analysis.sources.files import load_annotations, load_path
+from corral.epistemic_analysis.sources.files import load_path
 from corral.epistemic_analysis.sources.inputs import resolve_inputs
 from corral.epistemic_analysis.sources.langfuse import (
     download_locator,
     parse_langfuse_url,
 )
-from corral.epistemic_analysis.trace_checks import TRACE_CHECK_NAMES
 
 URL = "https://cloud.langfuse.com/project/project/sessions/session#observation=one"
 MESSAGES = [
@@ -267,16 +265,7 @@ def test_all_four_source_backend_combinations(
 
     async def llm_call(model, system, user, **kwargs):
         requests.append(system)
-        if system not in {llm.PASS_A_SYSTEM, llm.PASS_B_SYSTEM}:
-            assert system == llm.trace_check_system(json.loads(user)["check"]["name"])
-            return {
-                "trace_check": {
-                    "name": json.loads(user)["check"]["name"],
-                    "status": "absent",
-                    "explanation": "No supported incident.",
-                    "support": [],
-                }
-            }
+        assert system in {llm.PASS_A_SYSTEM, llm.PASS_B_SYSTEM}
         return (
             {
                 "nodes": [
@@ -292,13 +281,9 @@ def test_all_four_source_backend_combinations(
             else {"edges": []}
         )
 
-    async def decisions(self, model, state, questions, *, single_shot=False):
+    async def decisions(self, model, state, questions):
         requests.append(state)
-        if single_shot:
-            assert state["scope"] == "full_trace"
-            assert list(questions) == [state["check"]["name"]]
-            assert state["check"]["name"] in TRACE_CHECK_NAMES
-            return {name: {"choice": "absent", "confidence": 1.0} for name in questions}
+        assert "check" not in state
         answers = {}
         for key in questions:
             if key.startswith("edge_"):
@@ -326,14 +311,14 @@ def test_all_four_source_backend_combinations(
     assert requests
     graph = json.loads(next((output / "annotations").glob("*.json")).read_text())
     assert graph["nodes"]
-    assert graph["trace_checks_status"] == "complete"
-    assert len(graph["trace_checks"]) == 11
+    assert graph["trace_checks_status"] == "unspecified"
+    assert graph["trace_checks"] == []
     assert graph["source"]["locator"] == origin
     assert len(graph["message_sources"]) == len(graph["messages"])
-    summary = json.loads((output / "analysis" / "annotation_summary.json").read_text())
-    assert summary["n_selected"] == 1
-    assert origin in (output / "analysis" / "annotation_summary.md").read_text()
-    assert (output / "analysis" / "tables" / "productive_motifs.tex").exists()
+    manifest = json.loads((output / "manifest.json").read_text())
+    assert len(manifest["annotations"]) == len(manifest["traces"]) == 1
+    assert json.loads((output / manifest["annotations"][0]).read_text()) == graph
+    assert not (output / "analysis").exists()
     count = len(requests)
     assert invoke("--input", origin, "--annotator", annotator, "--output", output) == 0
     assert len(requests) == count  # exact fingerprint reuse
@@ -353,27 +338,10 @@ def test_all_four_source_backend_combinations(
     assert len(requests) > count
     assert len(list((output / "annotations").glob("*.json"))) == 2
     # The manifest selects only the most recent invocation; no old config leaks.
-    summary = json.loads((output / "analysis" / "annotation_summary.json").read_text())
-    assert summary["n_selected"] == 1
-    assert len(summary["configurations"]) == 1
-    assert (
-        next(iter(summary["configurations"].values()))["annotation_configuration"][
-            "model"
-        ]
-        == "changed"
-    )
-
-    def forbidden(*args):
-        pytest.fail("analysis-only must not initialize clients or download")
-
-    monkeypatch.setattr(cli, "create_backend", forbidden)
-    monkeypatch.setattr(workflow, "download_locator", forbidden)
-    assert (
-        invoke(
-            "--input", output, "--skip-annotate", "--output", tmp_path / "reanalysis"
-        )
-        == 0
-    )
+    manifest = json.loads((output / "manifest.json").read_text())
+    assert len(manifest["annotations"]) == 1
+    selected = json.loads((output / manifest["annotations"][0]).read_text())
+    assert selected["provenance"]["fingerprint"]["configuration"]["model"] == "changed"
 
 
 def test_deduplication_dry_run_download_only_and_invalid_preflight(
@@ -399,7 +367,7 @@ def test_deduplication_dry_run_download_only_and_invalid_preflight(
     assert not (tmp_path / "bad-output").exists()
 
 
-def test_failed_annotation_is_excluded_but_recorded(tmp_path, monkeypatch):
+def test_failed_annotation_is_recorded_without_caching(tmp_path, monkeypatch):
     local = write_trace(tmp_path / "trace.json")
 
     async def failure(**kwargs):
@@ -412,26 +380,13 @@ def test_failed_annotation_is_excluded_but_recorded(tmp_path, monkeypatch):
     )
     output = tmp_path / "out"
     assert invoke("--input", local, "--output", output) == 1
-    summary = json.loads((output / "analysis" / "annotation_summary.json").read_text())
-    stats = next(iter(summary["configurations"].values()))["overall"]
-    assert stats["n_traces"] == 0
-    assert stats["status_counts"] == {"failed": 1}
-    assert stats["n_excluded"] == 1
-
-
-def test_multiple_saved_configurations_require_explicit_selection(tmp_path):
-    for i in range(2):
-        (tmp_path / f"{i}.annotated.json").write_text(
-            json.dumps(
-                AnnotatedGraph(
-                    [], [], provenance={"configuration_id": str(i)}
-                ).to_dict()
-            )
-        )
-    entry = resolve_inputs([str(tmp_path)])[0]
-    with pytest.raises(ValueError, match="Multiple annotation configurations"):
-        load_annotations(entry)
-    assert len(load_annotations(entry, configuration="0")) == 1
+    manifest = json.loads((output / "manifest.json").read_text())
+    assert len(manifest["annotations"]) == 1
+    graph = json.loads((output / manifest["annotations"][0]).read_text())
+    assert graph["annotation_status"] == "failed"
+    assert graph["qc"]["error"] == "model unavailable"
+    assert graph["messages"] == MESSAGES
+    assert not (output / "cache").exists()
 
 
 def test_provider_and_cli_dependencies_are_not_imported_by_library():
@@ -464,10 +419,7 @@ def test_downloaded_traces_preserve_origin_and_mapping_when_loaded_locally(
     assert trace.snapshot
 
 
-def test_resolved_versions_are_preserved_and_pattern_changes_need_no_annotation(
-    tmp_path, monkeypatch
-):
-    from corral.epistemic_analysis import schema
+def test_resolved_versions_are_preserved(tmp_path, monkeypatch):
     from corral.epistemic_analysis.annotators.base import record_model
 
     local = write_trace(tmp_path / "trace.json")
@@ -506,21 +458,9 @@ def test_resolved_versions_are_preserved_and_pattern_changes_need_no_annotation(
         ("provider-v1",),
         ("provider-v2",),
     }
-    monkeypatch.setattr(schema, "PATTERN_VERSION", "future-patterns")
-    monkeypatch.setattr(
-        cli,
-        "create_backend",
-        lambda args: pytest.fail("no annotation for changed patterns"),
-    )
-    reanalysis = tmp_path / "reanalysis"
-    assert invoke("--input", output, "--skip-annotate", "--output", reanalysis) == 0
-    summary = json.loads(
-        (reanalysis / "analysis" / "annotation_summary.json").read_text()
-    )
-    assert summary["pattern_version"] == "future-patterns"
-    assert next(iter(summary["configurations"].values()))["annotation_configuration"][
-        "resolved_models"
-    ] == ["provider-v2"]
+    manifest = json.loads((output / "manifest.json").read_text())
+    selected = json.loads((output / manifest["annotations"][0]).read_text())
+    assert selected["provenance"]["resolved_models"] == ["provider-v2"]
 
 
 def test_branch_reconstruction_failure_retains_raw_snapshot(tmp_path, monkeypatch):
@@ -546,11 +486,10 @@ def test_branch_reconstruction_failure_retains_raw_snapshot(tmp_path, monkeypatc
     assert not (output / "annotations").exists()
 
 
-def test_analysis_only_cli_never_imports_provider_libraries(tmp_path):
+def test_download_only_cli_never_imports_provider_libraries(tmp_path):
     import subprocess
 
-    saved = tmp_path / "saved.annotated.json"
-    saved.write_text(json.dumps(AnnotatedGraph([], []).to_dict()))
+    saved = write_trace(tmp_path / "trace.json")
     script = """
 import sys
 class BlockProviders:
@@ -559,7 +498,7 @@ class BlockProviders:
             raise AssertionError("Unexpected provider import: " + fullname)
 sys.meta_path.insert(0, BlockProviders())
 from corral.cli import main
-assert main(["analyze", "--input", sys.argv[1], "--skip-annotate", "--output", sys.argv[2]]) == 0
+assert main(["analyze", "--input", sys.argv[1], "--download-only", "--output", sys.argv[2]]) == 0
 """
     subprocess.run(
         [sys.executable, "-c", script, str(saved), str(tmp_path / "output")], check=True

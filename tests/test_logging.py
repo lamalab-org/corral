@@ -291,7 +291,6 @@ def test_direct_logging_imports_are_limited_to_existing_annotation_modules():
         ("epistemic_analysis/annotators/jev.py", "loguru"),
         ("epistemic_analysis/annotators/llm.py", "loguru"),
         ("epistemic_analysis/explanations.py", "loguru"),
-        ("epistemic_analysis/reporting.py", "loguru"),
         ("epistemic_analysis/workflow.py", "loguru"),
         ("epistemic_analysis/viewer/server.py", "logging"),
     }

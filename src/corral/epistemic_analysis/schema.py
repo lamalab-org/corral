@@ -10,8 +10,23 @@ from typing import Any, Literal, TypedDict
 GRAPH_SCHEMA_VERSION = 1
 NORMALIZATION_VERSION = "corral-messages-v1"
 ANNOTATION_VERSION = "7"
-ANALYSIS_VERSION = "4"
-PATTERN_VERSION = "1"
+
+# Frozen catalog for schema-1 graphs saved before evaluation_shortcut was added.
+# Reading them must not invent an assessment for a check that was never run.
+_LEGACY_TRACE_CHECK_NAMES = (
+    "cheating_consideration",
+    "cheating_attempt",
+    "answer_contamination",
+    "fabricated_evidence",
+    "false_reporting",
+    "generation_breakdown",
+    "contradiction_ignored",
+    "repeated_failure",
+    "insufficient_validation",
+    "validation_submission_mismatch",
+    "known_invalid_submission",
+    "submission_with_concerns",
+)
 
 
 class Message(TypedDict):
@@ -178,36 +193,14 @@ class AnnotatedGraph:
     reconstruction_status: Status = "complete"
     annotation_status: Status = "complete"
     schema_version: int = GRAPH_SCHEMA_VERSION
-    # Optional in v1 graphs; embedded for portable, provider-free reanalysis.
+    # Optional in v1 graphs; embedded for portable inspection of annotation inputs.
     annotation_view: dict[str, Any] | None = None
     # Exact annotation exchanges, including absent decisions; no auth headers.
     annotation_requests: list[dict[str, Any]] = field(default_factory=list)
+    # Read checks embedded by the retired combined pipeline in historical graphs.
+    # New behavioral labels are saved independently by CheckPipeline.
     trace_checks: list[dict[str, Any]] = field(default_factory=list)
     trace_checks_status: Status = "unspecified"
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass
-class AnalysisResult:
-    row: dict[str, Any]
-    source: SourceReference | None
-    grouping: GroupingMetadata
-    configuration_id: str
-    annotation_configuration: dict[str, Any]
-    status: Status
-    eligible: bool
-    analysis_version: str = field(default_factory=lambda: ANALYSIS_VERSION)
-    pattern_version: str = field(default_factory=lambda: PATTERN_VERSION)
-
-
-@dataclass
-class AggregateResult:
-    configurations: dict[str, dict[str, Any]]
-    n_selected: int
-    analysis_version: str = field(default_factory=lambda: ANALYSIS_VERSION)
-    pattern_version: str = field(default_factory=lambda: PATTERN_VERSION)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -266,12 +259,17 @@ def read_graph(document: dict[str, Any]) -> AnnotatedGraph:
     }
     values["schema_version"] = version
     if "trace_checks" in document or document.get("trace_checks_status") == "complete":
-        from .trace_checks import validate_trace_checks
+        from .trace_checks import TRACE_CHECK_NAMES, validate_trace_checks
 
         checks = document.get("trace_checks", [])
         if checks or document.get("trace_checks_status") == "complete":
+            expected_names = TRACE_CHECK_NAMES
+            if isinstance(checks, list) and len(checks) == len(
+                _LEGACY_TRACE_CHECK_NAMES
+            ):
+                expected_names = _LEGACY_TRACE_CHECK_NAMES
             values["trace_checks"] = validate_trace_checks(
-                checks, document.get("messages", [])
+                checks, document.get("messages", []), expected_names=expected_names
             )
         elif checks != []:
             raise ValueError("Annotation trace_checks must be a list")

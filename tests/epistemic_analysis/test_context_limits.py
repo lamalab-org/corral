@@ -16,7 +16,6 @@ from corral.epistemic_analysis import (
     AnnotationConfig,
     NormalizedTrace,
     SourceReference,
-    analyze_graph,
     annotate_trace,
     cli,
     read_graph,
@@ -161,6 +160,46 @@ def test_submission_mentions_do_not_end_annotation_view(role, content):
     assert len(view.messages) == len(trace.messages)
 
 
+@pytest.mark.parametrize(
+    "call",
+    [
+        {
+            "tool_calls": [
+                {"id": "call", "function": {"name": "submit_answer", "arguments": "{}"}}
+            ]
+        },
+        {"function_call": {"name": "submit_answer", "arguments": "{}"}},
+    ],
+)
+def test_structured_submission_ends_before_acceptance(call):
+    trace = source()
+    trace.messages[2]["content"] = "My answer.\n[saved message fields]\n" + json.dumps(
+        call
+    )
+    trace.messages[3]["content"] = "answer accepted"
+    view = build_annotation_view(trace, config())
+    assert len(view.messages) == 3
+    assert view.messages[-1] == trace.messages[2]
+
+
+def test_unexecuted_submission_proposal_does_not_cut_recorded_tool_stream():
+    trace = source()
+    trace.messages[2]["content"] = (
+        '<action>submit_answer</action><action_input>{"answer":"X"}</action_input>'
+        "\n[saved message fields]\n"
+        '{"tool_calls":[{"function":{"name":"simulate_spectra","arguments":"{}"}}]}'
+    )
+    assert len(build_annotation_view(trace, config()).messages) == len(trace.messages)
+
+
+def test_native_submission_stops_before_result_and_later_messages():
+    trace = source()
+    trace.messages[2]["content"] = (
+        '<|tool_call_begin|>functions.submit_answer<|tool_call_argument_begin|>{"answer":"X"}'
+    )
+    assert len(build_annotation_view(trace, config()).messages) == 3
+
+
 @pytest.mark.parametrize("kind", ["marker", "crossing", "hidden", "joined"])
 def test_rejects_gap_metadata_and_invisible_evidence(kind):
     trace = source()
@@ -267,9 +306,6 @@ def test_both_backends_stop_at_submission(monkeypatch, kind, strict_support):
         if kind == "llm"
         else jev.JevAnnotator(client).backend()
     )
-    backend = replace(
-        backend, extract_trace_checks=None
-    )  # This test covers graph context only.
     settings = replace(config(), window=20, overlap=1, strict_support=strict_support)
     graph = asyncio.run(annotate_trace(trace, backend, settings))
     assert "POST_SUBMISSION" not in json.dumps(requests + client.requests)
@@ -290,7 +326,7 @@ def test_both_backends_stop_at_submission(monkeypatch, kind, strict_support):
 
 def test_jev_uses_same_view_everywhere_including_edge_support():
     trace, client = source(), Decisions()
-    backend = replace(jev.JevAnnotator(client).backend(), extract_trace_checks=None)
+    backend = jev.JevAnnotator(client).backend()
     graph = asyncio.run(annotate_trace(trace, backend, config()))
     assert graph.messages == trace.messages
     assert graph.edges
@@ -309,7 +345,7 @@ def test_jev_uses_same_view_everywhere_including_edge_support():
                 == support["quote"]
             )
     assert any(len(e["support"]) == 2 for e in graph.edges)
-    assert analyze_graph(graph).row["reduced_context"]
+    assert graph.qc["context_coverage"]["reduced_context"]
     assert can_reuse(graph, trace, backend, config())
     assert not can_reuse(
         graph, trace, backend, replace(config(), tool_output_max_chars=3000)
@@ -404,7 +440,7 @@ def test_llm_both_passes_and_automatic_observation_support(monkeypatch):
     graph = asyncio.run(
         annotate_trace(
             source(),
-            replace(llm.LLMAnnotator().backend(), extract_trace_checks=None),
+            llm.LLMAnnotator().backend(),
             config(),
         )
     )
@@ -720,9 +756,7 @@ def invoke(*options):
     return asyncio.run(args._handler(args))
 
 
-def test_cli_failure_artifacts_bounded_attempts_and_offline_reanalysis(
-    tmp_path, monkeypatch
-):
+def test_cli_failure_artifacts_and_bounded_attempts(tmp_path, monkeypatch):
     calls = []
 
     async def fail(**kwargs):
@@ -762,23 +796,13 @@ def test_cli_failure_artifacts_bounded_attempts_and_offline_reanalysis(
     assert len(graph.qc["annotation_attempts"]) == 3
     assert (output / graph.provenance["annotation_view_artifact"]).is_file()
     assert graph.messages == source().messages
-    monkeypatch.setattr(
-        cli, "create_backend", lambda args: pytest.fail("provider initialized")
-    )
-    assert (
-        invoke(
-            "--input", output, "--skip-annotate", "--output", tmp_path / "reanalysis"
-        )
-        == 0
-    )
-    report = (
-        tmp_path / "reanalysis" / "analysis" / "annotation_summary.md"
-    ).read_text()
-    assert "Reduced-context traces: 1" in report
-    assert "Eligible: 0" in report
+    assert graph.qc["context_coverage"]["reduced_context"]
+    manifest = json.loads((output / "manifest.json").read_text())
+    assert manifest["annotations"] == [str(saved.relative_to(output))]
+    assert not (output / "cache").exists()
 
 
 def test_legacy_version_one_graph_still_reads():
     graph = read_graph({"schema_version": 1, "nodes": [], "edges": []})
     assert graph.annotation_view is None
-    assert not analyze_graph(graph).row["reduced_context"]
+    assert "context_coverage" not in graph.qc

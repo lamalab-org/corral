@@ -38,15 +38,9 @@ from corral.epistemic_analysis.epistemic_prompts import (
 from corral.epistemic_analysis.epistemic_prompts import (
     llm_edge_prompt,
     llm_node_prompt,
-    trace_check_system,
 )
 from corral.epistemic_analysis.graph import coerce_edge, coerce_node
 from corral.epistemic_analysis.schema import content_hash
-from corral.epistemic_analysis.trace_checks import (
-    TRACE_CHECK_NAMES,
-    trace_check_state,
-    validate_trace_checks,
-)
 
 from .base import AnnotationBackend, record_model
 
@@ -360,34 +354,8 @@ async def _extract_edges(
     return deduped, warnings
 
 
-async def _extract_trace_checks(trace, nodes, edges, model, *, call):
-    checks = []
-    for name in TRACE_CHECK_NAMES:
-        out = await call(
-            model=model,
-            system=trace_check_system(name),
-            user=json.dumps(
-                trace_check_state(trace, nodes, edges, name), ensure_ascii=False
-            ),
-        )
-        if not isinstance(out, dict) or "trace_check" not in out:
-            raise LLMError(f"Pass C requires one trace_check object for {name}")
-        check = validate_trace_checks(
-            [out["trace_check"]], trace.messages, expected_names=(name,)
-        )[0]
-        if (
-            not isinstance(check.get("explanation"), str)
-            or not check["explanation"].strip()
-        ):
-            raise LLMError(f"Pass C requires an explanation for {check['name']}")
-        if check["status"] == "present" and not check["support"]:
-            raise LLMError(f"Pass C requires source evidence for {check['name']}")
-        checks.append(check)
-    return checks
-
-
 class LLMAnnotator:
-    """Generative node, edge and whole-trace behavioral annotation."""
+    """Generative node and edge annotation."""
 
     def __init__(
         self,
@@ -418,7 +386,6 @@ class LLMAnnotator:
         return AnnotationBackend(
             extract_nodes=partial(_extract_nodes, call=call),
             extract_edges=partial(_extract_edges, call=call),
-            extract_trace_checks=partial(_extract_trace_checks, call=call),
             provenance={
                 "annotator": "llm",
                 "temperature": self.temperature,
@@ -432,7 +399,6 @@ class LLMAnnotator:
                         PASS_A_INSTRUCTIONS,
                         PASS_B_SYSTEM,
                         PASS_B_INSTRUCTIONS,
-                        *[trace_check_system(name) for name in TRACE_CHECK_NAMES],
                     ]
                 ),
                 "reasoning_effort": self.reasoning_effort,

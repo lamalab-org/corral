@@ -125,7 +125,6 @@ def test_edges_receive_one_test_per_action_and_old_cache_is_invalid(monkeypatch)
         messages, SourceReference("fixture", "fixture.json", "hash")
     )
     backend, config = llm.LLMAnnotator().backend(), AnnotationConfig("fixture")
-    backend = replace(backend, extract_trace_checks=None)
     graph = asyncio.run(annotate_trace(source, backend, config))
     assert [(n["type"], n["time"]) for n in graph.nodes] == [("T", 1), ("E", 2)]
     assert edge_inputs
