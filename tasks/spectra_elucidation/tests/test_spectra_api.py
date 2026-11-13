@@ -57,6 +57,8 @@ class Session:
     async def post(self, url, **kwargs):
         self.requests.append((spectra_utils.time.monotonic(), url, kwargs))
         status, retry_after = next(self.replies)
+        if status == "timeout":
+            raise TimeoutError
         headers = {} if retry_after is None else {"Retry-After": retry_after}
 
         def raise_for_status():
@@ -157,6 +159,36 @@ def test_other_failures_are_not_retried(prediction_type, status):
     assert error.value.status == status
     assert len(session.requests) == 1
     assert SpectraAPI._nmr_retry_after == 0
+
+
+@pytest.mark.parametrize("failure", [502, 503, 504, "timeout"])
+def test_ir_gateway_errors_and_timeouts_are_retried(clock, failure):
+    session = Session([(failure, None), (failure, None), (200, None)])
+    asyncio.run(SpectraAPI.get_prediction_async(session, "CCO", "ir"))
+    assert len(session.requests) == 3
+    assert [s for s in clock.sleeps if s >= 10] == [10, 20]
+    assert all(
+        request[2]["json"] == {"smiles": "CCO", "method": "GFN2xTB"}
+        for request in session.requests
+    )
+    assert session.requests[0][2]["timeout"].total == 180
+
+
+@pytest.mark.usefixtures("clock")
+def test_ir_failures_stop_after_three_attempts():
+    session = Session([(504, None)] * 3)
+    with pytest.raises(aiohttp.ClientResponseError) as error:
+        asyncio.run(SpectraAPI.get_prediction_async(session, "CCO", "ir"))
+    assert error.value.status == 504
+    assert len(session.requests) == 3
+
+
+@pytest.mark.usefixtures("clock")
+def test_ir_timeouts_stop_after_three_attempts():
+    session = Session([("timeout", None)] * 3)
+    with pytest.raises(TimeoutError):
+        asyncio.run(SpectraAPI.get_prediction_async(session, "CCO", "ir"))
+    assert len(session.requests) == 3
 
 
 def test_waiting_call_rechecks_extended_cooldown(clock, monkeypatch):

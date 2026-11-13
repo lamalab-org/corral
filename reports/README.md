@@ -5,34 +5,35 @@ same layout, names and index files, so runs can be compared across them.
 
 | Environment | Folder | Branch | Runs | Trials |
 |---|---|---|---:|---:|
-| AFM | [`afm/`](afm/) | `report_audit` | 4 | 200 |
-| Inference optimization (corral-mini v2.1: v2 with `math_number_theory_b` for `math_number_theory_a`; 12 Kimi runs pending; October full runs in `archive/`) | [`inference_opt/`](inference_opt/) | `mini-1-psychom` | 24 | 360 |
+| AFM | [`afm/`](afm/) | `afm-reports-november-2026` | 14 | 700 |
+| Inference optimization (corral-mini v2 in [`inference_opt/mini-v2/`](inference_opt/mini-v2/), 12 Kimi runs pending) | [`inference_opt/`](inference_opt/) | `ml_env_baseline` | 14 | 700 |
 | Psychometrics (corral-mini v1; October full runs in `archive/`) | [`psychometrics/`](psychometrics/) | `mini-1-psychom` | 28 | 420 |
-| Resistor network (corral-mini v2, 9 runs pending; October v4 runs in `archive/`) | [`resistor_network/`](resistor_network/) | `mini-1-psychom` | 27 | 405 |
+| Resistor network (v4, Docker sandbox; corral-mini v2 in [`resistor_network/mini-v2/`](resistor_network/mini-v2/), 8 runs pending) | [`resistor_network/`](resistor_network/) | `resistor-network-native-docker-reports` | 14 | 700 |
 | Corral MD | [`corral_md/`](corral_md/) | — | 14 | 700 |
 | Retrosynthesis | [`retrosynthesis/`](retrosynthesis/) | — | 14 | 700 |
-| Spectra elucidation (corral-mini v2, 6 runs pending; October full runs in `archive/`) | [`spectra_elucidation/`](spectra_elucidation/) | `mini-1-psychom` | 30 | 450 |
+| Spectra elucidation (corral-mini v2 in [`spectra_elucidation/mini-v2/`](spectra_elucidation/mini-v2/), 6 runs pending) | [`spectra_elucidation/`](spectra_elucidation/) | — | 14 | 1,400 |
 | Stargazer | [`stargazer/`](stargazer/) | — | 14 | 700 |
-| Wetlab (corral-mini v2; October full runs in `archive/`) | [`wetlab/`](wetlab/) | `mini-1-psychom` | 36 | 540 |
+| Wetlab (corral-mini v2 in [`wetlab/mini-v2/`](wetlab/mini-v2/)) | [`wetlab/`](wetlab/) | — | 14 | 700 |
 
-All nine environments together have **191 runs and 4,475 trials**. Each
+All nine environments together have **140 runs and 6,720 trials**. Each
 environment has its own indexes, with report paths relative to its folder. The
 `runs` and `trials` configs of the Hugging Face summary dataset combine them.
 
-Psychometrics holds the corral-mini v1 runs; wetlab, spectra elucidation and
-resistor network hold the corral-mini v2 runs, and inference optimization
-holds the corral-mini v2.1 runs (v2 with one level-1 task replaced).
+Psychometrics holds the corral-mini v1 runs. corral-mini v2 runs sit next to
+the full-benchmark runs of their environment, in `<environment>/mini-v2/` with
+their own indexes (wetlab, spectra elucidation, resistor network, inference optimization); the totals above count only the full runs.
 Each mini version has its own Hugging Face datasets, not the October ones:
 `jablonkagroup/corral-reports-mini-v1` (psychometrics) and
-`jablonkagroup/corral-reports-mini-v2` (wetlab), each with a `-summary`. The
+`jablonkagroup/corral-reports-mini-v2` (wetlab, spectra elucidation, resistor network,
+inference optimization), each with a `-summary`. The
 push scripts refuse to put runs whose ID contains `-mini-` into a repo without
 `mini` in its name (or the reverse), or runs of one mini version into another
 version's repo:
 
 ```bash
-python scripts/push_october_reports_to_hf.py --env=wetlab --only_env \
+python scripts/push_october_reports_to_hf.py --env=wetlab,spectra_elucidation,resistor_network,inference_opt --only_env \
     --repo=jablonkagroup/corral-reports-mini-v2
-python scripts/push_october_summary_to_hf.py --env=wetlab \
+python scripts/push_october_summary_to_hf.py --env=wetlab,spectra_elucidation,resistor_network,inference_opt \
     --repo=jablonkagroup/corral-reports-mini-v2-summary
 ```
 
@@ -112,7 +113,10 @@ reports/<environment>/
     provenance.json                 source hashes and recovery details, where available
 ```
 
-Each report holds exactly the trials that count: 10 tasks × 5 trials, or
+AFM’s Level 1 AI Scientist report combines two runs covering tasks 1–5 and 6–10;
+see its environment README for provenance.
+
+Each full report holds exactly the trials that count: 10 tasks × 5 trials, or
 20 tasks × 5 trials for spectra elucidation. Where a
 trial failed for an infrastructure reason and was rerun, the report holds the
 rerun in that trial's place, and the report's metrics are computed from the

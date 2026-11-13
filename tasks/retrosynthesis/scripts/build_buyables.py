@@ -65,6 +65,14 @@ MANUAL_PRICES = {
     "CCOC(=O)C(C)(F)F": 35.0,
     "CCOC(=O)C(Br)C1CC1": 30.0,
     "CCOP(=O)(CS(C)(=O)=O)OCC": 150.0,
+    # Missing reference-route leaves, using frozen benchmark USD/g estimates.
+    # The triazole intermediate is explicitly assumed benchmark stock.
+    "CC(C)(C)[Si](C)(C)OS(=O)(=O)C(F)(F)F": 15.0,
+    "CCOC(=O)/C=C/CP(=O)(OCC)OCC": 25.0,
+    "COc1cccc(NC(=O)c2nn[nH]c2N)c1": 200.0,
+    "O=C(O)CC(=O)O": 1.0,
+    "CC(C)(C)OC(=O)N1CCNCC1": 15.0,
+    "O=S(=O)(Cl)c1ccccc1F": 20.0,
 }
 
 

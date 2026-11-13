@@ -2,12 +2,9 @@
 
 import json
 import re
-import shutil
-import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import partial
-from pathlib import Path
 from threading import RLock
 from typing import Any
 from uuid import uuid4
@@ -45,10 +42,6 @@ from corral.agents.session import AgentSession, AgentSessionCapabilities
 from corral.agents.utils import llm_call
 from corral.core.action import SUBMIT_ANSWER_TOOL_NAME, Action
 from corral.core.errors import concise_error_message
-from corral.core.events import TaskConfigured, WorkspaceDelta
-from corral.core.transition import environment_operations
-from corral.core.workspace import WorkspaceState
-from corral.runtime import permissions
 
 _SCIENTIST_SYSTEM_PROMPT = """
 You are the reasoning component of a scientific experiment manager.
@@ -165,63 +158,15 @@ class _BranchSessionRegistry:
 
     def checkpoint(self, execution_id: str) -> dict[str, Any]:
         session = self.session(execution_id)
-        state = self.portal.call(
-            partial(session.state_store.materialize, session.branch_id)
-        )
-        return {
-            "environment": state.environment.values,
-            "workspace": state.workspace.model_dump(mode="json"),
-        }
+        return self.portal.call(session.checkpoint_branch)
 
     def restore_branch(self, checkpoint: Mapping[str, Any]) -> BranchSessionHandle:
         handle = self.create_branch()
         try:
             session = self.session(handle.execution_id)
-            saved_workspace = WorkspaceState.model_validate(checkpoint["workspace"])
-            destination = session.workspace
-            if destination is None:
-                raise ValueError("AI Scientist branch checkpoint requires a workspace")
-            # Node workspaces are excluded from the main snapshot. Restore their
-            # bytes before publishing the branch's logical state.
-            with tempfile.TemporaryDirectory(dir=Path(destination).parent) as temporary:
-                staged = Path(temporary) / "workspace"
-                self.portal.call(
-                    partial(
-                        session.environment.workspace_manager.materialize,
-                        saved_workspace,
-                        staged,
-                    )
-                )
-                for entry in Path(destination).iterdir():
-                    if entry.is_dir() and not entry.is_symlink():
-                        shutil.rmtree(entry)
-                    else:
-                        entry.unlink()
-                permissions.copy_workspace(staged, destination)
-
-            async def publish() -> None:
-                current = session.state
-                restored = WorkspaceState.model_validate(
-                    {
-                        **saved_workspace.model_dump(mode="json"),
-                        "id": current.workspace.id,
-                    }
-                )
-                event = TaskConfigured(
-                    status="AI Scientist branch checkpoint restored",
-                    environment_operations=environment_operations(
-                        current.environment.values, checkpoint["environment"]
-                    ),
-                    workspace_delta=WorkspaceDelta.from_workspace(restored),
-                    expected_environment_revision=current.environment.revision,
-                    expected_workspace_revision=current.workspace.revision,
-                )
-                commit = await session._append_runtime(
-                    event, f"branch:{session.branch_id}:restored"
-                )
-                await session._refresh(observed_hash=commit.hash)
-
-            self.portal.call(publish)
+            self.portal.call(
+                partial(session.restore_branch_state, checkpoint=checkpoint)
+            )
             return handle
         except BaseException:
             self.close_branch(handle.execution_id)
