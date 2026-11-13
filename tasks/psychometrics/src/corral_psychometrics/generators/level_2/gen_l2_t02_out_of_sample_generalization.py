@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Level 2 Task 02 artifacts and scoring metadata.
-
-Generating model, training sample: two correlated HSNS factors (phi 0.35),
-without extra item dependence.
-
-Each holdout changes one thing, which fixes the right verdict for it:
-
-    holdout_a   an extra 0.45 cross-loading            structure fails
-    holdout_b   the same population                    generalizes
-    holdout_c   the factors correlate 0.78, not 0.35   relations differ
-"""
+"""Generate the frozen-model generalization task and its holdout samples."""
 
 from __future__ import annotations
 
@@ -207,6 +197,7 @@ def classify(moved):
 
 
 def write_codebook(path, frames):
+    """Write the public variable and response-format descriptions."""
     path.write_text(
         "# Codebook - out-of-sample validation\n\n"
         "Each tab-separated file contains responses to the same ten HSNS items. "
@@ -226,6 +217,7 @@ def write_codebook(path, frames):
 
 
 def build_truth(floor, pop, data_sha, rows):
+    """Build the private answers, model parameters, and provenance."""
     return {
         "task_id": TASK_ID,
         "scored": {"holdout_conclusions": HOLDOUT_DECISIONS},
@@ -247,6 +239,7 @@ def build_truth(floor, pop, data_sha, rows):
 
 
 def build_task_json(data_sha):
+    """Build the task definition and private scoring configuration."""
     contract = C.scoring_contract(
         TASK,
         ITEMS,
@@ -279,7 +272,6 @@ def build_task_json(data_sha):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "codebook.md",
                     "data.csv",
@@ -399,6 +391,7 @@ def naive(train, holdouts):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     rng = np.random.default_rng(SEED)
     train = simulate(rng, N_TRAIN, label="US")

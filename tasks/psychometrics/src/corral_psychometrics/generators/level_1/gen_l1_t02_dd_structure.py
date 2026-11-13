@@ -1,16 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Task 02 artifacts and scoring metadata.
-
-Generating model, Dirty Dozen in the United States: bifactor-(S-1).
-
-    reference   Machiavellianism, measured by its four items
-    specifics   psychopathy and narcissism residuals, correlated after M
-
-Outside the United States there is no broad trait at all, only the three
-subscales, correlated 0.20 to 0.35 and all measured worse. Analysing the
-countries together recovers neither picture. The HSNS items sit in the file
-as two correlated factors and belong to no part of this task.
-"""
+"""Generate the Dirty Dozen S−1 structure task."""
 
 from __future__ import annotations
 
@@ -164,7 +153,7 @@ def build_dataset(rng):
 
 
 def reference_syntax():
-    """lavaan syntax for the generating model, used as the scoring floor."""
+    """Reference measurement model in semopy syntax."""
     by = {k: [i for i in ITEMS if SPECIFIC_OF[i] == k] for k in "MPN"}
     lines = [f"G =~ {'+'.join(ITEMS)}"]
     lines += [f"S{k} =~ {'+'.join(by[k])}" for k in "PN"]
@@ -275,7 +264,6 @@ def build_task_json(data_sha):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "codebook.md",
                     "data.csv",
@@ -411,6 +399,7 @@ def naive(df, pop):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     rng = np.random.default_rng(SEED)
     print("Simulating ...")

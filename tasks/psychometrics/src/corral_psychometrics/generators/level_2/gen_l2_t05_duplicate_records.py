@@ -1,16 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Level 2 Task 05 artifacts and scoring metadata.
-
-Generating model: two correlated HSNS factors (phi 0.35).
-
-The correlation in the delivered file is inflated by two mechanisms at once,
-and the task is to find both. Respondents are re-delivered with a probability
-rising in the sum of their two traits, so the repeated rows are the high-scoring
-end of the sample; separately, distinct respondents collide on identical answer
-patterns through a shared finite response-profile pool. A re-delivered row keeps its answers, age and accuracy, and
-is given a fresh participant id, session id and date, so the identifying key is
-the responses rather than the ids.
-"""
+"""Generate the panel-delivery task with repeated records and shared profiles."""
 
 from __future__ import annotations
 
@@ -201,6 +190,7 @@ def population_matrix(rng):
 
 
 def write_codebook(path, df):
+    """Write the public variable and response-format descriptions."""
     path.write_text(
         "# Codebook - panel delivery\n\n"
         "Tab-separated, one row per delivered record. Responses are continuous and unbounded, "
@@ -222,6 +212,7 @@ def write_codebook(path, df):
 
 
 def build_truth(floor, pop, data_sha, rows, n_distinct, n_repeated, corrected):
+    """Build the private answers, model parameters, and provenance."""
     return {
         "task_id": TASK_ID,
         "scored": {
@@ -251,6 +242,7 @@ def build_truth(floor, pop, data_sha, rows, n_distinct, n_repeated, corrected):
 
 
 def build_task_json(data_sha):
+    """Build the task definition and private scoring configuration."""
     contract = C.scoring_contract(
         TASK,
         ITEMS,
@@ -299,7 +291,6 @@ def build_task_json(data_sha):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "codebook.md",
                     "data.csv",
@@ -347,7 +338,7 @@ def candidate_submissions(X):
 
 
 def verify(delivered, n_repeated):
-    """Confirm the two mechanisms are both present and only one key separates them."""
+    """Check that identity-based deduplication retains every respondent."""
     as_delivered = factor_correlation(analysis_sample(delivered))
     routes = {
         "leave every row in": delivered,
@@ -422,6 +413,7 @@ def naive(delivered):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     rng = np.random.default_rng(SEED)
     people = respondents(rng, N_RESPONDENTS)

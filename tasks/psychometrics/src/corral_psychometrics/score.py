@@ -19,9 +19,6 @@ from corral_psychometrics.scoring_policy import comparative_rules, validity_opti
 warnings.filterwarnings("ignore")
 logging.disable(logging.WARNING)
 
-# --------------------------------------------------------------------------
-# Submitted-syntax validation
-# --------------------------------------------------------------------------
 _TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 #: A numeric literal, including a sign and an exponent, that is not the tail
 #: of a name: `-0.5`, `1e-3` and `.8`, but not the `1` in `HSNS1`.
@@ -61,12 +58,7 @@ def names_in(text: str) -> list[str]:
 
 
 def parse_statement(line: str) -> Statement | None:
-    """One line of a submitted model, or None if it states nothing.
-
-    Submitters choose their own factor names, spacing, comments and line
-    order, so everything that reads a submitted model parses it here instead
-    of matching text against an assumed spelling.
-    """
+    """Parse a model statement, ignoring comments and numeric coefficient fixings."""
     stripped = _code(line).strip()
     for op in _ALLOWED_OPS:
         if op in stripped:
@@ -87,15 +79,7 @@ def latent_names(spec: str) -> set[str]:
 
 
 def validate_syntax(spec: str, items: list[str], max_factors: int = 6) -> str:
-    """Check a submitted model before fitting it, and return it without comments.
-
-    Permits `#` comments, one statement per line using `=~`, `~~` or `~`,
-    numeric fixings such as `0.5*` or `-1e-3*` (not labels or `start()`),
-    and no names but the listed
-    observed variables and the factors the model defines. Raises
-    InvalidSubmission on anything else. Every later step reads the returned
-    specification, so a comment can never be mistaken for a variable.
-    """
+    """Validate semopy statements and numeric fixings; return syntax without comments."""
     if not isinstance(spec, str) or not spec.strip():
         raise InvalidSubmission("empty model specification")
     if len(spec) > 8000:
@@ -143,9 +127,6 @@ def validate_syntax(spec: str, items: list[str], max_factors: int = 6) -> str:
     return cleaned
 
 
-# --------------------------------------------------------------------------
-# Fitting
-# --------------------------------------------------------------------------
 def observed_in_spec(spec: str, known: list[str]) -> set:
     """The data columns a model actually refers to."""
     return set(names_in("\n".join(map(_code, spec.splitlines())))) & set(known)
@@ -192,10 +173,8 @@ def evaluate_model(
     return {k: (round(v, 3) if isinstance(v, float) else v) for k, v in criteria.items()}, model
 
 
-# --------------------------------------------------------------------------
-# Tier 1 - constraints
-# --------------------------------------------------------------------------
 def check_constraints(model, criteria: dict, params: dict) -> tuple[dict, list[str]]:
+    """Check model admissibility and identify degenerate factors."""
     params = {**validity_options(), **params}
     ins = model.inspect(std_est=True)
     loadings = ins[ins.op == "~"]
@@ -242,10 +221,8 @@ def check_constraints(model, criteria: dict, params: dict) -> tuple[dict, list[s
     return results, degenerate
 
 
-# --------------------------------------------------------------------------
-# Tier 2 - Pareto dominance over a floor
-# --------------------------------------------------------------------------
 def check_dominance(criteria: dict, floor: dict, spec: list[dict]) -> dict:
+    """Compare model criteria with a reference floor within the stated tolerances."""
     out = {}
     for item in spec:
         key, direction, eps = item["key"], item["direction"], item["eps"]
@@ -274,10 +251,8 @@ def model_quality_checks(spec, reference_spec, frame, items, prefix):
     return checks, {"submitted": criteria, "reference": floor}
 
 
-# --------------------------------------------------------------------------
-# Tier 3 - factual claims
-# --------------------------------------------------------------------------
 def _partition(mapping: dict) -> set[frozenset]:
+    """Group observed items into an unordered factor partition."""
     groups: dict[Any, set] = {}
     for item, factor in mapping.items():
         groups.setdefault(factor, set()).add(item)
@@ -314,17 +289,7 @@ def _standardised(model, items):
 
 
 def deduplicate_and_refit(spec, items, data, key, identity):
-    """Collapse rows the submitted key treats as one respondent, then refit.
-
-    spec      the submitted model, unchanged
-    items     variables the model covers
-    data      every delivered row, metadata included
-    key       columns the submission says identify a respondent
-    identity  columns that actually do, from the task definition
-
-    Returns retained row count, repeats the key failed to remove, and the trait
-    correlation on what is left. Returns None values when the key is unusable.
-    """
+    """Refit after deduplication and report retained identities and the factor correlation."""
     if not isinstance(key, (list, tuple)) or not key:
         return None, None, None
     if any(column not in data.columns for column in key):
@@ -343,21 +308,7 @@ def deduplicate_and_refit(spec, items, data, key, identity):
 
 
 def diagnose_holdouts(spec, items, train_fit, holdouts, thresholds):
-    """Refit the submitted model in each holdout and say how far it travels.
-
-    The frozen structure is re-estimated in every holdout and compared with the
-    training solution. Items that no longer track their factor the same way
-    break the measurement structure; a factor correlation that moves while the
-    loadings hold leaves the structure intact but changes what it says.
-
-    spec        the submitted model, unchanged
-    items       variables the model covers
-    train_fit   the model already fitted to the training data
-    holdouts    name -> respondents, one frame per holdout
-    thresholds  how far a loading and a factor correlation may move
-
-    Returns name -> label, and name -> the measurements behind it.
-    """
+    """Refit a frozen structure and classify changes in loadings and factor correlation."""
     base_loadings, base_phi = _standardised(train_fit, items)
     labels, detail = {}, {}
     for name, frame in holdouts.items():
@@ -538,6 +489,7 @@ def check_claims(
     items: list[str] | None = None,
     derived: dict | None = None,
 ) -> dict:
+    """Validate submitted or refitted claims against the private answers."""
     out: dict[str, bool | None] = {}
     for item in spec:
         key, fn = item["key"], item["fn"]
@@ -644,6 +596,7 @@ def check_claims(
 
 
 def _dig(obj: dict, dotted: str):
+    """Read a nested value using a dot-separated key."""
     for part in filter(None, dotted.split(".")):
         if not isinstance(obj, dict) or part not in obj:
             return None
@@ -651,21 +604,10 @@ def _dig(obj: dict, dotted: str):
     return obj
 
 
-# --------------------------------------------------------------------------
-# Entry point
-# --------------------------------------------------------------------------
 def score_model_criteria(
     submission: str | dict, params: dict, base_dir: str | Path | None = None
 ) -> dict:
-    """Score one submission.
-
-    submission  the agent's JSON answer, or the object already parsed
-    params      the task's scoring rules
-    base_dir    root the task-relative paths in params resolve against;
-                defaults to the task root rather than the working directory
-
-    Returns the full result. score_binary is the metric.
-    """
+    """Refit a submitted model and check its validity, fit, parsimony, and scientific claims."""
     if params.get("task_type") == "population_classification":
         return score_population_classification(submission, params, base_dir)
     if params.get("task_type") == "gender_item_integrity":
@@ -797,6 +739,7 @@ def score_model_criteria(
 
 
 def _merge(specs: list[dict]) -> dict:
+    """Combine options from a list of scoring rules."""
     out: dict = {}
     for s in specs:
         out.update({k: v for k, v in s.items() if k != "key"})
@@ -804,6 +747,7 @@ def _merge(specs: list[dict]) -> dict:
 
 
 def _fmt(v) -> str:
+    """Format a boolean check, preserving non-applicable results."""
     return "n/a" if v is None else ("PASS" if v else "FAIL")
 
 
@@ -821,6 +765,7 @@ def _recorded(criteria: dict) -> dict:
 def _result(
     score: float, checks: dict, criteria: dict, reason: str, recorded: dict | None = None
 ) -> dict:
+    """Build a score report from its applicable checks."""
     applicable = [v for v in checks.values() if v != "n/a"]
     return {
         "score_binary": score,
@@ -835,6 +780,7 @@ def _result(
 
 
 def _zero(reason: str) -> dict:
+    """Return a failed-submission report."""
     return {
         "score_binary": 0.0,
         "score_partial": 0.0,
@@ -880,6 +826,7 @@ def _within_outcome_syntax(spec: str, outcome: str, group: str) -> str:
 
 
 def _fit_outcome_model(spec: str, frame: pd.DataFrame, items: list[str], outcome: str, group: str):
+    """Fit an outcome model using the selected items and group variable."""
     import semopy
 
     model = semopy.Model(spec)
@@ -1084,13 +1031,7 @@ def _measurement_item_map(spec: str) -> dict[str, set[str]]:
 
 
 def _restore_items(spec: str, omitted: list[str], factor_items: dict[str, list[str]]) -> str:
-    """Put omitted items back on the measurement line they belong to.
-
-    A submission may name its factors anything and spread them over any number
-    of lines, so an omitted item cannot be placed by factor name. Each one
-    rejoins the line already carrying most of the items that share its factor in
-    the generating model, or the first measurement line if none of them does.
-    """
+    """Restore omitted items to the factor covering most siblings, preserving numeric fixings."""
     lines = spec.splitlines()
     parsed = [parse_statement(line) for line in lines]
     measurement = [i for i, statement in enumerate(parsed) if statement and statement.op == "=~"]
@@ -1115,6 +1056,7 @@ def _restore_items(spec: str, omitted: list[str], factor_items: dict[str, list[s
 
 
 def _model_fit_summary(spec: str, frame: pd.DataFrame, variables: list[str]) -> dict:
+    """Fit a model and return its CFI and RMSEA."""
     import semopy
 
     model = semopy.Model(spec)
@@ -1130,10 +1072,7 @@ def _model_fit_summary(spec: str, frame: pd.DataFrame, variables: list[str]) -> 
 
 
 def _drop_path(spec: str, left: str, right: str) -> str:
-    """The same model without the regression of `left` on `right`.
-
-    A path sharing its line with other predictors loses only `right`.
-    """
+    """Remove one regression predictor while retaining the other terms."""
     kept = []
     for line in spec.splitlines():
         parsed = parse_statement(line)
@@ -1499,14 +1438,7 @@ def score_model_identification(
 def score_population_classification(
     submission: str | dict, params: dict, base_dir: str | Path | None = None
 ) -> dict:
-    """Score a classification of anonymised respondents into populations.
-
-    Each person maps to the set of populations compatible with them. Order is
-    irrelevant; missing, extra or unknown people are errors. When the truth
-    holds a model per population, each submitted model is refitted on that
-    population's reference sample and has to pass the Tier 1 constraints and
-    fit as well as the generating model (Tier 2).
-    """
+    """Check case classifications and refit each submitted population model."""
     base = Path(base_dir) if base_dir is not None else paths.task_root()
     try:
         submission = parse_json_text(submission)
@@ -1581,11 +1513,7 @@ def _population_model_fits(spec: str, name: str, reference: dict, params: dict, 
 def score_gender_item_integrity(
     submission: str | dict, params: dict, base_dir: str | Path | None = None
 ) -> dict:
-    """Score item-integrity diagnoses made before a gender comparison.
-
-    Checks the reported diagnoses and comparison, and that the submitted model
-    covers the items, carries a gender path and fits.
-    """
+    """Check item diagnoses, repaired model quality, and the supported group comparison."""
     base = Path(base_dir) if base_dir is not None else paths.task_root()
     try:
         submission = parse_json_text(submission)

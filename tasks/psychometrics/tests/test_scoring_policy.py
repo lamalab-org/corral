@@ -64,7 +64,6 @@ def sample():
 
 def test_valid_factor_sign_changes_do_not_change_model_quality():
     X = sample()
-    base = "F =~ a+b+c+d+e+f"
     base = "F =~ " + "+".join(f"1*{item}" for item in X)
     reversed_factor = "F =~ " + "+".join(f"-1*{item}" for item in X)
     checks, _ = model_quality_checks(reversed_factor, base, X, list(X), "quality")

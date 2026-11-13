@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Task 08 artifacts and scoring metadata.
-
-Two instruments, each entitling its user to a different kind of score.
-
-    HSNS          one factor, modest and fairly even loadings. A sound total score, no subscales.
-    Dirty Dozen   bifactor-(S-1) with Machiavellianism as reference, plus
-                  correlated P and N residual facets. Subscales, no broad total.
-
-Outside the United States the HSNS splits into two factors and the Dirty Dozen
-is approximately unidimensional, so pooling the countries changes both answers.
-"""
+"""Generate the task assessing the interpretation of total and facet scores."""
 
 from __future__ import annotations
 
@@ -115,9 +105,6 @@ and runnable so the fit on the United States sample can be reproduced.
 """
 
 
-# --------------------------------------------------------------------------
-# Simulation
-# --------------------------------------------------------------------------
 def simulate_hsns(n, rng, us):
     """One factor in the United States; two weakly correlated factors elsewhere."""
     if us:
@@ -180,14 +167,13 @@ def build_dataset(rng):
     return C.finalize(frames, rng, SEED)
 
 
-# --------------------------------------------------------------------------
-# Models and reliability
-# --------------------------------------------------------------------------
 def hsns_syntax():
+    """Return the HSNS measurement model."""
     return "H =~ " + "+".join(HSNS)
 
 
 def dd_bifactor():
+    """Return the Dirty Dozen S−1 measurement model."""
     by = {k: [i for i in DD if SPECIFIC_OF[i] == k] for k in SUBSCALES}
     lines = ["G =~ " + "+".join(DD)]
     lines += [f"S{k} =~ {'+'.join(by[k])}" for k in "PN"]
@@ -197,6 +183,7 @@ def dd_bifactor():
 
 
 def dd_three_factor():
+    """Return the correlated three-facet comparison model."""
     by = {k: [i for i in DD if SPECIFIC_OF[i] == k] for k in SUBSCALES}
     return "\n".join(f"F{k} =~ {'+'.join(by[k])}" for k in SUBSCALES)
 
@@ -250,9 +237,6 @@ def population_correlation_matrix():
     return C.population_matrix(big, ITEMS)
 
 
-# --------------------------------------------------------------------------
-# Artifacts
-# --------------------------------------------------------------------------
 def build_truth(floor, pop, data_sha, rows):
     """Assemble the hidden ground truth, scoring reference and provenance."""
     reference_share, omega_total = omega(DD_GENERAL, DD_SPECIFIC, DD)
@@ -339,7 +323,6 @@ def build_task_json(data_sha):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "codebook.md",
                     "data.csv",
@@ -360,6 +343,7 @@ def candidate_submissions(X):
     del X
 
     def sub(hsns, dd, syntax=None):
+        """Build an instrument-score interpretation submission."""
         return {
             "model_syntax": syntax or reference_syntax(),
             "scoring": {"hsns": hsns, "dirty_dozen": dd},
@@ -376,9 +360,6 @@ def candidate_submissions(X):
     }
 
 
-# --------------------------------------------------------------------------
-# Checks
-# --------------------------------------------------------------------------
 def verify(df, pop):
     """Confirm alpha misses the reference-facet interpretation."""
     del pop
@@ -495,6 +476,7 @@ def verify(df, pop):
 
 
 def _fitted(spec, X, items):
+    """Fit a semopy model to the selected items."""
     import semopy
 
     model = semopy.Model(spec)
@@ -524,6 +506,7 @@ def naive(df, pop):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     rng = np.random.default_rng(SEED)
     print("Simulating ...")

@@ -94,16 +94,14 @@ def _run_cell(code: str, namespace: Namespace) -> str:
 
 @dataclass(frozen=True)
 class _CellExecutor:
-    """Runs cells with the task's workspace as the working directory.
-
-    Must stay picklable: the local session sends it to a spawned process.
-    """
+    """Execute a cell in the task workspace in local or restricted workers."""
 
     workspace: str
 
     def __call__(self, code: str, namespace: Namespace) -> str:
         # A restricted worker already starts in its /workspace mount, where the
         # controller's path does not exist; a local session starts elsewhere.
+        """Execute a Python cell in its task workspace."""
         if os.path.isdir(self.workspace):
             os.chdir(self.workspace)
         return _run_cell(code, namespace)

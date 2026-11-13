@@ -1,19 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Task 04 artifacts and scoring metadata.
-
-Two instruments, only one of which supports a gender comparison.
-
-    HSNS          one factor. Women really are 0.45 higher on the trait, but
-                  four items are also biased, two against them and two in
-                  their favour, so the observed gap mixes trait and bias and the comparison is not defensible.
-    Dirty Dozen   bifactor-(S-1), with Machiavellianism as reference facet.
-                  No item is biased; women are simply 0.30 higher. This is the
-                  instrument that supports the comparison.
-
-Outside the United States no item is biased and the Dirty Dozen difference runs
-the other way, so pooling the countries moves the answer out of tolerance
-rather than merely diluting it.
-"""
+"""Generate the instrument-selection task for a defensible gender comparison."""
 
 from __future__ import annotations
 
@@ -34,9 +20,6 @@ DD = C.DD_ITEMS
 ALL_VARS = HSNS + DD + ["gender"]
 MODEL_VARS = DD + ["gender"]  # the combination that works
 
-# --------------------------------------------------------------------------
-# HSNS: a real gender difference, hidden by bias against women on four items
-# --------------------------------------------------------------------------
 HSNS_LOADINGS = {
     "HSNS1": 0.55,
     "HSNS2": 0.76,
@@ -141,9 +124,6 @@ A single JSON object:
 """
 
 
-# --------------------------------------------------------------------------
-# Simulation
-# --------------------------------------------------------------------------
 def simulate_hsns(n, rng, female, scale=1.0, us=True):
     """One trait, a real gender difference, and gender bias on four items."""
     eta = rng.normal(0.0, 1.0, n) + (np.where(female, HSNS_LATENT_DIFFERENCE, 0.0) if us else 0.0)
@@ -212,9 +192,6 @@ def comparison_sample(df, variables):
     return X[X[items].notna().all(axis=1)].astype(float)
 
 
-# --------------------------------------------------------------------------
-# Models
-# --------------------------------------------------------------------------
 def dd_bifactor():
     """The Dirty Dozen's Machiavellianism-reference S-1 structure."""
     by = {k: [i for i in DD if SPECIFIC_OF[i] == k] for k in "MPN"}
@@ -269,9 +246,6 @@ def population_reference():
     return target, pop.round(3)
 
 
-# --------------------------------------------------------------------------
-# Artifacts
-# --------------------------------------------------------------------------
 def build_truth(target, floor, pop, data_sha, rows):
     """Assemble the hidden ground truth, scoring reference and provenance."""
     return {
@@ -374,7 +348,6 @@ def build_task_json(data_sha):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "codebook.md",
                     "data.csv",
@@ -390,9 +363,6 @@ def build_task_json(data_sha):
     ]
 
 
-# --------------------------------------------------------------------------
-# Checks
-# --------------------------------------------------------------------------
 def _bias_scan(spec, X, variables, items, factors):
     """Items that look biased: chi-square gain from freeing a direct gender path."""
     import semopy
@@ -502,6 +472,7 @@ def naive(df, target, pop):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     rng = np.random.default_rng(SEED)
     print("Simulating ...")

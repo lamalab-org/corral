@@ -1,21 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Level 2 Task 10 artifacts and scoring metadata.
-
-Six datasets of twelve items, each drawn from one of six candidate structures.
-Five also carry a data-quality complication; one is an uncomplicated control.
-
-    model_a   one general factor
-    model_b   two correlated factors, Q01-Q06 and Q07-Q12
-    model_c   bifactor - a general factor plus one narrow factor per subscale
-    model_d   three correlated factors, Q01-Q03, Q04-Q07 and Q08-Q12
-    model_e   two correlated factors, Q06 also loading on the second
-    model_f   one general factor plus a method effect shared by Q03, Q05, Q07 and Q10
-
-The complications - missingness, a shifted subgroup, repeated
-rows, a weak item, a response style - are what make several structures fit a
-dataset equally well, so an answer is a list of candidates within the stated BIC
-margin rather than one name.
-"""
+"""Generate the candidate-model identification task and response datasets."""
 
 from __future__ import annotations
 
@@ -53,13 +37,7 @@ MODEL_DESCRIPTIONS = {
     "model_f": "one general factor with a response-method effect shared by Q03, Q05, Q07 and Q10",
 }
 
-# A candidate belongs in a dataset's answer when its BIC is within this of the
-# best-fitting candidate. Two is the conventional point below which a BIC
-# difference is not worth interpreting, and it is well under what one extra
-# free parameter costs here, log(2400) = 7.8. The agent is not told how to
-# compare candidates: every dataset has a single answer, and the two close
-# calls are settled by the estimates too (dataset_04's two-factor rival has
-# factors correlating 1.0, dataset_05's extra cross-loading is about zero).
+# Retain admissible candidates within two BIC units of the best model.
 TIE_MARGIN = 2.0
 
 WEAK_ITEM = "Q08"
@@ -78,7 +56,7 @@ COMPLICATIONS = {
 
 
 def factor_syntax(model):
-    """The lavaan-style model a candidate stands for."""
+    """Return a candidate measurement model in semopy syntax."""
     join = "+".join
     if model == "model_a":
         return f"G =~ {join(ITEMS)}"
@@ -223,6 +201,7 @@ def assignment(rng):
 
 
 def build_frames(rng, mapping, with_complications=True):
+    """Generate each anonymized dataset from its assigned candidate model."""
     return {
         dataset: responses(
             mapping[dataset],
@@ -252,6 +231,7 @@ identifiers from `candidate_models.csv`. No working is submitted."""
 
 
 def write_codebook(path):
+    """Write the public variable and response-format descriptions."""
     path.write_text(
         "# Codebook - model identification\n\n"
         "Each `dataset_*.csv` is tab-separated and holds an independent anonymised "
@@ -268,6 +248,7 @@ def write_codebook(path):
 
 
 def build_task_json(data_sha):
+    """Build the task definition and private scoring configuration."""
     return [
         {
             "id": TASK_ID,
@@ -279,7 +260,6 @@ def build_task_json(data_sha):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "candidate_models.csv",
                     "codebook.md",
@@ -311,6 +291,7 @@ def build_task_json(data_sha):
 
 
 def truth(data_sha, mapping, answers, measured):
+    """Build the private answers, model parameters, and provenance."""
     return {
         "task_id": TASK_ID,
         "scored": {"assignments": answers},
@@ -331,6 +312,7 @@ def truth(data_sha, mapping, answers, measured):
 
 
 def candidate_submissions():
+    """Return the reference answer and competing analyses for scoring checks."""
     answers = json.loads(TASK.truth.read_text())["scored"]["assignments"]
     catalogue_order = {dataset: [model] for dataset, model in zip(DATASETS, MODELS)}
     single = {dataset: value[:1] for dataset, value in answers.items()}
@@ -465,6 +447,7 @@ def naive(mapping, frames, clean_frames):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     mapping = assignment(np.random.default_rng(SEED))
     frames = build_frames(np.random.default_rng(SEED + 1), mapping)

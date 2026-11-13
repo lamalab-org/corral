@@ -30,10 +30,12 @@ _COMPARISONS = [
 
 
 def validity_rules():
+    """Return an independent copy of the model-validity rules."""
     return deepcopy(_VALIDITY)
 
 
 def comparative_rules(*, population=False):
+    """Return fit and parsimony rules, optionally including population accuracy."""
     rules = deepcopy(_COMPARISONS)
     if population:
         rules.append(
@@ -48,4 +50,5 @@ def comparative_rules(*, population=False):
 
 
 def validity_options():
+    """Collect the shared model-validity thresholds."""
     return {key: value for rule in _VALIDITY for key, value in rule.items() if key != "key"}

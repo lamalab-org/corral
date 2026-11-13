@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Task 03 artifacts and scoring metadata.
-
-One broad HSNS trait plus a shared matrix-page method effect on four items.
-The other items appeared individually. The high-loading HSNS1/HSNS8 pair is
-associated only through the trait, providing a decoy for raw-correlation rules.
-Non-US responses have weaker trait loadings and no matrix-page effect.
-
-"""
+"""Generate the HSNS task separating personality and presentation effects."""
 
 from __future__ import annotations
 
@@ -145,7 +138,7 @@ def build_dataset(rng):
 
 
 def reference_syntax():
-    """lavaan syntax for the generating model, used as the scoring floor."""
+    """Reference measurement model in semopy syntax."""
     lines = [f"G =~ {'+'.join(ITEMS)}"]
     lines.append(C.method_syntax("Format", METHOD_ITEMS, ["G"]))
     return "\n".join(lines)
@@ -279,7 +272,6 @@ def build_task_json(data_sha):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "codebook.md",
                     "data.csv",
@@ -412,7 +404,6 @@ def _implied(unidim_spec, X):
 def naive(df, pop):
     """Confirm the default dimensionality check and the US filter both matter."""
     del pop
-    from factor_analyzer import FactorAnalyzer
 
     X = C.analysis_sample(df, ITEMS)
     corr = np.corrcoef(X.values.T)
@@ -426,7 +417,6 @@ def naive(df, pop):
         f"parallel analysis on the US sample -> {n_factors} factors "
         f"(eigenvalues {np.round(eigen[:3], 2)})"
     )
-    FactorAnalyzer(n_factors=2, rotation="oblimin", method="minres").fit(X.values)
 
     truth = {k: v[1] for k, v in LOADINGS.items()}
     print(f"\n{'sample':22s} {'N':>7s} {'worst |error|':>14s}  within 0.08?")
@@ -454,6 +444,7 @@ def naive(df, pop):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     rng = np.random.default_rng(SEED)
     print("Simulating ...")

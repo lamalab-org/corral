@@ -1,20 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Level 2 Task 04 artifacts and scoring metadata.
-
-Four HSNS populations, each with its own structure, and three case samples
-drawn from some of them.
-
-    population_a   two correlated factors
-    population_b   two correlated factors plus a matrix-page method effect on HSNS2, HSNS5, HSNS7, HSNS10
-    population_c   the same model as population_a, sampled independently
-    population_d   two factors, stronger loadings, phi 0.72, HSNS9 cross-loads
-
-The agent describes each population with a model and places each case. a and c
-are one population under two identifiers, so a case from either could have come
-from both. b and d each differ from a by one detail, which the submitted model
-has to carry: every model is refitted on its population's reference sample and
-has to fit as well as the generating model does.
-"""
+"""Generate HSNS reference populations and case-classification samples."""
 
 from __future__ import annotations
 
@@ -89,6 +74,7 @@ identifiers, in any order.
 
 
 def continuous_block(rng, n, factors, phi, loadings, method_items=None, method_variance=0.0):
+    """Draw continuous items from correlated traits and an optional method factor."""
     eta = rng.multivariate_normal(np.zeros(len(factors)), phi, n)
     index = {name: i for i, name in enumerate(factors)}
     shared = rng.normal(size=n)
@@ -105,6 +91,7 @@ def continuous_block(rng, n, factors, phi, loadings, method_items=None, method_v
 
 
 def two_factor(rng, n, loading_scale=1.0, phi=0.35, cross_loading=None):
+    """Draw a two-trait population with optional loading differences."""
     loading = {
         item: [(factor, value * loading_scale)]
         for item, (factor, value) in {
@@ -118,6 +105,7 @@ def two_factor(rng, n, loading_scale=1.0, phi=0.35, cross_loading=None):
 
 
 def method_dependence(rng, n):
+    """Draw the population with a shared matrix-page method effect."""
     return continuous_block(
         rng,
         n,
@@ -189,6 +177,7 @@ def model_verdict(spec, frame, floor):
 
 
 def reference_models(references):
+    """Estimate the Gaussian mean and covariance of each reference sample."""
     return {
         name: (
             frame[ITEMS].values.astype(float).mean(axis=0),
@@ -199,6 +188,7 @@ def reference_models(references):
 
 
 def log_likelihood(case, models):
+    """Compute mean Gaussian log-likelihood under a reference population."""
     from scipy.stats import multivariate_normal
 
     values = case[ITEMS].values.astype(float)
@@ -211,6 +201,7 @@ def log_likelihood(case, models):
 
 
 def compatible(case, models):
+    """Find reference populations within the likelihood compatibility margin."""
     scores = log_likelihood(case, models)
     best = max(scores.values())
     return sorted(name for name, value in scores.items() if best - value <= COMPATIBILITY_MARGIN)
@@ -222,16 +213,19 @@ def same_model(source):
 
 
 def build_references(rng):
+    """Draw the labeled reference samples."""
     return {name: recipe(rng, N_REFERENCE) for name, recipe in POPULATIONS.items()}
 
 
 def build_cases(rng):
+    """Draw case samples from the configured populations."""
     return {
         f"case_{i}": POPULATIONS[source](rng, CASE_SIZE) for i, source in enumerate(CASE_SOURCES, 1)
     }
 
 
 def write_codebook(path):
+    """Write the public variable and response-format descriptions."""
     path.write_text(
         "# Codebook - anonymised HSNS population comparison\n\n"
         "Every file is tab-separated. Responses are continuous and unbounded, centered around zero; all responses are complete.\n\n"
@@ -251,6 +245,7 @@ def write_codebook(path):
 
 
 def build_task_json(shas):
+    """Build the task definition and private scoring configuration."""
     return [
         {
             "id": TASK_ID,
@@ -262,7 +257,6 @@ def build_task_json(shas):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": ["cases.csv", "codebook.md"]
                 + [f"{name}.csv" for name in POPULATIONS],
                 "reference_datasets": {name: f"{name}.csv" for name in POPULATIONS},
@@ -290,6 +284,7 @@ def build_task_json(shas):
 
 
 def candidate_submissions():
+    """Return the reference answer and competing analyses for scoring checks."""
     expected = json.loads(TASK.truth.read_text())["scored"]["classifications"]
     overlapping = next(k for k, value in expected.items() if len(value) > 1)
     correct = {"models": dict(MODEL_SYNTAX), "classifications": expected}
@@ -326,6 +321,7 @@ def candidate_submissions():
 
 
 def verify(references, cases, expected):
+    """Check that the data support the intended scientific conclusions."""
     models = reference_models(references)
     rng = np.random.default_rng(SEED + 7717)
     trials = 25
@@ -405,6 +401,7 @@ def verify(references, cases, expected):
 
 
 def naive(references, cases, expected):
+    """Check that the specified shortcut leads to an incorrect conclusion."""
     means = {
         name: frame[ITEMS].values.astype(float).mean(axis=0) for name, frame in references.items()
     }
@@ -432,6 +429,7 @@ def naive(references, cases, expected):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     rng = np.random.default_rng(SEED)
     references = build_references(rng)

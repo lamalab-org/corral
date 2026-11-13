@@ -1,20 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Level 2 Task 06 artifacts and scoring metadata.
-
-Generating model: one HSNS factor, with group 2 genuinely 0.25 higher on the
-trait, and five kinds of item planted on top.
-
-    HSNS2 HSNS3   export wrote a middle response over the real answer, group 2
-    HSNS5 HSNS9   real differential item functioning - the trait is the same,
-                  the response function is not
-    HSNS7         mis-keyed
-    HSNS6         no fault; the item simply measures poorly
-    the rest      sound
-
-The delivery audit flags the re-sent batch as HSNS2, HSNS3 and HSNS4 - HSNS4
-rode along undamaged, and neither genuinely biased item was in that batch, so
-the audit alone gives the wrong answer.
-"""
+"""Generate the task distinguishing export faults from genuine item differences."""
 
 from __future__ import annotations
 
@@ -191,6 +176,7 @@ def neutral_profile(X, item):
 
 
 def write_codebook(path):
+    """Write the public variable and response-format descriptions."""
     path.write_text(
         "# Codebook - group comparison\n\n"
         "Tab-separated, one row per respondent. Responses are continuous and unbounded, "
@@ -243,6 +229,7 @@ def write_audit(out_dir):
 
 
 def build_task_json(shas, effect):
+    """Build the task definition and private scoring configuration."""
     return [
         {
             "id": TASK_ID,
@@ -254,7 +241,6 @@ def build_task_json(shas, effect):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "codebook.md",
                     "data.csv",
@@ -445,6 +431,7 @@ def naive(data):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     rng = np.random.default_rng(SEED)
     data = build_data(rng)

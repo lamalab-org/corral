@@ -1,4 +1,4 @@
-"""Answer-leak and malformed-submission regressions from the prompt audit."""
+"""Validate public prompts and reject malformed or incomplete submissions."""
 
 import importlib
 import json

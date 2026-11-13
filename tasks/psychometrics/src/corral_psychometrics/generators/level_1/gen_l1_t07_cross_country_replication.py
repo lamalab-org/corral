@@ -1,14 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Task 07 artifacts and scoring metadata.
-
-Generating model, United States: HSNS as two correlated factors (phi 0.35) and
-the Dirty Dozen as a Machiavellianism-reference bifactor-(S-1) model.
-
-Great Britain reproduces the US reference structure. Canada and Australia use
-narcissism as the reference facet. India and Brazil have correlated first-order
-facets; Germany changes reference facet and reassigns three items. HSNS changes
-in several countries independently of the Dirty Dozen.
-"""
+"""Generate the task assessing measurement replication across countries."""
 
 from __future__ import annotations
 
@@ -166,9 +157,6 @@ Use `null` when no canonical reference facet is defensible.
 """
 
 
-# --------------------------------------------------------------------------
-# Simulation
-# --------------------------------------------------------------------------
 def simulate_hsns(n, rng, scale, phi):
     """Two correlated factors, optionally weakened or collapsed."""
     eta = rng.multivariate_normal([0, 0], [[1, phi], [phi, 1]], size=n)
@@ -252,14 +240,13 @@ def country_sample(df, country, items=None):
     return X[X.notna().all(axis=1)].astype(float)
 
 
-# --------------------------------------------------------------------------
-# Models
-# --------------------------------------------------------------------------
 def hsns_syntax():
+    """Return the HSNS measurement model."""
     return f"F1 =~ {'+'.join(HSNS_F1)}\nF2 =~ {'+'.join(HSNS_F2)}"
 
 
 def dd_bifactor(reference="M"):
+    """Return the Dirty Dozen S−1 measurement model."""
     by = {k: [i for i in DD if SPECIFIC_OF[i] == k] for k in "MPN"}
     lines = ["G =~ " + "+".join(DD)]
     specifics = [k for k in "MPN" if k != reference]
@@ -270,6 +257,7 @@ def dd_bifactor(reference="M"):
 
 
 def dd_three_factor():
+    """Return the correlated three-facet comparison model."""
     by = {k: [i for i in DD if SPECIFIC_OF[i] == k] for k in "MPN"}
     return "\n".join(f"F{k} =~ {'+'.join(by[k])}" for k in "MPN")
 
@@ -294,6 +282,7 @@ def population_correlation_matrix():
 
 
 def _bic(spec, X, items):
+    """Fit a model and return its BIC comparison statistic."""
     import semopy
 
     model = semopy.Model(spec)
@@ -303,6 +292,7 @@ def _bic(spec, X, items):
 
 
 def _hsns_diagnostics(X, us_loadings):
+    """Compare HSNS parameters with the US calibration."""
     import semopy
 
     model = semopy.Model(hsns_syntax())
@@ -322,9 +312,6 @@ def _hsns_diagnostics(X, us_loadings):
     return deviation, phi, float(stats["CFI"].iloc[0])
 
 
-# --------------------------------------------------------------------------
-# Artifacts
-# --------------------------------------------------------------------------
 def build_truth(floor, pop, data_sha, rows):
     """Assemble the hidden ground truth, scoring reference and provenance."""
     return {
@@ -415,7 +402,6 @@ def build_task_json(data_sha):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "codebook.md",
                     "data.csv",
@@ -576,6 +562,7 @@ def naive(df, pop):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     rng = np.random.default_rng(SEED)
     print("Simulating ...")

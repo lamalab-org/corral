@@ -1,16 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Task 09 artifacts and scoring metadata.
-
-Generating model, United States: five correlated factors, two from the HSNS
-(E, V) and three from the Dirty Dozen (M, P, N).
-
-Within an instrument the dimensions are moderately related; across the two they
-are barely related at all (0.12 to 0.30), and that is the finding the task is
-after. It is hidden by respondents who were not reading: 8% answer every item
-identically and a further 4% click at random, which inflates every correlation
-that spans the two instruments. Outside the United States the instruments
-really are related (0.45), so pooling inflates the same correlations again.
-"""
+"""Generate the latent-correlation task with careless-response contamination."""
 
 from __future__ import annotations
 
@@ -116,9 +105,6 @@ and runnable so the fit can be reproduced.
 """
 
 
-# --------------------------------------------------------------------------
-# Simulation
-# --------------------------------------------------------------------------
 def phi_matrix(us):
     """Latent correlations among the five dimensions."""
     out = np.eye(len(FACTORS))
@@ -183,9 +169,6 @@ def analysis_sample(df, country="US", screen=None):
     return X[keep].astype(float)
 
 
-# --------------------------------------------------------------------------
-# Models
-# --------------------------------------------------------------------------
 def reference_syntax():
     """The joint model: five dimensions across the two instruments."""
     return "\n".join(f"{f} =~ {'+'.join(ITEMS_OF[f])}" for f in FACTORS)
@@ -217,9 +200,6 @@ def population_reference(rng):
     return targets, C.population_matrix(spoiled, ITEMS)
 
 
-# --------------------------------------------------------------------------
-# Artifacts
-# --------------------------------------------------------------------------
 def build_truth(targets, floor, pop, data_sha, rows):
     """Assemble the hidden ground truth, scoring reference and provenance."""
     return {
@@ -293,7 +273,6 @@ def build_task_json(data_sha):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "codebook.md",
                     "data.csv",
@@ -310,6 +289,7 @@ def build_task_json(data_sha):
 
 
 def _submission(values):
+    """Build a submission for the estimated cross-instrument correlations."""
     return {
         "model_syntax": reference_syntax(),
         "correlations": [[a, b, round(values[frozenset((a, b))], 3)] for a, b in CROSS_PAIRS],
@@ -333,9 +313,6 @@ def candidate_submissions(X):
     }
 
 
-# --------------------------------------------------------------------------
-# Checks
-# --------------------------------------------------------------------------
 def verify(df, targets):
     """Confirm the contamination is invisible to the model and fatal to the answer."""
     import semopy
@@ -441,6 +418,7 @@ def naive(df, targets):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     rng = np.random.default_rng(SEED)
     print("Simulating ...")

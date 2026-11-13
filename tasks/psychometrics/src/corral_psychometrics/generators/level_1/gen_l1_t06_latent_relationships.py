@@ -1,19 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Task 06 artifacts and scoring metadata.
-
-Generating model, United States: five correlated factors, two from the HSNS and
-three from the Dirty Dozen.
-
-    VULN   HSNS2 HSNS3 HSNS7 HSNS9
-    EGO    HSNS1 HSNS4 HSNS5 HSNS6 HSNS8 HSNS10
-    MACH   PSYCH   NARC          one per Dirty Dozen subscale
-
-EGO and NARC correlate 0.86, above the 0.80 the prompt gives as the point where
-two dimensions cannot be told apart; every other pair sits well below it. EGO is
-measured poorly on purpose, so relating the instruments through scale scores
-instead of latent variables shrinks exactly the correlation that decides the
-answer.
-"""
+"""Generate the task estimating latent relationships between instruments."""
 
 from __future__ import annotations
 
@@ -267,7 +253,6 @@ def build_task_json(data_sha):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "codebook.md",
                     "data.csv",
@@ -289,6 +274,7 @@ def candidate_submissions(X):
     scores = scale_score_correlations(X)
 
     def payload(source):
+        """Build correlations and discriminant-validity claims from one estimator."""
         corr = [[a, b, round(source[frozenset((a, b))], 3)] for a, b in CROSS_PAIRS]
         redundant = [
             [a, b] for a, b in CROSS_PAIRS if source[frozenset((a, b))] >= REDUNDANCY_THRESHOLD
@@ -373,6 +359,7 @@ def naive(df, targets, pop):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     rng = np.random.default_rng(SEED)
     print("Simulating ...")

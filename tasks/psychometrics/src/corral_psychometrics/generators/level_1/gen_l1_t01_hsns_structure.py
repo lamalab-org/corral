@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Task 01 artifacts and scoring metadata.
-
-Generating model, HSNS in the United States: two correlated factors.
-
-    egocentrism      HSNS1 HSNS4 HSNS5 HSNS6 HSNS8 HSNS10
-    oversensitivity  HSNS2 HSNS3 HSNS7 HSNS9
-    phi 0.35
-
-On top of that: HSNS9 also loads 0.15 on egocentrism, HSNS5 and HSNS10 agree
-0.10 beyond the factors, and two items carry small gender DIF. Outside the
-United States the same two factors are measured worse and correlate 0.68, so
-pooling the countries blurs the structure the task asks for.
-"""
+"""Generate the HSNS structure task and validate competing factor models."""
 
 from __future__ import annotations
 
@@ -140,7 +128,7 @@ def build_dataset(rng):
 
 
 def reference_syntax():
-    """lavaan syntax for the generating model, used as the scoring floor."""
+    """Reference measurement model in semopy syntax."""
     f1 = "+".join(k for k, v in LOADINGS.items() if v[0] == F1)
     f2 = "+".join(k for k, v in LOADINGS.items() if v[0] == F2)
     return f"F1 =~ {f1}\nF2 =~ {f2}"
@@ -233,7 +221,6 @@ def build_task_json(data_sha):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "codebook.md",
                     "data.csv",
@@ -362,6 +349,7 @@ def naive(df, pop):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     rng = np.random.default_rng(SEED)
     print("Simulating ...")

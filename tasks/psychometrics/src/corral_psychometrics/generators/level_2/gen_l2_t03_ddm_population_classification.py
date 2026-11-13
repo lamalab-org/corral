@@ -1,21 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Level 2 Task 03 artifacts and scoring metadata.
-
-Four Dirty Dozen populations, each with its own structure, and three case
-samples drawn from some of them.
-
-    population_a   three correlated factors, loadings .68, r .25
-    population_b   two factors, psychopathy and narcissism merged, loadings .70, r .30
-    population_c   population_a plus a matrix-page method effect on DDP1, DDP2, DDN1, DDN2
-    population_d   the same model as population_a, sampled independently
-
-The agent describes each population with a model and places each case. a and d
-are one population under two identifiers, so a case from either could have come
-from both and the answer for it is a list, not one name. b and c each differ
-from a by one detail, which the submitted model has to carry: every model is
-refitted on its population's reference sample and has to fit as well as the
-generating model does.
-"""
+"""Generate Dirty Dozen reference populations and case-classification samples."""
 
 from __future__ import annotations
 
@@ -122,6 +106,7 @@ def two_factors(rng, n, loading, phi):
 
 
 def three_factors(rng, n):
+    """Draw the baseline population with three correlated facets."""
     return correlated_factors(rng, n, 0.68, 0.25)
 
 
@@ -224,6 +209,7 @@ def same_model(source):
 
 
 def build_references(rng):
+    """Draw the labeled reference samples."""
     return {name: recipe(rng, N_REFERENCE) for name, recipe in POPULATIONS.items()}
 
 
@@ -236,6 +222,7 @@ def build_cases(rng):
 
 
 def write_codebook(path):
+    """Write the public variable and response-format descriptions."""
     path.write_text(
         "# Codebook - anonymised population comparison\n\n"
         "Every file is tab-separated. Responses are continuous and unbounded, centered around zero; all "
@@ -258,6 +245,7 @@ def write_codebook(path):
 
 
 def build_task_json(expected, shas):
+    """Build the task definition and private scoring configuration."""
     return [
         {
             "id": TASK_ID,
@@ -269,7 +257,6 @@ def build_task_json(expected, shas):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": ["cases.csv", "codebook.md"]
                 + [f"{name}.csv" for name in POPULATIONS],
                 "reference_datasets": {name: f"{name}.csv" for name in POPULATIONS},
@@ -478,6 +465,7 @@ def naive(references, cases, expected):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     rng = np.random.default_rng(SEED)
     references = build_references(rng)

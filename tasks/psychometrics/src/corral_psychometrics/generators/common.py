@@ -77,9 +77,6 @@ ITEM_TEXT = {
 }
 
 
-# --------------------------------------------------------------------------
-# Simulation
-# --------------------------------------------------------------------------
 def continuous_response(score, intercept=0.0):
     """Return a continuous response, preserving zero as a valid observed value."""
     return np.asarray(score, dtype=float) + intercept
@@ -128,44 +125,6 @@ def correlated_block(
         else:
             out[item] = continuous_response(ystar, intercept)
     return pd.DataFrame(out)
-
-
-def bifactor_block(n, rng, general, specific, specific_of, items, intercepts):
-    """Answers driven by one broad trait plus a narrow one per subscale.
-
-        ystar = broad_lam * broad + narrow_lam * narrow + noise
-
-    ystar       the continuous response before adding the item intercept
-    broad       the one trait every item measures
-    narrow      the trait of the item's own subscale
-    broad_lam   the item's loading on `broad`, from `general`
-    narrow_lam  the item's loading on `narrow`, from `specific`
-    noise       everything else about the item, drawn with `left_over`
-
-    `broad` and `narrow` are uncorrelated, so they claim separate shares of the
-    item's one unit of variance and `noise` takes `left_over`, the rest.
-
-    general      {item: broad_lam}
-    specific     {item: narrow_lam}
-    specific_of  {item: which narrow trait it belongs to}
-    items        column order of the result
-    intercepts   {item: baseline intercept}
-    """
-    broad = rng.normal(size=n)
-    # dict.fromkeys keeps first-appearance order; iterating a set here would
-    # shuffle the draws between processes, because string hashing is randomised.
-    narrow = {name: rng.normal(size=n) for name in dict.fromkeys(specific_of.values())}
-    out = {}
-    for item in items:
-        broad_lam, narrow_lam = general[item], specific[item]
-        left_over = 1 - broad_lam**2 - narrow_lam**2
-        ystar = (
-            broad_lam * broad
-            + narrow_lam * narrow[specific_of[item]]
-            + rng.normal(0, np.sqrt(max(left_over, 1e-6)), n)
-        )
-        out[item] = continuous_response(ystar, intercepts[item])
-    return pd.DataFrame(out)[items]
 
 
 def bifactor_s1_block(
@@ -236,20 +195,8 @@ def analysis_sample(df, items, country="US"):
     return X[X.notna().all(axis=1)].astype(float)
 
 
-# --------------------------------------------------------------------------
-# Model fitting
-# --------------------------------------------------------------------------
 def evaluate_model(spec, X, items, pop):
-    """Fit a model and measure it.
-
-    Returns how well it fits (CFI, RMSEA, SRMR), how many parameters it spends
-    (BIC), and how close the correlations it implies come to `pop`.
-
-    spec   model in lavaan notation
-    X      one row per respondent
-    items  columns to fit on
-    pop    correlations a perfectly specified model would reproduce
-    """
+    """Fit a continuous SEM and compare its fit, parsimony, and population correlations."""
     import semopy
 
     model = fit(spec, X, items)
@@ -287,12 +234,7 @@ def _rounded(criteria, places=3):
 
 
 def fit(spec, X, items=None):
-    """Fit a model and return it.
-
-    spec   model in lavaan notation
-    X      one row per respondent
-    items  columns to fit on; all of X by default
-    """
+    """Fit a semopy model to the selected columns."""
     import semopy
 
     model = semopy.Model(spec)
@@ -306,12 +248,7 @@ def estimates(model):
 
 
 def loadings(model, factors=None):
-    """How strongly each item tracks its factor, signed.
-
-    An item that loads on two factors is reported under the stronger one.
-
-    factors  restrict to these factors; all of them by default
-    """
+    """Return the strongest signed standardized loading per item, optionally by factor."""
     rows = estimates(model)
     rows = rows[rows.op == "~"].copy()
     if factors is not None:
@@ -319,18 +256,6 @@ def loadings(model, factors=None):
     rows["value"] = pd.to_numeric(rows["Est. Std"], errors="coerce")
     best = rows.loc[rows["value"].abs().groupby(rows.lval).idxmax()]
     return {row.lval: float(row.value) for row in best.itertuples()}
-
-
-def factor_correlations(model, factors):
-    """Correlations between the latent factors, keyed by the pair of names."""
-    rows = estimates(model)
-    rows = rows[
-        (rows.op == "~~")
-        & (rows.lval != rows.rval)
-        & rows.lval.isin(factors)
-        & rows.rval.isin(factors)
-    ]
-    return {frozenset((r["lval"], r["rval"])): float(r["Est. Std"]) for _, r in rows.iterrows()}
 
 
 def alpha(X):
@@ -350,9 +275,6 @@ def population_matrix(frame, items):
     return np.corrcoef(frame[items].values.T.astype(float)).round(3)
 
 
-# --------------------------------------------------------------------------
-# Artifacts
-# --------------------------------------------------------------------------
 def write_codebook(path, df):
     """Write the dataset description the agent can see.
 
@@ -413,14 +335,7 @@ def provenance(generator, seed, rows, data_sha):
 
 
 def scoring_contract(task, items, tier_3_claims):
-    """The scoring rules for a task.
-
-    Stages 1 and 2 are identical for every task; only stage 3 differs.
-
-    task           the task these rules belong to
-    items          variables the model must cover
-    tier_3_claims  what to check the submission's answers against
-    """
+    """Build the shared validity, fit, parsimony, and task-specific claim configuration."""
     return {
         "data_dir": task.artifacts_relpath,
         "truth_path": task.truth_relpath,
@@ -478,11 +393,7 @@ def write_json(path, payload):
 
 
 def write_artifacts(task, df, truth_fn, task_json_fn):
-    """Write the dataset, codebook, answer key and task definition.
-
-    truth_fn and task_json_fn are each called with the dataset's checksum,
-    which is known only once the file exists.
-    """
+    """Write public data and codebook separately from private answers and definitions."""
     for directory in (task.artifacts, task.truth.parent, task.definition.parent):
         directory.mkdir(parents=True, exist_ok=True)
 
@@ -508,9 +419,6 @@ def data_sha256(out_dir):
     return file_sha256(out_dir / "data.csv")
 
 
-# --------------------------------------------------------------------------
-# Command line
-# --------------------------------------------------------------------------
 def mode():
     """Read the command line. Returns "verify", "naive" or "build"."""
     parser = argparse.ArgumentParser()
@@ -521,10 +429,7 @@ def mode():
 
 
 def report(checks):
-    """Print each check and return an exit code.
-
-    checks  list of (description, passed)
-    """
+    """Print validation checks and return zero only when every check passes."""
     print("\nChecks")
     ok = True
     for label, passed in checks:

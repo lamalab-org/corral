@@ -51,10 +51,7 @@ SCORING_FUNCTIONS: dict[str, Callable[..., dict]] = {
 def _verify_checksums(
     task_id: str, task_info: dict[str, Any], scoring_params: dict[str, Any], root: Path
 ) -> None:
-    """Check a task's files against the checksums recorded for them.
-
-    Verifies that every public input hashes to its recorded value, and that the definition and the answer key were built from the same dataset.
-    """
+    """Validate public-file hashes and agreement between task and answer-key datasets."""
     declared = task_info.get("initial_input", {}).get("data_sha256")
     data_dir = paths.resolve(scoring_params["data_dir"], root=root)
     checksums = dict(task_info.get("public_sha256", {}))
@@ -99,10 +96,7 @@ def _verify_checksums(
 def _copy_public_inputs(
     env: Environment, data_dir: Path, declared: tuple[str, ...]
 ) -> EnvironmentSetup:
-    """Copy a task's public inputs into its isolated workspace (usually the dataset and codebook).
-
-    Fails unless `data_dir` holds exactly the declared files.
-    """
+    """Copy only declared public files into the isolated workspace."""
     if not env.workspace_path:
         raise RuntimeError("psychometrics tasks require a workspace")
     workspace = Path(env.workspace_path).resolve()
@@ -137,6 +131,7 @@ class PsychometricsEnvironment(Environment):
     """Dispatches PythonREPL, keeping its session checkpoint in task state."""
 
     def execute_controller_tool(self, state: ExecutionState, prepared: Any) -> Any:
+        """Dispatch tools while preserving the task REPL checkpoint."""
         tool, arguments = prepared.tool, prepared.arguments
         if tool.name != "PythonREPL":
             return super().execute_controller_tool(state, prepared)
@@ -211,12 +206,7 @@ def _task_prompt(env: Environment, state: ExecutionState) -> str:
 
 
 def _scoring_function(name: str, params: dict[str, Any], root: Path) -> Callable[[Any], float]:
-    """Bind a scorer to its task's rules and the root its paths resolve against.
-
-    The scorers report a dict, but a task's `scoring_fn` is a float to corral's
-    evaluation layer, so only the binary score reaches it. `build.py` and the
-    scoring tests call the scorers directly and read the whole report.
-    """
+    """Bind a task scorer and expose its binary score to Corral."""
     try:
         fn = SCORING_FUNCTIONS[name]
     except KeyError as exc:
@@ -225,6 +215,7 @@ def _scoring_function(name: str, params: dict[str, Any], root: Path) -> Callable
 
     @functools.wraps(fn)
     def score(answer: Any) -> float:
+        """Return the task binary score for a submitted answer."""
         return float(bound(answer)["score_binary"])
 
     return score
@@ -276,12 +267,7 @@ def create_environments(
     data_root: str | Path | None = None,
     repl_timeout_minutes: float | None = DEFAULT_REPL_TIMEOUT_MINUTES,
 ) -> dict[str, Environment]:
-    """Create one isolated psychometrics environment per generated task.
-
-    `data_root`             which built dataset to read; defaults to the source checkout
-    `work_dir`              where the agents' writable workspaces go
-    `repl_timeout_minutes`  how long one PythonREPL call may run; None for no limit
-    """
+    """Create isolated task environments with public files and a persistent analysis REPL."""
     if repl_timeout_minutes is not None and repl_timeout_minutes <= 0:
         raise ValueError("repl_timeout_minutes must be positive, or None for no limit")
     started = perf_counter()

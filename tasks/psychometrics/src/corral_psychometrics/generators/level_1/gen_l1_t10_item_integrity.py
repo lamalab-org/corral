@@ -1,19 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Task 10 artifacts and scoring metadata.
-
-Generating model, HSNS in the United States: one factor over all ten items,
-with four planted faults.
-
-    HSNS4   mis-keyed - stored with the scale reversed
-    HSNS7   answers overwritten with zero, 45% of the time
-    HSNS2   truncated - responses were clipped at an upper limit
-    HSNS6   no recording fault at all; the item simply measures poorly
-
-The first three are damage to the data, the fourth is a property of the item,
-and telling them apart is the task. Outside the United States every item is
-measured worse and HSNS9 was mistranslated and runs backwards, so pooling makes
-that item, rather than the real one, look like the weak link.
-"""
+"""Generate the HSNS item-integrity task with recording faults and a weak item."""
 
 from __future__ import annotations
 
@@ -98,9 +84,6 @@ and runnable so the fit can be reproduced.
 """
 
 
-# --------------------------------------------------------------------------
-# Simulation
-# --------------------------------------------------------------------------
 def honest_responses(n, rng, scale):
     """Responses to all 22 items from one trait per instrument."""
     eta = rng.normal(size=n)
@@ -154,9 +137,6 @@ def analysis_sample(df, country="US", repair=True):
     return X
 
 
-# --------------------------------------------------------------------------
-# Models and diagnostics
-# --------------------------------------------------------------------------
 def reference_syntax():
     """One trait behind the ten items."""
     return "F =~ " + "+".join(ITEMS)
@@ -187,9 +167,6 @@ def population_correlation_matrix():
     return np.corrcoef(big.values.T).round(3)
 
 
-# --------------------------------------------------------------------------
-# Artifacts
-# --------------------------------------------------------------------------
 def build_truth(floor, pop, data_sha, rows):
     """Assemble the hidden ground truth, scoring reference and provenance."""
     return {
@@ -254,7 +231,6 @@ def build_task_json(data_sha):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "codebook.md",
                     "data.csv",
@@ -275,6 +251,7 @@ def candidate_submissions(X):
     del X
 
     def sub(quality):
+        """Build an item-quality submission using the reference model."""
         return {"model_syntax": reference_syntax(), "item_quality": quality}
 
     drop_the_weak = {i: ("weak_item" if TRUTH[i] != "sound" else "sound") for i in ITEMS}
@@ -288,9 +265,6 @@ def candidate_submissions(X):
     }
 
 
-# --------------------------------------------------------------------------
-# Checks
-# --------------------------------------------------------------------------
 def verify(df, pop):
     """Confirm each fault is findable and that the look-alikes need the data."""
     del pop
@@ -394,6 +368,7 @@ def naive(df, pop):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     rng = np.random.default_rng(SEED)
     print("Simulating ...")

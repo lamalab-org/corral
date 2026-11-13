@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Check the expected scoring results for every task.
-
-    uv run --with numpy --with pandas --with scipy --with semopy \
-      python tests/test_scoring.py
-"""
+"""Validate reference answers, competing analyses, and equivalent submission syntax."""
 
 from __future__ import annotations
 

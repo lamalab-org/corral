@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Level 2 Task 01 artifacts and scoring metadata.
-
-Generating model: two correlated HSNS factors (phi 0.35), with HSNS9 also
-loading 0.15 on the first. No extra method effects are added.
-
-The two groups are identical on both traits - the latent difference is exactly
-zero. Four items, two on each factor, are cleared more easily by group 2, so
-every point of the visible gap is item bias. A model that frees those four
-items recovers a difference of zero; the memo's model, which frees nothing,
-does not.
-"""
+"""Generate the group-comparability task with item-intercept bias."""
 
 from __future__ import annotations
 
@@ -219,6 +209,7 @@ def raw_effect_size(X):
 
 
 def write_task_memo(path):
+    """Write the preliminary group-comparison analysis."""
     path.write_text(
         "# Preliminary analysis memo\n\n"
         "Total HSNS scores were compared between the two groups. Group 2 scored "
@@ -229,6 +220,7 @@ def write_task_memo(path):
 
 
 def write_codebook(path, df):
+    """Write the public variable and response-format descriptions."""
     lines = [
         "# Codebook - group comparability study",
         "",
@@ -256,10 +248,12 @@ def write_codebook(path, df):
 
 
 def write_behavior(path, behavior):
+    """Write the behavioral indicators for the group comparison."""
     behavior.to_csv(path, sep="\t", index=False)
 
 
 def write_behavior_codebook(path):
+    """Describe the behavioral data columns."""
     path.write_text(
         "# Codebook - behavioural indicators\n\n"
         "`behavior.csv` is tab-separated and uses the same `participant_id` and "
@@ -275,6 +269,7 @@ def write_behavior_codebook(path):
 
 
 def build_truth(floor, pop, data_sha, rows):
+    """Build the private answers, model parameters, and provenance."""
     return {
         "task_id": TASK_ID,
         "scored": {
@@ -305,6 +300,7 @@ def build_truth(floor, pop, data_sha, rows):
 
 
 def build_task_json(data_sha):
+    """Build the task definition and private scoring configuration."""
     contract = C.scoring_contract(
         TASK,
         ALL_VARS,
@@ -353,7 +349,6 @@ def build_task_json(data_sha):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "behavior.csv",
                     "behavior_codebook.md",
@@ -549,6 +544,7 @@ def naive(df):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     df, behavior = simulate(np.random.default_rng(SEED))
     if action == "verify":

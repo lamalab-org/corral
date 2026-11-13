@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Task 05 artifacts and scoring metadata.
-
-Generating model, United States: one HSNS factor plus a second trait carried by
-the four Dark-Triad narcissism items.
-
-The items load identically in both genders, so structure, loadings, variances
-and the correlation between the two traits are all comparable. But six of the
-ten HSNS items are answered differently at the same trait level, in both
-directions, and nothing in the data says which four are clean - so no reference
-set can be defended and the latent means are not identified. The real latent
-difference, 0.30, is deliberately unrecoverable. The two traits correlate 0.50
-in men and 0.30 in women, and that contrast is recoverable.
-"""
+"""Generate the task assessing which gender comparisons are defensible."""
 
 from __future__ import annotations
 
@@ -312,7 +300,6 @@ def build_task_json(data_sha):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "codebook.md",
                     "data.csv",
@@ -364,6 +351,7 @@ def verify(df, targets, pop):
 
     # loadings identical across groups -> metric invariance holds
     def loadings(sub):
+        """Estimate standardized item loadings for a group."""
         m = semopy.Model(reference_syntax())
         m.fit(sub[MODEL_VARS])
         ins = m.inspect(std_est=True)
@@ -442,6 +430,7 @@ def naive(df, targets, pop):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     rng = np.random.default_rng(SEED)
     print("Simulating ...")

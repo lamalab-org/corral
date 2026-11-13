@@ -1,20 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Level 2 Task 08 artifacts and scoring metadata.
-
-Generating model: two correlated HSNS factors (phi 0.28), with four problems
-planted in both samples and one planted in the development sample alone.
-
-    Matrix-page factor   four items, variance 0.22       replicates
-    HSNS9 -> F1         cross-loading 0.38              replicates
-    HSNS3               differential item functioning   replicates
-    HSNS6               loading 0.30, too weak to keep  replicates
-    Second page factor   HSNS1/HSNS2, variance 0.36      development only
-
-The development-only pair is the largest single improvement to development fit
-and is absent from the replication sample, so chasing fit alone gets it wrong.
-The stable format crosses the personality dimensions; its four indicators allow
-the shared method pattern to be tested separately from personality cross-loadings.
-"""
+"""Generate the task testing whether measurement modifications replicate."""
 
 from __future__ import annotations
 
@@ -238,6 +223,7 @@ def modification_gain(frame, syntax, line, items=None):
 
 
 def write_codebook(path):
+    """Write the public variable and response-format descriptions."""
     path.write_text(
         "# Codebook - misfit replication\n\n"
         "The development and replication files are tab-separated and hold the same ten "
@@ -261,6 +247,7 @@ def write_codebook(path):
 
 
 def write_memo(path):
+    """Write the preliminary analysis for the agent to assess."""
     path.write_text(
         "# Preliminary analysis\n\n"
         "The two-factor model fits the development sample poorly. Several item-level "
@@ -275,6 +262,7 @@ def write_memo(path):
 
 
 def build_task_json(data_sha):
+    """Build the task definition and private scoring configuration."""
     return [
         {
             "id": TASK_ID,
@@ -286,7 +274,6 @@ def build_task_json(data_sha):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "codebook.md",
                     "data.csv",
@@ -320,6 +307,7 @@ def build_task_json(data_sha):
 
 
 def truth(data_sha, rows):
+    """Build the private answers, model parameters, and provenance."""
     return {
         "task_id": TASK_ID,
         "scored": {"findings": FINDINGS, "replication": REPLICATION},
@@ -509,6 +497,7 @@ def naive(development, replication):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     development = simulate(np.random.default_rng(SEED), N_DEVELOPMENT, True)
     replication = simulate(np.random.default_rng(SEED + 1), N_REPLICATION, False)
