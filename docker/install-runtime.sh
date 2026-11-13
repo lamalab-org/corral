@@ -4,7 +4,18 @@ set -eu
 
 CORRAL_EXTRAS=${CORRAL_EXTRAS:-}
 # Tracing is passive and stays off without Langfuse keys, so every image has it.
-python -m pip install --no-cache-dir --editable ".[langfuse${CORRAL_EXTRAS:+,$CORRAL_EXTRAS}]" "$@"
+case ",$CORRAL_EXTRAS," in
+    *,denario,*)
+        # uv reads the tested OpenAI override from pyproject.toml and installs
+        # Denario into the same interpreter as Corral.
+        python -m pip install --no-cache-dir 'uv==0.12.13'
+        uv pip install --python "$(command -v python)" --no-cache \
+            --editable ".[langfuse${CORRAL_EXTRAS:+,$CORRAL_EXTRAS}]" "$@"
+        ;;
+    *)
+        python -m pip install --no-cache-dir --editable ".[langfuse${CORRAL_EXTRAS:+,$CORRAL_EXTRAS}]" "$@"
+        ;;
+esac
 
 case ",$CORRAL_EXTRAS," in
     *,claude,*)

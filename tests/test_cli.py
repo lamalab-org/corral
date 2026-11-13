@@ -52,6 +52,7 @@ EXPECTED_AGENTS = (
     "ai-scientist",
     "claude-code",
     "codex",
+    "denario",
     "epistemic",
     "llm-planner",
     "openhands",
@@ -107,6 +108,7 @@ def test_every_public_concrete_agent_is_registered():
         "AIScientistAgent",
         "ClaudeCodeAgent",
         "CodexAgent",
+        "DenarioAgent",
         "EpistemicAgent",
         "LLMPlanner",
         "OpenHandsAgent",
@@ -139,6 +141,7 @@ def test_create_agent_accepts_class_and_separator_aliases():
     assert cli.normalise_agent_name("ToolCallingAgent") == "tool-calling"
     assert cli.normalise_agent_name("tool_calling") == "tool-calling"
     assert cli.normalise_agent_name("ClaudeCodeAgent") == "claude-code"
+    assert cli.normalise_agent_name("DenarioAgent") == "denario"
     assert cli.normalise_agent_name("AI_Scientist") == "ai-scientist"
 
 
@@ -200,7 +203,7 @@ def test_ai_scientist_supports_sakana_config_profile():
     assert isinstance(agent.config, SakanaAIScientistConfig)
 
 
-@pytest.mark.parametrize("name", ["claude-code", "codex", "openhands"])
+@pytest.mark.parametrize("name", ["claude-code", "codex", "denario", "openhands"])
 def test_optional_agents_are_loaded_only_when_selected(monkeypatch, name):
     definition = cli.AGENT_DEFINITIONS[name]
     requested = []
@@ -302,6 +305,7 @@ def test_legacy_benchmark_namespace_also_defaults_to_docker():
         ("tool-calling", {}, ""),
         ("claude-code", {}, "claude"),
         ("codex", {}, "codex"),
+        ("denario", {}, "denario"),
         ("openhands", {}, "openhands"),
         ("reflexion", {"actor": "ClaudeCodeAgent"}, "claude"),
     ],
