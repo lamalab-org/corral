@@ -56,6 +56,9 @@ WORKSPACE = Path(__file__).resolve().parent.parent
 REPORTS_DIR = WORKSPACE / "reports"
 # Every folder under reports/ with a runs.csv is an environment.
 ENVIRONMENTS = tuple(sorted(p.parent.name for p in REPORTS_DIR.glob("*/runs.csv")))
+# corral-mini runs of version vN live in reports/<env>/mini-vN/ next to the
+# full-benchmark runs in reports/<env>/; set by use_repo() for a mini repo.
+MINI: dict[str, str | None] = {"dir": None}
 
 load_dotenv(dotenv_path=WORKSPACE / ".env")
 HF_TOKEN = os.getenv("HF_TOKEN")
@@ -115,7 +118,7 @@ def _json(value: Any) -> str | None:
 
 def _trial_rows(env: str, level: int) -> Iterator[dict[str, Any]]:
     """Yield one row per final trial of *env* at *level*, report by report."""
-    env_dir = REPORTS_DIR / env
+    env_dir = report_dir(env)
     index = {
         row["execution_id"]: row
         for row in _read_csv(env_dir / "trials.csv")
@@ -172,7 +175,7 @@ def _trial_rows(env: str, level: int) -> Iterator[dict[str, Any]]:
 
 def _levels(env: str) -> list[int]:
     """Levels with reports in *env*, e.g. [1, 2] or [2, 3]."""
-    return sorted({int(r["level"]) for r in _read_csv(REPORTS_DIR / env / "runs.csv")})
+    return sorted({int(r["level"]) for r in _read_csv(report_dir(env) / "runs.csv")})
 
 
 def _trial_dataset(env: str, level: int, cache_dir: str) -> Dataset:
@@ -186,6 +189,20 @@ def _trial_dataset(env: str, level: int, cache_dir: str) -> Dataset:
 
 MINI_RUN_PREFIX = "-mini-"
 MINI_VERSION = re.compile(r"mini-(v\d+)")
+
+
+def report_dir(env: str) -> Path:
+    """The folder with env's runs: reports/<env>/mini-vN/ for a mini repo, if present."""
+    mini_dir = MINI["dir"]
+    if mini_dir and (REPORTS_DIR / env / mini_dir / "runs.csv").exists():
+        return REPORTS_DIR / env / mini_dir
+    return REPORTS_DIR / env
+
+
+def use_repo(repo: str) -> None:
+    """Read corral-mini runs from reports/<env>/mini-vN/ when pushing to a vN repo."""
+    version = mini_version(repo) if "mini" in repo.rsplit("/", 1)[-1] else None
+    MINI["dir"] = f"mini-{version}" if version else None
 
 
 def mini_version(name: str) -> str | None:
@@ -204,7 +221,7 @@ def check_target(repo: str, envs: tuple[str, ...]) -> None:
     mini_repo = "mini" in repo.rsplit("/", 1)[-1]
     version = mini_version(repo)
     for env in envs:
-        for row in _read_csv(REPORTS_DIR / env / "runs.csv"):
+        for row in _read_csv(report_dir(env) / "runs.csv"):
             if (MINI_RUN_PREFIX in row["run_id"]) != mini_repo:
                 raise SystemExit(
                     f"ERROR: {env} run {row['run_id']!r} does not belong in {repo}; "
@@ -239,7 +256,7 @@ def mini_environments(version: str | None = None) -> tuple[str, ...]:
         if any(
             MINI_RUN_PREFIX in r["run_id"]
             and (version is None or mini_version(r["run_id"]) == version)
-            for r in _read_csv(REPORTS_DIR / env / "runs.csv")
+            for r in _read_csv(report_dir(env) / "runs.csv")
         )
     )
 
@@ -265,7 +282,7 @@ def check_shared_tables(repo: str, envs: tuple[str, ...]) -> None:
 def _runs_dataset(envs: tuple[str, ...] = ENVIRONMENTS) -> Dataset:
     rows = []
     for env in envs:
-        for row in _read_csv(REPORTS_DIR / env / "runs.csv"):
+        for row in _read_csv(report_dir(env) / "runs.csv"):
             for key in (
                 "level",
                 "tasks",
@@ -307,6 +324,7 @@ def main(
             effect if the repo already exists.
         repo: Target dataset repo.
     """
+    use_repo(repo)
     envs = env_list(env)
     if only_env and envs is None:
         raise SystemExit("ERROR: --only_env needs --env")

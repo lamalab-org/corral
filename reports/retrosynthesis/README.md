@@ -1,98 +1,94 @@
-# Retrosynthesis reports: corral-mini v2
+# Retrosynthesis reports
 
-36 runs (18 agent/model pairs × levels 2 and 3), 3 tasks per level × k = 5,
-540 trials. Layout, names and index columns follow [`../README.md`](../README.md).
-The October full-benchmark runs are archived in
-[`archive/october-full/`](archive/october-full/).
+14 runs, 700 trials. Layout and index columns follow
+[`../README.md`](../README.md). Results include the supplied reports and
+subsequent rescoring and reruns, including the 2026-11-12 reruns of the tasks
+changed by the reaction-database and buyables fixes (see Corrections below).
+Final evaluations are retained in the run reports.
 
-[Run index](runs.csv) · [Trial index with Langfuse links](trials.csv)
+[Run index](runs.csv) · [Trial index with Langfuse links](trials.csv) ·
+[Import provenance](../IMPORT_NOTES.md)
 
-## Tasks
+| Agent | Model | Level | Passes | Errors | Unscored | Report |
+|---|---|---:|---:|---:|---:|---|
+| ai-scientist | claude-opus-5-5 | 2 | 27/50 | 12 | 0 | [report](level_2/ai-scientist__claude-opus-5-5/report.json.xz) |
+| ai-scientist | claude-opus-5-5 | 3 | 26/50 | 21 | 0 | [report](level_3/ai-scientist__claude-opus-5-5/report.json.xz) |
+| claude-code | claude-opus-5-5 | 2 | 36/50 | 2 | 0 | [report](level_2/claude-code__claude-opus-5-5/report.json.gz) |
+| claude-code | claude-opus-5-5 | 3 | 27/50 | 9 | 0 | [report](level_3/claude-code__claude-opus-5-5/report.json.gz) |
+| codex | gpt-5.6-sol | 2 | 38/50 | 0 | 0 | [report](level_2/codex__gpt-5.6-sol/report.json.gz) |
+| codex | gpt-5.6-sol | 3 | 28/50 | 13 | 0 | [report](level_3/codex__gpt-5.6-sol/report.json.gz) |
+| openhands | kimi-k3 | 2 | 26/50 | 11 | 0 | [report](level_2/openhands__kimi-k3/report.json.gz) |
+| openhands | kimi-k3 | 3 | 17/50 | 22 | 0 | [report](level_3/openhands__kimi-k3/report.json.gz) |
+| react | claude-opus-5-5 | 2 | 27/50 | 10 | 0 | [report](level_2/react__claude-opus-5-5/report.json.gz) |
+| react | claude-opus-5-5 | 3 | 25/50 | 12 | 0 | [report](level_3/react__claude-opus-5-5/report.json.gz) |
+| react | gpt-5.6-sol | 2 | 38/50 | 0 | 0 | [report](level_2/react__gpt-5.6-sol/report.json.gz) |
+| react | gpt-5.6-sol | 3 | 28/50 | 17 | 0 | [report](level_3/react__gpt-5.6-sol/report.json.gz) |
+| react | kimi-k3 | 2 | 31/50 | 10 | 0 | [report](level_2/react__kimi-k3/report.json.gz) |
+| react | kimi-k3 | 3 | 23/50 | 14 | 0 | [report](level_3/react__kimi-k3/report.json.gz) |
 
-| Level | Tasks |
-|---|---|
-| 2 | `make_10_lvl2`, `make_1_lvl2`, `make_6_lvl2` |
-| 3 | `make_1_lvl3`, `make_5_lvl3`, `make_6_lvl3` |
+Errors count nonempty saved execution/evaluation error fields, including
+iteration-limit or answer-format outcomes. CSV trial positions are zero-based.
 
-No task is shared with corral-mini v1, so every trial was run for v2.
+## Corrections (2026-11-12): tasks changed by the database and buyables fixes
 
-## Results (passes out of 15 per level)
+Two fixes changed what some tasks ask for or how they can be solved:
 
-| Batch | Agent | Model | L2 passes | L2 pass@5 | L2 pass^5 | L3 passes | L3 pass@5 | L3 pass^5 |
-|---|---|---|---:|---:|---:|---:|---:|---:|
-| 1 | openhands | kimi-k3.1-pro | 1 | 0.22 | 0.00 | 0 | 0.00 | 0.00 |
-| 1 | react | kimi-k3.1-pro | 0 | 0.00 | 0.00 | 0 | 0.00 | 0.00 |
-| 1 | claude-code | claude-opus-5-5 | 0 | 0.00 | 0.00 | 0 | 0.00 | 0.00 |
-| 1 | react | claude-opus-5-5 | 0 | 0.00 | 0.00 | 0 | 0.00 | 0.00 |
-| 1 | codex | gpt-6.1-sol | 5 | 0.33 | 0.33 | 0 | 0.00 | 0.00 |
-| 1 | react | gpt-6.1-sol | 0 | 0.00 | 0.00 | 0 | 0.00 | 0.00 |
-| 2 | openhands | kimi-k2.5 | 0 | 0.00 | 0.00 | 0 | 0.00 | 0.00 |
-| 2 | react | kimi-k2.5 | 0 | 0.00 | 0.00 | 0 | 0.00 | 0.00 |
-| 2 | claude-code | claude-opus-4-7 | 1 | 0.22 | 0.00 | 0 | 0.00 | 0.00 |
-| 2 | react | claude-opus-4-7 | 0 | 0.00 | 0.00 | 0 | 0.00 | 0.00 |
-| 2 | codex | gpt-5.6-sol | 2 | 0.31 | 0.00 | 0 | 0.00 | 0.00 |
-| 2 | react | gpt-5.6-sol | 4 | 0.33 | 0.11 | 0 | 0.00 | 0.00 |
-| 3 | openhands | kimi-k2-0905 | 0 | 0.00 | 0.00 | 0 | 0.00 | 0.00 |
-| 3 | react | kimi-k2-0905 | 0 | 0.00 | 0.00 | 0 | 0.00 | 0.00 |
-| 3 | claude-code | claude-opus-4-5-20251101 | 0 | 0.00 | 0.00 | 0 | 0.00 | 0.00 |
-| 3 | react | claude-opus-4-5-20251101 | 0 | 0.00 | 0.00 | 0 | 0.00 | 0.00 |
-| 3 | codex | gpt-5-2025-08-07 | 0 | 0.00 | 0.00 | 0 | 0.00 | 0.00 |
-| 3 | react | gpt-5-2025-08-07 | 0 | 0.00 | 0.00 | 0 | 0.00 | 0.00 |
+- **Reaction database v2** (`ghcr.io/lamalab-org/corral-retro-db:v2`, now the
+  default, #487). Template 1914384, the only template of `make_1`, had the wrong
+  product in v1, so `make_1` could not be solved at either level.
+- **Buyables and budgets** (#485, #486). Six reference-route leaves gained
+  prices, and the level-3 budgets of `make_5` to `make_8` changed from 9999 to
+  110% of the reference cost (stated in the prompt). The `is_buyable` tool now
+  answers differently for those six compounds.
 
-13 of 540 trials pass, all at level 2 (`make_6_lvl2` 9, `make_10_lvl2` 4). The
-same six tasks were also hard in the October runs (16 of 210 passed); the v2
-subset picks unsaturated tasks.
+`make_1`, `make_5`, `make_6`, `make_7` and `make_8` were therefore rerun at
+both levels with the October settings (same agents, models, reasoning effort
+`medium`, 50 steps, k = 5) on current Corral, one `corral bench --trials 1` run
+per trial (AI Scientist with 100 steps, as in October, after the Docker
+checkpoint fix #491). One level-3 `make_9` trial (claude-code k2) that had asked
+`is_buyable` about a newly priced compound was rerun too. Tasks `make_2`,
+`make_3`, `make_4`, `make_10` and level-2 `make_9` are unaffected and keep their
+October trials.
 
-204 trials end with an error, almost all an agent using its 50-step budget
-without submitting. One ReAct claude-opus-4-5 trial overflowed the 200k
-context, OpenAI refused one ReAct gpt-5.6-sol prompt as a possible policy
-violation, and the provider rejected one ReAct kimi-k2-0905 request as
-invalid; all three are kept as failures.
+| Agent | Model | Rerun trials | Status |
+|---|---|---:|---|
+| claude-code | claude-opus-5-5 | 51 | done |
+| codex | gpt-5.6-sol | 50 | done |
+| react | claude-opus-5-5 | 50 | done |
+| react | gpt-5.6-sol | 50 | done |
+| openhands | kimi-k3 | 50 | done |
+| react | kimi-k3 | 50 | done |
+| ai-scientist | claude-opus-5-5 | 50 | done (100 steps, as in October) |
 
-The 336 submitted routes were rechecked step by step with the scorer's own
-checks (same 13 passes). Of the 323 that fail, 129 contain an invalid reaction
-(most often a reaction SMARTS instead of a catalog `template_id`, or a
-template that does not apply), 80 miss the starting material the level-2 task
-requires, 62 use starting materials that are not in the buyables database (the
-agents' `is_buyable` tool reports the same), 28 are not valid JSON, 19 are
-malformed route trees and 5 exceed the step limit.
+Each updated run report records the replaced trials and the rerun source runs
+under `metadata.reruns_20261112`; rerun trials keep their own execution IDs and
+Langfuse session (`retrosynthesis-full-rerun-20261112-l<L>-<agent>-<model>`,
+recorded per trial in `run-metadata.json`). All 700 traces were found
+(`build_index.py --verify`). The rerun trials ran on current Corral, which
+differs from the October code in ways that can change agent behaviour (for
+example #456 prompts, #465 Codex step budget, #475 `verify_route` in the
+controller); kimi-k3 again ran on the Together provider, now with
+`max_tokens` 32768; the unchanged tasks keep their October trials.
 
-## Settings
-
-k = 5, 50 iterations, reasoning effort `medium` (provider default for
-kimi-k2-0905), surrender off, Docker sandbox with 2 CPUs, 6 GB and a 4096 PID
-limit per trial, `OPENBLAS_NUM_THREADS`/`OMP_NUM_THREADS`/`MKL_NUM_THREADS` =
-2, Langfuse on. Kimi via OpenRouter (`max_tokens` 32768, no fallbacks):
-kimi-k3.1-pro on Modal, kimi-k2.5 and kimi-k2-0905 on Novita. Codex enforced
-the 50-call budget (#465).
-
-Corral at `ad800a2a5` (`origin/main` `2ef35fb3c`, including #475, which runs
-`verify_route` in the controller so it reaches the reaction database). The
-tools query the `corral-retro-db` Postgres container through the Docker
-gateway (`RETRO_DB_HOST=172.17.0.1`). Images were built from
-`docker/benchmark.Dockerfile`; the OpenHands image pins pip packages to the
-versions of the earlier working image (unpinned, `agent-client-protocol` 1.0
-breaks the OpenHands SDK).
-
-Each trial ran as its own `corral bench --trials 1` run; the reports are
-merged with `scripts/merge_trial_reports.py` (metrics recomputed, messages and
-tool calls rebuilt from each trial's final state, source runs in
-`provenance.json`).
-
-**Langfuse.** Each run's trials share one session named after the merged run
-ID (`retrosynthesis-mini-v2-l<L>-<agent>-<model>`, in `run-metadata.json`);
-all 540 traces were found in their sessions (`build_index.py --verify`).
+Aggregate passes: **315/700 before, 397/700 after**; all 351 rerun trials are in.
 
 ## Caveats
 
-- **91 trials were rerun**: 90 after the provider accounts ran out of credit
-  (78 Kimi, 12 OpenAI) and 1 after an unnamed OpenRouter "Provider returned
-  error"; the reports hold the reruns only. Rerun traces share
-  the trace of their failed attempt (see "Known issue: some traces mix
-  attempts" in `../README.md`).
-- **Tools.** No tool call returned a database connection error; `verify_route`
-  returned route checks in the trials that called it.
-- **Machine load.** Runs shared the machine with the spectra, resistor and
-  wetlab pools; wall-clock durations are not comparable with other runs.
-- **Comparison with the archived runs.** The archived runs cover all 10
-  tasks per level; compare per task only.
+On 2026-10-23, the corrected catalog reaction validator was applied to the
+**33 trials flagged in the retrosynthesis audit**. The 24 confirmed passes and
+4 template-granularity passes changed from 1 to 0; the other 5 remained 0
+(including 4 without a saved submission). Aggregate passes changed from
+**343/700 (49%) to 315/700 (45%)**.
+
+Only these 33 trials were selected. The other 667 trials retain their original
+evaluations, so these are partially rescored results, not a full evaluation of
+all 700 trials under the corrected scorer. The four template-granularity cases
+remain classified as suspicious in the original audit: their submitted catalog
+steps fail the strict check, which does not establish intentional cheating.
+
+Rejection reasons are recorded in each selected trial's evaluation metadata.
+
+Messages, submitted routes, execution IDs, timings, and token usage were
+preserved. Langfuse links still point to the original executions. The local
+reports and indexes contain the corrected scores; hosted copies have not been
+republished.
