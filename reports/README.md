@@ -9,7 +9,7 @@ same layout, names and index files, so runs can be compared across them.
 | Inference optimization (corral-mini v2 in [`inference_opt/mini-v2/`](inference_opt/mini-v2/), 12 Kimi runs pending) | [`inference_opt/`](inference_opt/) | `ml_env_baseline` | 14 | 700 |
 | Psychometrics (corral-mini v1; October full runs in `archive/`) | [`psychometrics/`](psychometrics/) | `mini-1-psychom` | 28 | 420 |
 | Resistor network (v4, Docker sandbox; corral-mini v2 in [`resistor_network/mini-v2/`](resistor_network/mini-v2/), 8 runs pending) | [`resistor_network/`](resistor_network/) | `resistor-network-native-docker-reports` | 14 | 700 |
-| Corral MD (corral-mini v2 in [`corral_md/mini-v2/`](corral_md/mini-v2/), 30 runs pending) | [`corral_md/`](corral_md/) | — | 14 | 700 |
+| Corral MD (corral-mini v2 in [`corral_md/mini-v2/`](corral_md/mini-v2/), 28 runs pending) | [`corral_md/`](corral_md/) | — | 14 | 700 |
 | Retrosynthesis | [`retrosynthesis/`](retrosynthesis/) | — | 14 | 700 |
 | Spectra elucidation (corral-mini v2 in [`spectra_elucidation/mini-v2/`](spectra_elucidation/mini-v2/), 6 runs pending) | [`spectra_elucidation/`](spectra_elucidation/) | — | 14 | 1,400 |
 | Stargazer | [`stargazer/`](stargazer/) | — | 14 | 700 |
