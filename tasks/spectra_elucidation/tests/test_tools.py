@@ -469,6 +469,10 @@ class TestReturnPossibleFragments:
 class TestSimulateSpectra:
     """Tests for the simulate_spectra tool."""
 
+    def test_simulate_spectra_runs_in_controller(self):
+        # Restricted tool workers drop SPECTRA_IR_URL; the controller keeps it.
+        assert simulate_spectra.trusted
+
     @patch(
         "spectra_elucidation.tools.SpectraAPI.get_all_predictions",
         new_callable=AsyncMock,
