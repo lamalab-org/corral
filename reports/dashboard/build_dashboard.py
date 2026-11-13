@@ -1,7 +1,7 @@
 """Build a standalone HTML dashboard of the benchmark reports.
 
-Reads every ``<reports>/<environment>/trials.csv`` (AFM is left out by
-default; ``<reports>`` is this repository's ``reports/`` unless ``--reports``
+Reads every ``<reports>/<environment>/trials.csv`` (``<reports>`` is this
+repository's ``reports/`` unless ``--reports``
 names another folder, such as one filled by ``fetch_trials.py``) and writes one self-contained page with the trial data embedded: leaderboard,
 pass@k and pass^k curves, consistency, cost, per-level heatmap, native agent
 vs ReAct, and passing vs failing trials. The page loads d3 from a CDN; nothing
@@ -172,8 +172,8 @@ def main() -> None:
     parser.add_argument(
         "--exclude",
         nargs="*",
-        default=["afm"],
-        help="environments to leave out (default: afm)",
+        default=[],
+        help="environments to leave out (default: include all)",
     )
     args = parser.parse_args()
     html = build(args.reports, set(args.exclude))
