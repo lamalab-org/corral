@@ -100,6 +100,10 @@ def load_tasks_from_json(json_path: str | Path) -> dict[str, TaskDefinition]:
                     dep: InputRef(dep) for dep in task_info.get("input_from_tasks", [])
                 },
                 initial_input=initial_input,
+                # Answers are JSON strings, never file paths. Path resolution
+                # would treat prose answers as file names and can fail before
+                # scoring (e.g. "File name too long") instead of scoring 0.
+                resolve_answer=False,
             )
 
     return tasks
