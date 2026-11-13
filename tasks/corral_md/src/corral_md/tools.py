@@ -151,6 +151,15 @@ def build_md_terminal_tool(workspace: str | Path, *, local: bool = False):
                 "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
             }
             for key in (
+                "OPENBLAS_NUM_THREADS",
+                "OPENBLAS_DEFAULT_NUM_THREADS",
+                "OMP_NUM_THREADS",
+                "OMP_THREAD_LIMIT",
+                "MKL_NUM_THREADS",
+                "BLIS_NUM_THREADS",
+                "VECLIB_MAXIMUM_THREADS",
+                "NUMEXPR_NUM_THREADS",
+                "NUMEXPR_MAX_THREADS",
                 "CUDA_VISIBLE_DEVICES",
                 "CUDA_HOME",
                 "CUDA_PATH",

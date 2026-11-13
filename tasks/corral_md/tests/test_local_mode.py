@@ -275,14 +275,21 @@ def test_local_gpu_dispatch_uses_worker_not_modal(tmp_path, monkeypatch):
     assert captured == {"gpu": True}
 
 
-def test_local_terminal_preserves_cuda_environment(tmp_path, monkeypatch):
+def test_local_terminal_preserves_resource_controls_without_secrets(tmp_path, monkeypatch):
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "2")
+    for name in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
+        monkeypatch.setenv(name, "2")
+    monkeypatch.setenv("OPENAI_API_KEY", "private-test-value")
     terminal = tools.build_md_terminal_tool(tmp_path, local=True)
     result = json.loads(
-        terminal.execute(command="printf '%s' \"$CUDA_VISIBLE_DEVICES\"")
+        terminal.execute(
+            command="printf '%s\\n' \"$CUDA_VISIBLE_DEVICES\" "
+            '"$OPENBLAS_NUM_THREADS" "$OMP_NUM_THREADS" '
+            '"$MKL_NUM_THREADS" "$OPENAI_API_KEY"'
+        )
     )
     assert result["exit_code"] == 0
-    assert result["output"] == "2"
+    assert result["output"].splitlines() == ["2", "2", "2", "2", ""]
 
 
 def test_local_verifier_routes_mace_to_configured_host_gpu(tmp_path, monkeypatch):

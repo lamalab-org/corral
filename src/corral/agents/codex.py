@@ -74,6 +74,7 @@ _FILE_WRITING_TOOLS = frozenset({"write_file", "copy_file", "move_file", "mkdir"
 HarnessStatus = Literal[
     "success",
     "surrender",
+    "iteration_limit",
     "timeout",
     "sdk_failure",
 ]
@@ -316,7 +317,8 @@ class CodexAgent(BaseAgent):
             "openai_codex_version": _sdk_version(),
             "python_version": platform.python_version(),
             "reasoning_effort": self.reasoning_effort,
-            "max_sdk_turns": iteration_limit,
+            "max_model_calls": iteration_limit,
+            "model_call_budget_source": "cumulative_token_usage_updates",
             "streaming_enabled": True,
             "wall_clock_timeout_s": self.wall_clock_timeout_s,
             "tool_timeout_s": self.tool_timeout_s,
@@ -438,6 +440,10 @@ class CodexAgent(BaseAgent):
         final_phase_text: str | None = None
         phase_less_text: str | None = None
         tool_calls = 0
+        model_calls = 0
+        last_total_tokens = 0
+        iteration_limit = run.metadata["max_model_calls"]
+        budget_exhausted = False
         turn_status: str | None = None
 
         stream = turn.stream()
@@ -478,6 +484,23 @@ class CodexAgent(BaseAgent):
                     usage = getattr(payload, "token_usage", None)
                     if usage is not None:
                         self._record_usage(usage, run)
+                        total = usage_field(usage, "total", None)
+                        total_tokens = int(usage_field(total, "input_tokens", 0) or 0)
+                        total_tokens += int(usage_field(total, "output_tokens", 0) or 0)
+                        # Use increases in cumulative usage as a proxy for
+                        # completed model calls. The SDK has no native call cap
+                        # or event before the next model call; this can cut off
+                        # tools issued by the last allowed response.
+                        if total_tokens > last_total_tokens:
+                            model_calls += 1
+                            last_total_tokens = total_tokens
+                            run.metadata["model_calls"] = model_calls
+                            if (
+                                model_calls >= iteration_limit
+                                and final_phase_text is None
+                            ):
+                                budget_exhausted = True
+                                turn.interrupt()
                 elif method == "turn/completed":
                     turn_status = self._on_turn_completed(payload, run)
         finally:
@@ -495,6 +518,11 @@ class CodexAgent(BaseAgent):
                 f"Codex turn exceeded the wall-clock deadline of "
                 f"{self.wall_clock_timeout_s}s",
                 subtype="timeout",
+            )
+        if budget_exhausted:
+            raise _CodexError(
+                f"Codex exhausted its {iteration_limit} model-call budget",
+                subtype="iteration_limit",
             )
         self._require_completed_turn(turn_status)
 
@@ -807,7 +835,7 @@ class CodexAgent(BaseAgent):
         result = run.result
         usage = self._usage(
             run.usage,
-            llm_calls=int(run.metadata.get("sdk_turns", 0) or 0),
+            llm_calls=int(run.metadata.get("model_calls", 0) or 1),
         )
         if result is None:
             return AgentOutcome(
@@ -869,7 +897,11 @@ class CodexAgent(BaseAgent):
                 usage=usage,
                 metadata=metadata,
             )
-        status = "timeout" if result.status == "timeout" else "harness_failure"
+        status = (
+            result.status
+            if result.status in {"iteration_limit", "timeout"}
+            else "harness_failure"
+        )
         return AgentOutcome(
             status=status,
             error=result.error or "Codex harness failed",
@@ -928,6 +960,7 @@ class CodexAgent(BaseAgent):
             )
         except _CodexError as e:
             status_map: dict[str, HarnessStatus] = {
+                "iteration_limit": "iteration_limit",
                 "timeout": "timeout",
                 "sdk_failure": "sdk_failure",
             }

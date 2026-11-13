@@ -2,7 +2,7 @@
 # setup_retro_db.sh — Pull and run the corral retrosynthesis database
 set -euo pipefail
 
-IMAGE="ghcr.io/lamalab-org/corral-retro-db:v1"
+IMAGE="ghcr.io/lamalab-org/corral-retro-db:v2"
 CONTAINER_NAME="corral-retro-db"
 VOLUME_NAME="corral-retro-db"
 PORT="${RETRO_DB_PORT:-5432}"

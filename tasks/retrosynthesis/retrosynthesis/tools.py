@@ -515,7 +515,9 @@ def verify_step(molecule_smiles: str, template_id: str, precursors: list[str]) -
     return species_match([molecule_smiles], real_products) if real_products else False
 
 
-@tool
+# Trusted like the other catalog tools: restricted tool workers drop RETRO_DB_*,
+# so an untrusted tool would query localhost instead of the configured database.
+@tool(trusted=True)
 def verify_route(route: str) -> tuple[bool, str]:
     """
     [BRIEF] Checks route structure and every reaction against the template catalog. [/BRIEF]
