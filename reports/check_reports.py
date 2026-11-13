@@ -56,11 +56,7 @@ class Problems(list):
 
 
 def environments() -> list[Path]:
-    return sorted(
-        p
-        for p in REPORTS_DIR.iterdir()
-        if p.is_dir() and p.name != "figures" and not p.name.startswith((".", "_"))
-    )
+    return sorted(p.parent for p in REPORTS_DIR.glob("*/runs.csv"))
 
 
 def read_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
