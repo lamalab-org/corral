@@ -419,21 +419,19 @@ def residual_pairs_from_fit(model, items) -> set:
     return {frozenset((row.lval, row.rval)) for row in rows.itertuples()}
 
 
-def local_dependence_pairs_from_fit(model, items) -> set:
-    """Count residual links and equivalent orthogonal two-item method factors.
+def method_factors_from_fit(model, items) -> dict:
+    """Narrow factors orthogonal to all other latents, with positive variance.
 
-    The broad factor covers all items. Narrow factors must be orthogonal to
-    every other factor, so a second correlated trait is not treated as a method.
-    Fit, identification and parsimony still pass through the usual gates.
+    This is a structural classification supported by each task's presentation
+    log, not a causal inference from covariance fit alone.
     """
-    pairs = residual_pairs_from_fit(model, items)
     ins = model.inspect(std_est=True)
     latent = set(model.vars["latent"])
     load = ins[(ins.op == "~") & ins.lval.isin(items) & ins.rval.isin(latent)]
-    if not any(set(rows.lval) == set(items) for _, rows in load.groupby("rval")):
-        return pairs
+    methods = {}
     for factor, rows in load.groupby("rval"):
-        if len(rows) != 2:
+        members = set(rows.lval)
+        if len(members) < 2 or not members < set(items):
             continue
         cov = ins[
             (ins.op == "~~")
@@ -443,11 +441,73 @@ def local_dependence_pairs_from_fit(model, items) -> set:
                 | ((ins.rval == factor) & ins.lval.isin(latent))
             )
         ]
+        variance = ins[(ins.op == "~~") & (ins.lval == factor) & (ins.rval == factor)]
+        if variance.empty or float(variance["Estimate"].iloc[0]) <= 1e-8:
+            continue
         if pd.to_numeric(cov["Estimate"]).abs().gt(1e-8).any():
             continue
         if pd.to_numeric(rows["Estimate"]).abs().gt(1e-8).all():
-            pairs.add(frozenset(rows.lval))
+            methods[factor] = members
+    return methods
+
+
+def local_dependence_pairs_from_fit(model, items) -> set:
+    """Observed residual links and pairwise implications of method factors."""
+    pairs = residual_pairs_from_fit(model, items)
+    for members in method_factors_from_fit(model, items).values():
+        ordered = sorted(members)
+        pairs.update(
+            frozenset((a, b)) for index, a in enumerate(ordered) for b in ordered[index + 1 :]
+        )
     return pairs
+
+
+def dependence_clusters(pairs):
+    """Collapse complete connected pair sets into item clusters."""
+    remaining = set().union(*pairs) if pairs else set()
+    groups = []
+    while remaining:
+        group = {next(iter(remaining))}
+        while True:
+            joined = group | set().union(*(pair for pair in pairs if pair & group))
+            if joined == group:
+                break
+            group = joined
+        remaining -= group
+        edges = {pair for pair in pairs if pair <= group}
+        if len(edges) == len(group) * (len(group) - 1) // 2:
+            groups.append(sorted(group))
+        else:
+            groups.extend(sorted(pair) for pair in edges)
+    return sorted(groups)
+
+
+def _drop_method_factor(spec, factor):
+    """Remove a method factor, preserving other terms and numerical fixings."""
+    lines = []
+    for line in spec.splitlines():
+        parsed = parse_statement(line)
+        if parsed and parsed.left == factor:
+            continue
+        if parsed and factor in parsed.right:
+            left, right = line.split(parsed.op, 1)
+            terms = [term for term in right.split("+") if factor not in names_in(term)]
+            if not terms:
+                continue
+            line = left + parsed.op + "+".join(terms)
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _drop_dependence_cluster(spec, members, model, items):
+    """Remove one method cluster or its residual-covariance representation."""
+    for factor, covered in method_factors_from_fit(model, items).items():
+        if covered == set(members):
+            spec = _drop_method_factor(spec, factor)
+    for index, a in enumerate(members):
+        for b in members[index + 1 :]:
+            spec = _drop_residual_pair(spec, (a, b))
+    return spec
 
 
 def check_claims(
@@ -1042,13 +1102,19 @@ def _drop_path(spec: str, left: str, right: str) -> str:
 
 
 def _drop_residual_pair(spec: str, pair: list[str] | tuple[str, str]) -> str:
-    """Remove an observed-item residual covariance regardless of order."""
+    """Remove one covariance, retaining other terms and numeric coefficients."""
     wanted = set(pair)
     kept = []
     for line in spec.splitlines():
         parsed = parse_statement(line)
-        if parsed and parsed.op == "~~" and {parsed.left, *parsed.right} == wanted:
-            continue
+        if parsed and parsed.op == "~~" and parsed.left in wanted:
+            other = next(iter(wanted - {parsed.left}))
+            if other in parsed.right:
+                left, right = line.split("~~", 1)
+                terms = [term for term in right.split("+") if other not in names_in(term)]
+                if not terms:
+                    continue
+                line = left + "~~" + "+".join(terms)
         kept.append(line)
     return "\n".join(kept)
 
@@ -1068,7 +1134,7 @@ def _drop_cross_loading(spec: str, item: str, item_map: dict, model=None) -> str
         parsed = parse_statement(line)
         if parsed and parsed.op == "=~":
             factor, members = parsed.left, parsed.right
-            if item in members and factor not in keep:
+            if item in members and factor in factors and factor not in keep:
                 members = [name for name in members if name != item]
                 if not members:
                     continue
@@ -1135,6 +1201,8 @@ def score_misfit_replication(
         fitted_dev = _model_fit_summary(spec, dev, variables)
         fitted_rep = _model_fit_summary(spec, rep, variables)
         factor_names = latent_names(spec)
+        methods = method_factors_from_fit(fitted_dev["model"], list(model_items))
+        trait_names = factor_names - set(methods)
         estimates = fitted_dev["model"].inspect(std_est=True)
         factor_group_paths = set(
             estimates.loc[
@@ -1144,12 +1212,13 @@ def score_misfit_replication(
                 "lval",
             ]
         )
-        checks["factor_group_paths"] = "PASS" if factor_group_paths == factor_names else "FAIL"
+        checks["factor_group_paths"] = "PASS" if factor_group_paths == trait_names else "FAIL"
 
         item_map = _measurement_item_map(spec)
-        cross = sorted(item for item in model_items if len(item_map.get(item, set())) > 1)
-        residual = residual_pairs_from_fit(fitted_dev["model"], list(model_items))
-        residual_list = sorted([sorted(pair) for pair in residual])
+        trait_map = {item: factors & trait_names for item, factors in item_map.items()}
+        cross = sorted(item for item in model_items if len(trait_map.get(item, set())) > 1)
+        residual = local_dependence_pairs_from_fit(fitted_dev["model"], list(model_items))
+        residual_list = dependence_clusters(residual)
         dif = sorted(biased_items_from_fit(fitted_dev["model"], list(model_items), group))
         derived_findings = {
             "local_dependence": residual_list,
@@ -1177,9 +1246,12 @@ def score_misfit_replication(
         margin = params.get("replication_gain", 0.010)
         ordered = [item for item in items if item in model_items]
         reduced_for = {
-            "local_dependence": [_drop_residual_pair(spec, (a, b)) for a, b in residual_list],
+            "local_dependence": [
+                _drop_dependence_cluster(spec, members, fitted_dev["model"], list(model_items))
+                for members in residual_list
+            ],
             "cross_loadings": [
-                _drop_cross_loading(spec, item, item_map, fitted_dev["model"]) for item in cross
+                _drop_cross_loading(spec, item, trait_map, fitted_dev["model"]) for item in cross
             ],
             "dif_items": [_drop_path(spec, item, group) for item in dif],
         }
@@ -1232,7 +1304,13 @@ def score_misfit_replication(
         # supports and the replication sample really does not.
         justified = True
         for pair in rejected_reported:
-            added = spec + f"\n{pair[0]} ~~ {pair[1]}"
+            rejected_name = "RejectedMethod"
+            while rejected_name in factor_names:
+                rejected_name += "X"
+            added = spec + "\n" + rejected_name + " =~ " + "+".join(f"1*{item}" for item in pair)
+            added += "\n" + "\n".join(
+                f"{rejected_name} ~~ 0*{factor}" for factor in sorted(factor_names)
+            )
             in_dev = _modification_worth(added, spec, dev, variables)
             in_rep = _modification_worth(added, spec, rep, variables)
             if in_dev is None or in_rep is None or in_dev < margin or in_rep >= margin:

@@ -3,8 +3,7 @@
 
 Two instruments, each entitling its user to a different kind of score.
 
-    HSNS          one factor, modest and fairly even loadings, plus one small
-                  residual covariance. A sound total score, no subscales.
+    HSNS          one factor, modest and fairly even loadings. A sound total score, no subscales.
     Dirty Dozen   bifactor-(S-1) with Machiavellianism as reference, plus
                   correlated P and N residual facets. Subscales, no broad total.
 
@@ -46,10 +45,7 @@ HSNS_LOADINGS = {
     "HSNS9": 0.47,
     "HSNS10": 0.43,
 }
-# Two items are worded alike and agree a little beyond the trait. Small enough
-# to leave the total score sound, large enough that the model is an
-# approximation rather than an exact match.
-HSNS_RESIDUAL_CORR = (("HSNS2", "HSNS7"), 0.10)
+
 
 # Machiavellianism defines the reference factor. Its items do not load on a
 # specific factor; P and N retain strong residual facets.
@@ -133,7 +129,6 @@ def simulate_hsns(n, rng, us):
             phi_matrix=np.array([[1.0]]),
             factor_names=["F"],
             intercepts=C.INTERCEPTS,
-            resid_corr=HSNS_RESIDUAL_CORR,
         )[HSNS]
     phi = np.array([[1.0, NON_US_HSNS_PHI], [NON_US_HSNS_PHI, 1.0]])
     loadings = {i: ("A" if i in NON_US_HSNS_F1 else "B", NON_US_HSNS_LOADING) for i in HSNS}
@@ -283,10 +278,6 @@ def build_truth(floor, pop, data_sha, rows):
             "hsns": {
                 "loadings": HSNS_LOADINGS,
                 "omega": round(hsns_omega(), 3),
-                "residual_correlation": {
-                    "items": list(HSNS_RESIDUAL_CORR[0]),
-                    "covariance": HSNS_RESIDUAL_CORR[1],
-                },
                 "non_us_loading": NON_US_HSNS_LOADING,
                 "non_us_phi": NON_US_HSNS_PHI,
                 "non_us_f1_items": NON_US_HSNS_F1,
@@ -496,8 +487,8 @@ def verify(df, pop):
             pooled_cfi < 0.95 and pooled_omega_h > 0.50,
         ),
         (
-            "the simple HSNS model retains local misfit while the DD S-1 fits well",
-            fits["unidimensional"][3] < 0.001 and fits["bifactor"][0] > 0.99,
+            "both reference structures fit their continuous data well",
+            fits["unidimensional"][0] > 0.99 and fits["bifactor"][0] > 0.99,
         ),
     ]
     return C.report(checks)

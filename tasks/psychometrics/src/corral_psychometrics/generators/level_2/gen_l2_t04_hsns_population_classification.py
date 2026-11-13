@@ -5,7 +5,7 @@ Four HSNS populations, each with its own structure, and three case samples
 drawn from some of them.
 
     population_a   two correlated factors
-    population_b   two correlated factors plus a residual covariance on HSNS5, HSNS10
+    population_b   two correlated factors plus a matrix-page method effect on HSNS2, HSNS5, HSNS7, HSNS10
     population_c   the same model as population_a, sampled independently
     population_d   two factors, stronger loadings, phi 0.72, HSNS9 cross-loads
 
@@ -57,7 +57,7 @@ CASE_SOURCES = ["population_b", "population_c", "population_d"]
 # when the case's mean Gaussian log-likelihood under it is within this margin of
 # the best-fitting population's. The agent is not told it.
 COMPATIBILITY_MARGIN = 0.04
-RESIDUAL_PAIR = ("HSNS5", "HSNS10")
+METHOD_ITEMS = ("HSNS2", "HSNS5", "HSNS7", "HSNS10")
 
 PROMPT = (
     "You have large HSNS response samples from four reference populations, `population_a` to "
@@ -86,7 +86,7 @@ identifiers, in any order.
 """
 
 
-def continuous_block(rng, n, factors, phi, loadings, residual_pair=None, residual=0.0):
+def continuous_block(rng, n, factors, phi, loadings, method_items=None, method_variance=0.0):
     eta = rng.multivariate_normal(np.zeros(len(factors)), phi, n)
     index = {name: i for i, name in enumerate(factors)}
     shared = rng.normal(size=n)
@@ -94,9 +94,9 @@ def continuous_block(rng, n, factors, phi, loadings, residual_pair=None, residua
     for item in ITEMS:
         score = sum(loading * eta[:, index[factor]] for factor, loading in loadings[item])
         explained = sum(loading**2 for _, loading in loadings[item])
-        if residual_pair and item in residual_pair:
-            score = score + np.sqrt(residual) * shared
-            explained += residual
+        if method_items and item in method_items:
+            score = score + np.sqrt(method_variance) * shared
+            explained += method_variance
         noise = rng.normal(0, np.sqrt(max(1 - explained, 0.08)), n)
         out[item] = C.continuous_response(score + noise, C.INTERCEPTS[item])
     return pd.DataFrame(out)[ITEMS]
@@ -115,22 +115,22 @@ def two_factor(rng, n, loading_scale=1.0, phi=0.35, cross_loading=None):
     return continuous_block(rng, n, ["F1", "F2"], [[1, phi], [phi, 1]], loading)
 
 
-def residual_dependence(rng, n):
+def method_dependence(rng, n):
     return continuous_block(
         rng,
         n,
         ["F1", "F2"],
         [[1, 0.35], [0.35, 1]],
         {item: [(FACTOR_OF[item], value)] for item, value in LOADINGS.items()},
-        residual_pair=RESIDUAL_PAIR,
-        residual=0.70,
+        method_items=METHOD_ITEMS,
+        method_variance=0.22,
     )
 
 
 # a and c share one model; the rest are separable.
 POPULATIONS = {
     "population_a": two_factor,
-    "population_b": residual_dependence,
+    "population_b": method_dependence,
     "population_c": two_factor,
     "population_d": lambda rng, n: two_factor(
         rng, n, loading_scale=1.10, phi=0.72, cross_loading=("HSNS9", "F1", 0.35)
@@ -138,7 +138,7 @@ POPULATIONS = {
 }
 STRUCTURES = {
     "population_a": "two correlated factors, phi .35",
-    "population_b": f"population_a plus residual covariance .70 on {RESIDUAL_PAIR}",
+    "population_b": f"population_a plus a shared presentation factor with variance .22 on {METHOD_ITEMS}",
     "population_c": "the same model as population_a, sampled independently",
     "population_d": "two factors, loadings x1.10, phi .72, HSNS9 cross-loads .35 on F1",
 }
@@ -148,7 +148,7 @@ TWO_FACTORS = f"F1 =~ {'+'.join(F1)}\nF2 =~ {'+'.join(F2)}"
 # submitted model is held to on that population's reference sample.
 MODEL_SYNTAX = {
     "population_a": TWO_FACTORS,
-    "population_b": f"{TWO_FACTORS}\n{RESIDUAL_PAIR[0]} ~~ {RESIDUAL_PAIR[1]}",
+    "population_b": TWO_FACTORS + "\n" + C.method_syntax("Format", METHOD_ITEMS, ["F1", "F2"]),
     "population_c": TWO_FACTORS,
     "population_d": f"F1 =~ {'+'.join(F1)}+HSNS9\nF2 =~ {'+'.join(F2)}",
 }
@@ -157,7 +157,7 @@ MODEL_SYNTAX = {
 ALTERNATIVE_SYNTAX = {
     "one factor": f"G =~ {'+'.join(ITEMS)}",
     "two factors": TWO_FACTORS,
-    "two factors + residual": MODEL_SYNTAX["population_b"],
+    "two factors + method": MODEL_SYNTAX["population_b"],
     "two factors + cross-loading": MODEL_SYNTAX["population_d"],
 }
 # The same margins Level 1 holds a model to, without the population-matrix term.
@@ -239,6 +239,9 @@ def write_codebook(path):
         "Every file is tab-separated. Responses are continuous and unbounded, centered around zero; all responses are complete.\n\n"
         "The reference files hold large samples from four populations, named only by identifier. How they differ is not supplied. `cases.csv` holds three case samples of "
         f"{CASE_SIZE} respondents each, identified by `case_id`; each case comes from one of the four populations.\n\n"
+        "Items " + ", ".join(METHOD_ITEMS) + " were presented together on a matrix page; "
+        "other items appeared individually. This format was used in every population; "
+        "whether it produces a shared response influence must be assessed from the data.\n\n"
         "| item | text |\n|---|---|\n"
         + "\n".join(f"| `{item}` | {C.ITEM_TEXT[item]} |" for item in ITEMS)
         + "\n"
@@ -307,7 +310,7 @@ def candidate_submissions():
             **correct,
             "models": {name: TWO_FACTORS for name in POPULATIONS},
         },
-        "misses the residual covariance": {
+        "omits the method factor": {
             **correct,
             "models": {**MODEL_SYNTAX, "population_b": TWO_FACTORS},
         },

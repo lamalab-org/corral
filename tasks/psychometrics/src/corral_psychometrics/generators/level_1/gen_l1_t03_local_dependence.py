@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 """Generate Task 03 artifacts and scoring metadata.
 
-Generating model, HSNS in the United States: one factor over all ten items,
-plus two pairs that agree beyond it - HSNS2 with HSNS7 at 0.38 and HSNS5 with
-HSNS10 at 0.33. Both pairs read as near-paraphrases.
+One broad HSNS trait plus a shared matrix-page method effect on four items.
+The other items appeared individually. The high-loading HSNS1/HSNS8 pair is
+associated only through the trait, providing a decoy for raw-correlation rules.
+Non-US responses have weaker trait loadings and no matrix-page effect.
 
-HSNS1 and HSNS8 are the decoy: they load highest (0.82, 0.80), so they are the
-most correlated pair in the raw data, but nothing is planted between them.
-Outside the United States no pair agrees beyond the factor and every item is
-measured worse.
 """
 
 from __future__ import annotations
@@ -43,10 +40,10 @@ LOADINGS = {
     "HSNS10": (TRAIT, 0.53),
 }
 
-# Pairs that agree beyond what the trait explains. Both read as near-
-# paraphrases: HSNS2 and HSNS7 are about other people's remarks, HSNS5 and
-# HSNS10 about other people's troubles.
-RESIDUAL_PAIRS = [(("HSNS2", "HSNS7"), 0.38), (("HSNS5", "HSNS10"), 0.33)]
+# These four items share a matrix page. The method influence is independent
+# of the personality trait; unit loadings identify its variance.
+METHOD_ITEMS = ("HSNS2", "HSNS5", "HSNS7", "HSNS10")
+METHOD_VARIANCE = 0.30
 
 # HSNS1 and HSNS8 read as the most similar pair of all and have no such
 # agreement between them. They are the decoy.
@@ -90,7 +87,9 @@ A single JSON object:
 {
   "model_syntax": "<complete semopy model>",
   "loadings": {"<item>": <float>, ...},
-  "factor_correlation": <float or null>
+  "factor_correlation": <float or null>,
+  "measurement_explanation": "one_trait|two_traits|one_trait_with_method_effect",
+  "trait_variance_share": <float>
 }
 
 `model_syntax` uses semopy syntax (`=~` loadings, `~~` (co)variances, `0*` to fix a
@@ -99,22 +98,22 @@ parameter to zero).
 `loadings`: Absolute standardised item loadings on the broad trait factor, excluding method factors.
 
 `factor_correlation`: Correlation between two trait factors, if applicable; otherwise `null`.
+
+`trait_variance_share`: Proportion of variance in the ten-item sum attributable to the broad personality trait, excluding method variance.
 """
 
 
 def simulate_hsns(n, rng, scale=1.0, dependent=True):
-    """Draw HSNS responses from one trait, optionally with the duplicate pairs."""
+    """Draw one trait and an optional independent matrix-page method effect."""
     eta = rng.normal(size=n)
-    shared = {pair: rng.normal(size=n) for pair, _ in RESIDUAL_PAIRS}
+    method = rng.normal(size=n)
     out = {}
     for item in ITEMS:
         lam = LOADINGS[item][1] * scale
         common, explained = lam * eta, lam**2
-        if dependent:
-            for pair, cov in RESIDUAL_PAIRS:
-                if item in pair:
-                    common = common + np.sqrt(cov) * shared[pair]
-                    explained += cov
+        if dependent and item in METHOD_ITEMS:
+            common += np.sqrt(METHOD_VARIANCE) * method
+            explained += METHOD_VARIANCE
         ystar = common + rng.normal(0, np.sqrt(max(1 - explained, 1e-6)), n)
         out[item] = C.continuous_response(ystar, C.INTERCEPTS[item])
     return pd.DataFrame(out)[ITEMS]
@@ -147,7 +146,7 @@ def build_dataset(rng):
 def reference_syntax():
     """lavaan syntax for the generating model, used as the scoring floor."""
     lines = [f"G =~ {'+'.join(ITEMS)}"]
-    lines += [f"{a} ~~ {b}" for (a, b), _ in RESIDUAL_PAIRS]
+    lines.append(C.method_syntax("Format", METHOD_ITEMS, ["G"]))
     return "\n".join(lines)
 
 
@@ -163,7 +162,7 @@ def candidate_models():
             "S2 =~ HSNS1+HSNS4+HSNS5+HSNS6+HSNS8+HSNS10\n"
             "G ~~ 0*S1\nG ~~ 0*S2\nS1 ~~ 0*S2"
         ),
-        "unidimensional_with_correlated_residuals": reference_syntax(),
+        "trait_with_method_factor": reference_syntax(),
         "unidim_with_decoy_pair_freed": (
             reference_syntax() + f"\n{DECOY_PAIR[0]} ~~ {DECOY_PAIR[1]}"
         ),
@@ -171,6 +170,37 @@ def candidate_models():
             f"G =~ {every}\nHSNS2 ~~ HSNS7\n{DECOY_PAIR[0]} ~~ {DECOY_PAIR[1]}"
         ),
     }
+
+
+def variance_shares():
+    """Variance decomposition of the unit-weighted ten-item total score."""
+    trait = sum(value[1] for value in LOADINGS.values()) ** 2
+    method = len(METHOD_ITEMS) ** 2 * METHOD_VARIANCE
+    unique = sum(
+        1 - value[1] ** 2 - (METHOD_VARIANCE if item in METHOD_ITEMS else 0)
+        for item, value in LOADINGS.items()
+    )
+    total = trait + method + unique
+    return {"trait": trait / total, "method": method / total, "unique": unique / total}
+
+
+def candidate_submissions(X):
+    """Reference answer and plausible competing substantive explanations."""
+    cases = {}
+    for name, syntax in candidate_models().items():
+        fitted = C.fit(syntax, X, ITEMS)
+        broad = ["G"] if "G" in fitted.vars["latent"] else None
+        loading = C.loadings(fitted, factors=broad)
+        cases["correct" if name == "trait_with_method_factor" else name] = {
+            "model_syntax": syntax,
+            "loadings": {item: abs(value) for item, value in loading.items()},
+            "factor_correlation": None,
+            "measurement_explanation": "one_trait_with_method_effect"
+            if name == "trait_with_method_factor"
+            else "two_traits",
+            "trait_variance_share": variance_shares()["trait"],
+        }
+    return cases
 
 
 def population_correlation_matrix():
@@ -184,10 +214,15 @@ def build_truth(floor, pop, data_sha, rows):
     return {
         "task_id": TASK_ID,
         "scored": {
-            "model_family": "unidimensional_with_correlated_residuals",
-            "n_factors": 1,
+            "model_family": "trait_with_method_factor",
+            "measurement_explanation": "one_trait_with_method_effect",
+            "n_trait_factors": 1,
+            "n_method_factors": 1,
+            "trait_variance_share": variance_shares()["trait"],
             "loadings": {k: v[1] for k, v in LOADINGS.items()},
-            "residual_pairs": [list(pair) for pair, _ in RESIDUAL_PAIRS],
+            "residual_pairs": [
+                [a, b] for index, a in enumerate(METHOD_ITEMS) for b in METHOD_ITEMS[index + 1 :]
+            ],
             "item_assignment": {k: "G" for k in ITEMS},
         },
         "scoring_reference": {
@@ -201,13 +236,18 @@ def build_truth(floor, pop, data_sha, rows):
         "generative_parameters": {
             "us": {
                 "loadings": {k: v[1] for k, v in LOADINGS.items()},
-                "residual_covariances": {f"{a}_{b}": v for (a, b), v in RESIDUAL_PAIRS},
+                "method_factor": {
+                    "items": list(METHOD_ITEMS),
+                    "unit_loadings": True,
+                    "variance": METHOD_VARIANCE,
+                },
+                "total_score_variance_shares": variance_shares(),
                 "decoy_pair": list(DECOY_PAIR),
                 "decoy_residual_covariance": 0.0,
             },
             "non_us": {
                 "loading_scale": LOADING_SCALE_NON_US,
-                "residual_covariances": {},
+                "method_variance": 0.0,
             },
             "dark_triad": {
                 "loadings": {k: v[1] for k, v in DD_LOADINGS.items()},
@@ -224,7 +264,7 @@ def build_task_json(data_sha):
     return [
         {
             "id": TASK_ID,
-            "name": "HSNS dimensionality versus item redundancy",
+            "name": "HSNS trait structure and presentation effects",
             "uuid": "6c40b18e-9d2f-4a77-93e1-58aa0c7f5d03",
             "keywords": [
                 "psychometrics",
@@ -260,6 +300,19 @@ def build_task_json(data_sha):
                         "tol": 0.08,
                         "all_must_be_within": True,
                         "criterion": "parameter_quality",
+                    },
+                    {
+                        "key": "measurement_explanation",
+                        "fn": "score_label",
+                        "truth_key": "scored.measurement_explanation",
+                        "criterion": "interpretation",
+                    },
+                    {
+                        "key": "trait_variance_share",
+                        "fn": "score_scalar",
+                        "truth_key": "scored.trait_variance_share",
+                        "tol": 0.04,
+                        "criterion": "trait_score_interpretation",
                     },
                     # The answer: which pairs agree beyond the trait. Read from the
                     # submitted model rather than asked for separately.
@@ -300,7 +353,7 @@ def verify(df, pop):
         )
     print(pd.DataFrame(rows).to_string(index=False, float_format=lambda v: f"{v:.4f}"))
 
-    truth = criteria["unidimensional_with_correlated_residuals"]
+    truth = criteria["trait_with_method_factor"]
     corr = pd.DataFrame(np.corrcoef(X.values.T), index=ITEMS, columns=ITEMS)
     ranked = sorted(
         ((a, b, corr.loc[a, b]) for i, a in enumerate(ITEMS) for b in ITEMS[i + 1 :]),
@@ -313,7 +366,7 @@ def verify(df, pop):
     print("\ntop raw correlations: " + "  ".join(f"{a}-{b} {r:.3f}" for a, b, r in ranked[:3]))
     print(
         "residual correlations under one factor: "
-        + "  ".join(f"{a}-{b} {res.loc[a, b]:+.3f}" for (a, b), _ in RESIDUAL_PAIRS)
+        + "  ".join(f"{a}-{b} {res.loc[a, b]:+.3f}" for a, b in zip(METHOD_ITEMS, METHOD_ITEMS[1:]))
         + f"   decoy {DECOY_PAIR[0]}-{DECOY_PAIR[1]} "
         f"{res.loc[DECOY_PAIR[0], DECOY_PAIR[1]]:+.3f}"
     )
@@ -330,9 +383,12 @@ def verify(df, pop):
         ),
         ("the decoy pair ranks in the top 3 raw correlations", decoy_rank <= 3),
         (
-            "but its residual correlation is an order of magnitude smaller",
-            abs(res.loc[DECOY_PAIR[0], DECOY_PAIR[1]]) * 5
-            < min(abs(res.loc[a, b]) for (a, b), _ in RESIDUAL_PAIRS),
+            "the decoy correlation is explained by trait loadings alone",
+            abs(
+                corr.loc[DECOY_PAIR[0], DECOY_PAIR[1]]
+                - LOADINGS[DECOY_PAIR[0]][1] * LOADINGS[DECOY_PAIR[1]][1]
+            )
+            < 0.02,
         ),
     ]
     return C.report(checks)
@@ -414,6 +470,14 @@ def main():
         df,
         lambda sha: build_truth(floor, pop.tolist(), sha, len(df)),
         build_task_json,
+    )
+    book = TASK.artifacts / "codebook.md"
+    book.write_text(
+        book.read_text()
+        + "\nPresentation log: "
+        + ", ".join(METHOD_ITEMS)
+        + " appeared together on a matrix page. All other HSNS items appeared individually. "
+        "The log describes presentation, not which effects exist in responses.\n"
     )
     return 0
 

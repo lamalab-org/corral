@@ -5,7 +5,7 @@ Each `dataset_*.csv` is tab-separated and holds an independent anonymised sample
 | variable | meaning |
 |---|---|
 | `respondent_id` | row identifier |
-| response format | Q03, Q07 and Q10 used a shared reverse-worded format; their values have already been keyed in the same direction as the other items |
+| response format | Q03, Q05, Q07 and Q10 used a shared matrix-page format; the other items appeared individually; the format does not itself establish a method effect |
 | `Q01` | continuous response; zero is valid |
 | `Q02` | continuous response; zero is valid |
 | `Q03` | continuous response; zero is valid |

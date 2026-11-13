@@ -30,7 +30,7 @@ ROOT = paths.task_root()
 TASKS = [
     (1, 1, "two_correlated_factors"),
     (1, 2, "bifactor_s1_machiavellianism_reference"),
-    (1, 3, "unidimensional_with_correlated_residuals"),
+    (1, 3, "correct"),
     (1, 4, "DD, bifactor (CORRECT)"),
     (1, 5, "correct"),
     (1, 6, "joint latent model (CORRECT)"),

@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """Generate Level 2 Task 10 artifacts and scoring metadata.
 
-Six datasets of twelve items, each drawn from one of six candidate structures
-and then given one data-quality problem on top.
+Six datasets of twelve items, each drawn from one of six candidate structures.
+Five also carry a data-quality complication; one is an uncomplicated control.
 
     model_a   one general factor
     model_b   two correlated factors, Q01-Q06 and Q07-Q12
     model_c   bifactor - a general factor plus one narrow factor per subscale
     model_d   three correlated factors, Q01-Q03, Q04-Q07 and Q08-Q12
     model_e   two correlated factors, Q06 also loading on the second
-    model_f   one general factor plus a method effect shared by Q03, Q07 and Q10
+    model_f   one general factor plus a method effect shared by Q03, Q05, Q07 and Q10
 
-The complications - missingness, local dependence, a shifted subgroup, repeated
+The complications - missingness, a shifted subgroup, repeated
 rows, a weak item, a response style - are what make several structures fit a
 dataset equally well, so an answer is a list of candidates within the stated BIC
 margin rather than one name.
@@ -49,7 +49,7 @@ MODEL_DESCRIPTIONS = {
     "model_c": "a bifactor model; every item loads on a general factor and one subscale",
     "model_d": "three correlated factors; Q01-Q03, Q04-Q07 and Q08-Q12 form the subscales",
     "model_e": "two correlated factors with Q06 also loading on the second factor",
-    "model_f": "one general factor with a response-method effect shared by Q03, Q07 and Q10",
+    "model_f": "one general factor with a response-method effect shared by Q03, Q05, Q07 and Q10",
 }
 
 # A candidate belongs in a dataset's answer when its BIC is within this of the
@@ -61,9 +61,6 @@ MODEL_DESCRIPTIONS = {
 # factors correlating 1.0, dataset_05's extra cross-loading is about zero).
 TIE_MARGIN = 2.0
 
-# Inside one block of every candidate, so it cannot mimic a general factor.
-DEPENDENT_PAIR = ("Q02", "Q03")
-DEPENDENT_SHARE = 0.28
 WEAK_ITEM = "Q08"
 WEAK_LOADING = 0.26
 SHIFTED_ITEM = "Q11"
@@ -71,7 +68,7 @@ DUPLICATED_ROWS = 320
 
 COMPLICATIONS = {
     "dataset_01": "responses to Q01 go missing more often at the low end of the scale",
-    "dataset_02": f"{DEPENDENT_PAIR[0]} and {DEPENDENT_PAIR[1]} share residual variance",
+    "dataset_02": "complete responses without an additional data-quality problem",
     "dataset_03": f"a subgroup answers {SHIFTED_ITEM} 0.55 units higher at the same trait level",
     "dataset_04": f"{DUPLICATED_ROWS} rows are delivered twice",
     "dataset_05": f"{WEAK_ITEM} is weak but still measures the trait",
@@ -106,7 +103,7 @@ def factor_syntax(model):
         )
     if model == "model_e":
         return f"F1 =~ {join(ITEMS[:6])}\nF2 =~ {join(ITEMS[6:])}+Q06\nF1 ~~ F2"
-    return f"G =~ {join(ITEMS)}\nM =~ Q03+Q07+Q10\nG ~~ 0*M"
+    return f"G =~ {join(ITEMS)}\nM =~ Q03+Q05+Q07+Q10\nG ~~ 0*M"
 
 
 def latent_scores(model, rng, n):
@@ -137,7 +134,7 @@ def latent_scores(model, rng, n):
     else:
         eta = rng.normal(size=n)
         method = rng.normal(size=n)
-        columns = [0.68 * eta + (0.42 * method if i in (2, 6, 9) else 0.0) for i in range(12)]
+        columns = [0.68 * eta + (0.42 * method if i in (2, 4, 6, 9) else 0.0) for i in range(12)]
     return np.column_stack(columns)
 
 
@@ -149,10 +146,6 @@ def responses(model, rng, n, complication=None):
         shared = signal[:, index]
         scale = WEAK_LOADING / max(float(np.std(shared)), 1e-9)
         signal[:, index] = shared * scale
-    if complication == "dependence":
-        shared = rng.normal(size=n)
-        for item in DEPENDENT_PAIR:
-            signal[:, ITEMS.index(item)] += np.sqrt(DEPENDENT_SHARE) * shared
 
     values = {}
     for index, item in enumerate(ITEMS):
@@ -184,7 +177,7 @@ def responses(model, rng, n, complication=None):
 
 COMPLICATION_KIND = {
     "dataset_01": "missing",
-    "dataset_02": "dependence",
+    "dataset_02": "none",
     "dataset_03": "shift",
     "dataset_04": "duplicates",
     "dataset_05": "weak_item",
@@ -265,8 +258,8 @@ def write_codebook(path):
         "centered around zero; empty fields denote missing responses.\n\n"
         "| variable | meaning |\n|---|---|\n"
         "| `respondent_id` | row identifier |\n"
-        "| response format | Q03, Q07 and Q10 used a shared reverse-worded format; "
-        "their values have already been keyed in the same direction as the other items |\n"
+        "| response format | Q03, Q05, Q07 and Q10 used a shared matrix-page format; "
+        "the other items appeared individually; the format does not itself establish a method effect |\n"
         + "\n".join(f"| `{item}` | continuous response; zero is valid |" for item in ITEMS)
         + "\n\n`candidate_models.csv` gives each model's description and lavaan-style "
         "syntax. The order of the catalogue carries no information.\n"

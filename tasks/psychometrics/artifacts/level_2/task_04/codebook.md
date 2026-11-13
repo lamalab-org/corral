@@ -4,6 +4,8 @@ Every file is tab-separated. Responses are continuous and unbounded, centered ar
 
 The reference files hold large samples from four populations, named only by identifier. How they differ is not supplied. `cases.csv` holds three case samples of 300 respondents each, identified by `case_id`; each case comes from one of the four populations.
 
+Items HSNS2, HSNS5, HSNS7, HSNS10 were presented together on a matrix page; other items appeared individually. This format was used in every population; whether it produces a shared response influence must be assessed from the data.
+
 | item | text |
 |---|---|
 | `HSNS1` | I can become entirely absorbed in thinking about my personal affairs, my health, my cares or my relations to others. |

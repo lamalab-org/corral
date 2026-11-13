@@ -34,3 +34,5 @@ alternatives when the case sample does not separate them.
 ```bash
 uv run --with numpy --with pandas --with scipy python generators/level_2/gen_l2_t04_hsns_population_classification.py [--verify|--naive]
 ```
+
+Presentation formats are documented in the codebook. Compare substantive dimensions and shared method effects; the format alone does not establish whether a method effect exists.

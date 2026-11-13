@@ -195,6 +195,15 @@ def bifactor_s1_block(
     return pd.DataFrame(out)[items]
 
 
+def method_syntax(name, items, traits, variance=None):
+    """Identified method factor: unit loadings, orthogonal to named traits."""
+    lines = [f"{name} =~ " + "+".join(f"1*{item}" for item in items)]
+    lines.extend(f"{name} ~~ 0*{trait}" for trait in traits)
+    if variance is not None:
+        lines.append(f"{name} ~~ {variance}*{name}")
+    return "\n".join(lines)
+
+
 def demographics(n, rng, country):
     """The non-item columns for one country's respondents."""
     return pd.DataFrame(

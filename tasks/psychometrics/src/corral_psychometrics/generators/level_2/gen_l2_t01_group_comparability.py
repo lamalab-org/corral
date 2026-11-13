@@ -2,7 +2,7 @@
 """Generate Level 2 Task 01 artifacts and scoring metadata.
 
 Generating model: two correlated HSNS factors (phi 0.35), with HSNS9 also
-loading 0.15 on the first and HSNS5 and HSNS10 agreeing 0.10 beyond them.
+loading 0.15 on the first. No extra method effects are added.
 
 The two groups are identical on both traits - the latent difference is exactly
 zero. Four items, two on each factor, are cleared more easily by group 2, so
@@ -53,7 +53,6 @@ ADJUSTED_TOLERANCE = 0.06
 
 PHI = 0.35
 CROSS_LOADING = ("HSNS9", 0.15)
-RESIDUAL_CORR = (("HSNS5", "HSNS10"), 0.10)
 N_GROUP_1, N_GROUP_2 = 6_000, 6_000
 POP_REFERENCE_N = 200_000
 
@@ -122,7 +121,6 @@ def responses(rng, n_1, n_2, apply_dif=True):
         [LATENT_DIFFERENCE["egocentrism"], LATENT_DIFFERENCE["oversensitivity"]],
         0.0,
     )
-    shared = rng.normal(size=len(gender))
     out = {}
     for item, (factor, loading) in LOADINGS.items():
         factor_index = 0 if factor == "egocentrism" else 1
@@ -132,10 +130,6 @@ def responses(rng, n_1, n_2, apply_dif=True):
             cross_loading = CROSS_LOADING[1]
             common += cross_loading * eta[:, 0]
             explained += cross_loading**2 + 2 * cross_loading * loading * PHI
-        if item in RESIDUAL_CORR[0]:
-            residual = RESIDUAL_CORR[1]
-            common += np.sqrt(residual) * shared
-            explained += residual
         y = common + rng.normal(0, np.sqrt(max(1 - explained, 1e-6)), len(gender))
         intercept = np.asarray(C.INTERCEPTS[item])
         shift = ITEM_DIF.get(item, 0.0) if apply_dif else 0.0
@@ -173,7 +167,6 @@ def responses_with_latents(rng, n_1, n_2, apply_dif=True):
     """Draw responses and retain the latent traits for the auxiliary file."""
     gender = np.r_[np.ones(n_1), np.full(n_2, 2)]
     eta = rng.multivariate_normal([0.0, 0.0], [[1.0, PHI], [PHI, 1.0]], len(gender))
-    shared = rng.normal(size=len(gender))
     out = {}
     for item, (factor, loading) in LOADINGS.items():
         factor_index = 0 if factor == "egocentrism" else 1
@@ -183,10 +176,6 @@ def responses_with_latents(rng, n_1, n_2, apply_dif=True):
             cross_loading = CROSS_LOADING[1]
             common += cross_loading * eta[:, 0]
             explained += cross_loading**2 + 2 * cross_loading * loading * PHI
-        if item in RESIDUAL_CORR[0]:
-            residual = RESIDUAL_CORR[1]
-            common += np.sqrt(residual) * shared
-            explained += residual
         y = common + rng.normal(0, np.sqrt(max(1 - explained, 1e-6)), len(gender))
         intercept = np.asarray(C.INTERCEPTS[item])
         shift = ITEM_DIF.get(item, 0.0) if apply_dif else 0.0
@@ -309,7 +298,6 @@ def build_truth(floor, pop, data_sha, rows):
             "metric_invariance": True,
             "scalar_invariance": False,
             "cross_loading": CROSS_LOADING,
-            "residual_correlation": RESIDUAL_CORR,
             "item_intercepts": C.INTERCEPTS,
         },
         "provenance": C.provenance(Path(__file__).name, SEED, rows, data_sha),

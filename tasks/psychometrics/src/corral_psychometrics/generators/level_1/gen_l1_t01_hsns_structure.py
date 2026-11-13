@@ -49,7 +49,6 @@ PHI = 0.35
 # Two small extras, so that the true model is a close approximation of the
 # data rather than an exact match. Real data never match a model exactly.
 CROSS_LOADING = ("HSNS9", F1, 0.15)
-RESIDUAL_CORR = (("HSNS5", "HSNS10"), 0.10)
 
 # Participants outside the US come from a weaker, less differentiated population.
 LOADING_SCALE_NON_US = 0.72
@@ -119,7 +118,6 @@ def build_dataset(rng):
             intercepts=C.INTERCEPTS,
             scale=1.0 if is_us else LOADING_SCALE_NON_US,
             cross=CROSS_LOADING if is_us else None,
-            resid_corr=RESIDUAL_CORR if is_us else None,
             dif=GENDER_DIF if is_us else None,
             female=demo.gender == 2,
         )
@@ -180,7 +178,6 @@ def population_correlation_matrix():
         factor_names=[F1, F2],
         intercepts=C.INTERCEPTS,
         cross=CROSS_LOADING,
-        resid_corr=RESIDUAL_CORR,
     )[ITEMS]
     return C.population_matrix(big, list(big.columns))
 
@@ -210,7 +207,6 @@ def build_truth(floor, pop, data_sha, rows):
                 "factor_of_item": {k: v[0] for k, v in LOADINGS.items()},
                 "phi": PHI,
                 "cross_loading": list(CROSS_LOADING),
-                "residual_correlation": [list(RESIDUAL_CORR[0]), RESIDUAL_CORR[1]],
             },
             "non_us": {"loading_scale": LOADING_SCALE_NON_US, "phi": PHI_NON_US},
             "gender_dif": GENDER_DIF,

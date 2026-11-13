@@ -4,7 +4,7 @@
 
 You are given responses from an online personality survey. Use the codebook to investigate whether the HSNS measures one trait or more than one.
 
-The analysis should also identify pairs of items whose responses share additional association beyond the common trait. Report each item’s standardised loading on the broad trait factor, excluding narrow method factors, and report the latent correlation if the selected model has multiple traits. The Dirty Dozen items are present but are not part of this task.
+Use the presentation log and the covariance pattern to distinguish personality dimensions from a shared presentation effect. Report each item’s standardised loading on the broad trait factor, excluding narrow method factors, and report the latent correlation if the selected model has multiple traits. The Dirty Dozen items are present but are not part of this task.
 
 Responses are continuous and unbounded; zero is a valid neutral response and empty fields denote missing responses. The target population is respondents from the United States.
 
@@ -12,11 +12,11 @@ Responses are continuous and unbounded; zero is a valid neutral response and emp
 
 ## What to report
 
-Submit a complete semopy model for the 10 HSNS items, including correlated residuals or identified method factors where justified, plus the item loadings and any factor correlation.
+Submit a complete semopy model for the 10 HSNS items, including correlated residuals or identified method factors where justified, plus the item loadings, any trait-factor correlation, and a `measurement_explanation` (`one_trait`, `two_traits`, or `one_trait_with_method_effect`). Report `trait_variance_share`: the proportion of variance in the unit-weighted ten-item sum attributable to the broad personality trait, excluding method variance.
 
 ## Why this is non-trivial
 
-Local dependence can imitate an additional factor. Raw item correlations can also highlight a pair simply because both items are strong indicators. Deleting items may hide the symptom without explaining it, so distinguish item wording effects from substantive dimensionality.
+Local dependence can imitate an additional factor. Raw item correlations can also highlight a pair simply because both items are strong indicators. Deleting items may hide the symptom without explaining it, so distinguish presentation effects from substantive dimensionality.
 
 ## Synthetic task command
 

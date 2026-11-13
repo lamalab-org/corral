@@ -51,17 +51,14 @@ def test_dirty_dozen_facet_reliability():
     assert all(0.60 <= value <= 0.70 for value in dd.facet_reliability().values())
 
 
-def test_equivalent_identified_method_factors_receive_full_credit():
+def test_equivalent_method_scaling_receives_full_credit():
     task = paths.find(1, 3)
     params = json.loads(task.definition.read_text())[0]["scoring_params"]
     data = pd.read_csv(task.artifacts / "data.csv", sep="\t")
     X = C.analysis_sample(data, local.ITEMS)
-    lines = ["G =~ " + "+".join(local.ITEMS)]
-    for index, ((a, b), _) in enumerate(local.RESIDUAL_PAIRS):
-        # Fixed equal loadings identify each pair; its variance is estimated.
-        lines.extend([f"M{index} =~ 1*{a}+1*{b}", f"G ~~ 0*M{index}"])
-    lines.append("M0 ~~ 0*M1")
-    syntax = "\n".join(lines)
+    # Doubling method loadings and estimating one quarter of the variance
+    # preserves the implied covariance, parameter count and substantive answer.
+    syntax = local.reference_syntax().replace("1*HSNS", "2*HSNS")
     fitted = semopy.Model(syntax)
     fitted.fit(X)
     rows = fitted.inspect(std_est=True)
@@ -70,13 +67,90 @@ def test_equivalent_identified_method_factors_receive_full_credit():
         "model_syntax": syntax,
         "loadings": {row.lval: abs(float(row["Est. Std"])) for _, row in rows.iterrows()},
         "factor_correlation": None,
+        "measurement_explanation": "one_trait_with_method_effect",
+        "trait_variance_share": local.variance_shares()["trait"],
     }
     result = score_model_criteria(submission, params, base_dir=paths.task_root())
     assert result["score_binary"] == 1.0, result
 
-    # An extra unexplained pair is still wrong even when written as a method.
     a, b = local.DECOY_PAIR
-    submission["model_syntax"] += f"\nExtra =~ 1*{a}+1*{b}\nExtra ~~ 0*G+0*M0+0*M1"
+    submission["model_syntax"] += f"\nExtra =~ 1*{a}+1*{b}\nExtra ~~ 0*G+0*Format"
     assert (
         score_model_criteria(submission, params, base_dir=paths.task_root())["score_binary"] == 0.0
     )
+
+
+def test_method_variance_is_not_counted_as_trait_reliability():
+    loadings = np.array([local.LOADINGS[item][1] for item in local.ITEMS])
+    method = np.array([item in local.METHOD_ITEMS for item in local.ITEMS], dtype=float)
+    unique = 1 - loadings**2 - method * local.METHOD_VARIANCE
+    covariance = (
+        np.outer(loadings, loadings)
+        + local.METHOD_VARIANCE * np.outer(method, method)
+        + np.diag(unique)
+    )
+    shares = local.variance_shares()
+    assert sum(shares.values()) == pytest.approx(1)
+    assert shares["trait"] == pytest.approx(loadings.sum() ** 2 / covariance.sum())
+    assert shares["method"] > 0.08
+    sample = local.simulate_hsns(50_000, np.random.default_rng(843)).to_numpy()
+    np.testing.assert_allclose(np.cov(sample, rowvar=False), covariance, atol=0.025)
+
+
+def test_pair_method_and_residual_models_are_equivalent():
+    from corral_psychometrics.score import local_dependence_pairs_from_fit
+
+    rng = np.random.default_rng(17)
+    trait, method = rng.normal(size=(2, 6000))
+    items = [f"X{i}" for i in range(6)]
+    X = pd.DataFrame(
+        {
+            item: 0.65 * trait
+            + (0.4 * method if i < 2 else 0)
+            + rng.normal(0, np.sqrt(1 - 0.65**2 - (0.4**2 if i < 2 else 0)), 6000)
+            for i, item in enumerate(items)
+        }
+    )
+    base = "G =~ " + "+".join(items)
+    residual = C.fit(base + "\nX0 ~~ X1", X)
+    method_model = C.fit(base + "\n" + C.method_syntax("Page", items[:2], ["G"]), X)
+    np.testing.assert_allclose(residual.calc_sigma()[0], method_model.calc_sigma()[0], atol=0.003)
+    assert (
+        local_dependence_pairs_from_fit(residual, items)
+        == local_dependence_pairs_from_fit(method_model, items)
+        == {frozenset(items[:2])}
+    )
+
+
+def test_replication_distinguishes_method_from_trait_cross_loadings():
+    from corral_psychometrics.generators.level_2 import gen_l2_t08_misfit_replication as replication
+
+    task = paths.find(2, 8)
+    params = json.loads(task.definition.read_text())[0]["scoring_params"]
+    good = replication.candidate_submissions()["correct"]
+    result = score_model_criteria(good, params, base_dir=paths.task_root())
+    assert result["score_binary"] == 1, result
+    assert result["recorded"]["derived_findings"]["cross_loadings"] == [
+        replication.CROSS_LOADING[0]
+    ]
+    wrong = {**good, "model_syntax": good["model_syntax"] + "\nFormat ~ gender"}
+    assert score_model_criteria(wrong, params, base_dir=paths.task_root())["score_binary"] == 0
+
+
+def test_replication_accepts_equivalent_residual_representation():
+    from corral_psychometrics.generators.level_2 import gen_l2_t08_misfit_replication as replication
+    from corral_psychometrics.score import _drop_method_factor
+
+    task = paths.find(2, 8)
+    params = json.loads(task.definition.read_text())[0]["scoring_params"]
+    good = replication.candidate_submissions()["correct"]
+    syntax = _drop_method_factor(good["model_syntax"], "Format")
+    items = replication.METHOD_ITEMS
+    # Multiple residual terms on one line exercise equivalent compact syntax.
+    syntax += "\n" + "\n".join(
+        f"{a} ~~ " + "+".join(items[index + 1 :]) for index, a in enumerate(items[:-1])
+    )
+    result = score_model_criteria(
+        {**good, "model_syntax": syntax}, params, base_dir=paths.task_root()
+    )
+    assert result["score_binary"] == 1, result

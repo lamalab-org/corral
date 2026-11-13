@@ -37,3 +37,5 @@ Items are taken from published self-report personality scales and were presented
 | `country` | ISO country code |
 
 Rows: 43,710. Countries: US (27,000), GB (6,200), CA (3,800), AU (3,000), DE (830), IN (660), SE (630), PH (560), PL (520), BR (510).
+
+Presentation log: HSNS2, HSNS5, HSNS7, HSNS10 appeared together on a matrix page. All other HSNS items appeared individually. The log describes presentation, not which effects exist in responses.

@@ -29,7 +29,7 @@ Include every dataset exactly once and use only candidate IDs from the catalogue
 
 ## What needs checking
 
-Each sample has a different complication: missingness, residual dependence, a
+Five samples have a complication and one is an uncomplicated control. Complications include missingness, a
 subgroup item-intercept shift, duplicate rows, a weak item, or response-style shift.
 These can distort fit without defining the generating model. Check that the
 assignment follows the stated BIC rule rather than a filename, catalogue order,

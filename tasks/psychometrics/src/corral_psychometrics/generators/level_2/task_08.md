@@ -17,15 +17,15 @@ they represent local dependence, cross-loadings, DIF, or a weak item.
 Report a final model and, for each category below, the supported findings and
 whether they replicate. Categories are not mutually exclusive.
 
-- `local_dependence`: item pairs requiring residual covariance;
-- `cross_loadings`: items loading on a second factor;
+- `local_dependence`: item clusters sharing a presentation effect;
+- `cross_loadings`: items loading on a second personality factor;
 - `dif_items`: items with group-dependent response after accounting for factors;
 - `poor_items`: items with a loading too weak to retain.
 
 Also report development-supported modifications rejected after replication. Use
 the JSON format in the task definition. A poor item may be omitted from the final
 model; no other item may be omitted. The model must give `gender` a path to each
-factor.
+personality factor. Orthogonal method factors do not require a group path.
 
 ## What needs checking
 

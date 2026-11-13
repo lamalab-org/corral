@@ -6,7 +6,7 @@ samples drawn from some of them.
 
     population_a   three correlated factors, loadings .68, r .25
     population_b   two factors, psychopathy and narcissism merged, loadings .70, r .30
-    population_c   population_a plus a residual covariance on DDP1, DDP2
+    population_c   population_a plus a matrix-page method effect on DDP1, DDP2, DDN1, DDN2
     population_d   the same model as population_a, sampled independently
 
 The agent describes each population with a model and places each case. a and d
@@ -50,8 +50,8 @@ CASE_SOURCES = ["population_d", "population_c", "population_b"]
 # the best-fitting population's. The agent is not told it.
 COMPATIBILITY_MARGIN = 0.06
 
-RESIDUAL_PAIR = ("DDP1", "DDP2")
-RESIDUAL_SHARE = 0.40
+METHOD_ITEMS = ("DDP1", "DDP2", "DDN1", "DDN2")
+METHOD_VARIANCE = 0.22
 
 PROMPT = (
     "You have large Dirty Dozen response samples from four reference populations, "
@@ -80,14 +80,14 @@ identifiers, in any order.
 """
 
 
-def continuous_block(rng, n, factors, phi, loadings, residual_pair=None, residual=0.0):
+def continuous_block(rng, n, factors, phi, loadings, method_items=None, method_variance=0.0):
     """Draw continuous responses from a latent factor model.
 
     factors       latent variable names, in the order `phi` uses
     phi           correlations between the latent variables
     loadings      item -> list of (factor, loading)
-    residual_pair two items sharing variance the factors do not explain
-    residual      how much variance they share
+    method_items items sharing a presentation influence orthogonal to the traits
+    method_variance      how much variance they share
     """
     eta = rng.multivariate_normal(np.zeros(len(factors)), phi, n)
     index = {name: i for i, name in enumerate(factors)}
@@ -96,9 +96,9 @@ def continuous_block(rng, n, factors, phi, loadings, residual_pair=None, residua
     for item in ITEMS:
         score = sum(loading * eta[:, index[factor]] for factor, loading in loadings[item])
         explained = sum(loading**2 for _, loading in loadings[item])
-        if residual_pair and item in residual_pair:
-            score = score + np.sqrt(residual) * shared
-            explained += residual
+        if method_items and item in method_items:
+            score = score + np.sqrt(method_variance) * shared
+            explained += method_variance
         noise = rng.normal(0, np.sqrt(max(1 - explained, 0.08)), n)
         out[item] = C.continuous_response(score + noise, C.INTERCEPTS[item])
     return pd.DataFrame(out)[ITEMS]
@@ -128,14 +128,14 @@ POPULATIONS = {
     "population_a": three_factors,
     "population_b": lambda rng, n: two_factors(rng, n, 0.70, 0.30),
     "population_c": lambda rng, n: correlated_factors(
-        rng, n, 0.68, 0.25, residual_pair=RESIDUAL_PAIR, residual=RESIDUAL_SHARE
+        rng, n, 0.68, 0.25, method_items=METHOD_ITEMS, method_variance=METHOD_VARIANCE
     ),
     "population_d": three_factors,
 }
 STRUCTURES = {
     "population_a": "three correlated factors, loadings .68, r .25",
     "population_b": "two factors, psychopathy and narcissism merged, loadings .70, r .30",
-    "population_c": f"population_a plus residual covariance {RESIDUAL_SHARE} on {RESIDUAL_PAIR}",
+    "population_c": f"population_a plus a shared presentation factor {METHOD_VARIANCE} on {METHOD_ITEMS}",
     "population_d": "the same model as population_a, sampled independently",
 }
 
@@ -146,7 +146,7 @@ THREE_FACTORS = f"P =~ {_P}\nN =~ {_N}\nM =~ {_M}"
 MODEL_SYNTAX = {
     "population_a": THREE_FACTORS,
     "population_b": f"PN =~ {_P}+{_N}\nM =~ {_M}",
-    "population_c": f"{THREE_FACTORS}\n{RESIDUAL_PAIR[0]} ~~ {RESIDUAL_PAIR[1]}",
+    "population_c": THREE_FACTORS + "\n" + C.method_syntax("Format", METHOD_ITEMS, ["P", "N", "M"]),
     "population_d": THREE_FACTORS,
 }
 # Models an analyst might give instead: one detail short of the generating
@@ -155,7 +155,7 @@ ALTERNATIVE_SYNTAX = {
     "one factor": f"G =~ {_P}+{_N}+{_M}",
     "three factors": THREE_FACTORS,
     "two factors": MODEL_SYNTAX["population_b"],
-    "three factors + residual": MODEL_SYNTAX["population_c"],
+    "three factors + method": MODEL_SYNTAX["population_c"],
     "bifactor": (
         f"G =~ {_P}+{_N}+{_M}\nSP =~ {_P}\nSN =~ {_N}\nSM =~ {_M}\n"
         "G ~~ 0*SP\nG ~~ 0*SN\nG ~~ 0*SM\nSP ~~ 0*SN\nSP ~~ 0*SM\nSN ~~ 0*SM"
@@ -246,6 +246,9 @@ def write_codebook(path):
         "identifier. How they differ is not supplied. `cases.csv` holds three case samples of "
         f"{CASE_SIZE} respondents each, identified by `case_id`; each case comes from one of "
         "the four populations.\n\n"
+        "Items " + ", ".join(METHOD_ITEMS) + " were presented together on a matrix page; "
+        "other items appeared individually. This format was used in every population; "
+        "whether it produces a shared response influence must be assessed from the data.\n\n"
         "| item | text |\n|---|---|\n"
         + "\n".join(f"| `{item}` | {C.ITEM_TEXT[item]} |" for item in ITEMS)
         + "\n"
@@ -315,7 +318,7 @@ def candidate_submissions():
             **correct,
             "models": {name: THREE_FACTORS for name in POPULATIONS},
         },
-        "misses the residual covariance": {
+        "omits the method factor": {
             **correct,
             "models": {**MODEL_SYNTAX, "population_c": THREE_FACTORS},
         },

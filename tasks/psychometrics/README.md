@@ -8,10 +8,15 @@ scoring negates a response. Level 2 Task 09 retains binary adaptive IRT data.
 Scoring fits continuous SEMs by ML and compares BIC on the same items and sample.
 
 Dirty Dozen tasks L1 02, 04, 07 and 08 use bifactor S−1 models. Task 02 targets
-population omega of .60–.70 for each four-item facet score. Local dependence is
-represented by paired residual associations (L1 03) and a shared method factor
-with three indicators (L2 10). Equivalent identified two-item method factors
-are accepted for L1 03; its reported loadings refer to the broad trait.
+population omega of .60–.70 for each four-item facet score.
+
+Method effects are explicit orthogonal factors tied to documented presentation
+formats in L1 03 and L2 03, 04, 08 and 10. The main clusters have four items.
+L2 08 also includes an identified two-item effect found only in development.
+L1 03 asks agents to distinguish personality from method variance in the total
+score; method variance is excluded from its reported trait variance share.
+L1 01/08 and L2 01/02 omit incidental residual dependence to keep their questions
+focused. L2 09 retains its binary IRT pair-dependence exercise.
 
 ## Layout
 
