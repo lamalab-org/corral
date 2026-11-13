@@ -232,6 +232,9 @@ def _fork_state(event: ExecutionForked, commit: Commit) -> ExecutionState:
             for key, value in source.usage.model_dump(mode="json").items()
         },
         "checkpoint_configured": event.configured,
+        "branch_checkpoints": list(
+            source.runtime.metadata.get("branch_checkpoints", ())
+        ),
         "continuation_message": (
             event.message if isinstance(event.message, str) else None
         ),

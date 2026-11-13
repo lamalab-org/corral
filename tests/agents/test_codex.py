@@ -12,7 +12,7 @@ from mcp.client.streamable_http import streamablehttp_client
 pytest.importorskip("openai_codex")
 
 from corral.agents import CodexAgent
-from corral.agents.codex import HarnessRunResult, _RunState
+from corral.agents.codex import HarnessRunResult, _CodexError, _RunState
 from corral.core.action import submit_answer_tool
 from corral.core.environment import Environment, Toolset
 from corral.core.task import TaskDefinition
@@ -69,7 +69,8 @@ async def test_codex_uses_session_mcp_and_returns_typed_outcome(monkeypatch):
 
     def fake_run(self, *, run, **kwargs):
         captured.update(kwargs)
-        captured["max_sdk_turns"] = run.metadata["max_sdk_turns"]
+        captured["max_model_calls"] = run.metadata["max_model_calls"]
+        captured["model_call_budget_source"] = run.metadata["model_call_budget_source"]
         run.messages.append({"role": "assistant", "content": "42"})
         run.usage = {
             "prompt_tokens": 10,
@@ -91,7 +92,8 @@ async def test_codex_uses_session_mcp_and_returns_typed_outcome(monkeypatch):
     assert outcome.usage.llm_calls == 1
     assert outcome.metadata["session_id"] == "codex-1"
     assert captured["mcp_url"] == "http://127.0.0.1:1234/mcp"
-    assert captured["max_sdk_turns"] == 1
+    assert captured["max_model_calls"] == 1
+    assert captured["model_call_budget_source"] == ("cumulative_token_usage_updates")
     assert agent.__dict__.keys().isdisjoint(
         {
             "messages",
@@ -126,6 +128,78 @@ def test_codex_extracts_usage_from_nested_total():
     assert usage.output_tokens == 5
     assert usage.reasoning_tokens == 2
     assert usage.llm_calls == 1
+
+
+def test_codex_interrupts_at_model_call_budget():
+    from openai_codex.generated.v2_all import ThreadItem
+
+    agent = CodexAgent(model="gpt-test", system_prompt="system")
+    run = _RunState(metadata={"max_model_calls": 2})
+    interrupted = []
+
+    def usage_event(total_tokens):
+        return SimpleNamespace(
+            method="thread/tokenUsage/updated",
+            payload=SimpleNamespace(
+                token_usage=SimpleNamespace(
+                    total=SimpleNamespace(input_tokens=total_tokens, output_tokens=0)
+                )
+            ),
+        )
+
+    def stream():
+        for index in range(2):
+            tool = ThreadItem.model_validate(
+                {
+                    "id": f"tool-{index}",
+                    "type": "commandExecution",
+                    "command": "true",
+                    "cwd": "/tmp",
+                    "commandActions": [],
+                    "status": "completed",
+                    "exitCode": 0,
+                }
+            ).root
+            yield SimpleNamespace(
+                method="item/completed", payload=SimpleNamespace(item=tool)
+            )
+        yield usage_event(10)
+        yield usage_event(10)  # duplicate cumulative update
+        assert interrupted == []
+        yield usage_event(20)
+        assert interrupted == [True]
+        yield SimpleNamespace(
+            method="turn/completed",
+            payload=SimpleNamespace(
+                turn=SimpleNamespace(status=SimpleNamespace(value="interrupted"))
+            ),
+        )
+
+    turn = SimpleNamespace(stream=stream, interrupt=lambda: interrupted.append(True))
+    thread = SimpleNamespace(turn=lambda *args, **kwargs: turn)
+
+    with pytest.raises(_CodexError, match="2 model-call budget") as error:
+        agent._drive_turn(thread, "solve", run)
+
+    assert error.value.subtype == "iteration_limit"
+    assert run.metadata["model_calls"] == 2
+    assert run.metadata["num_tool_calls"] == 2
+
+
+@pytest.mark.anyio
+async def test_codex_reports_model_call_budget_as_iteration_limit(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    def fake_run(self, *, run, **kwargs):
+        run.result = HarnessRunResult(
+            status="iteration_limit", error="model-call budget exhausted"
+        )
+
+    monkeypatch.setattr(CodexAgent, "_execute_harness", fake_run)
+    outcome = await CodexAgent(system_prompt="system").run_session(Session())
+
+    assert outcome.status == "iteration_limit"
+    assert outcome.error == "model-call budget exhausted"
 
 
 @pytest.mark.parametrize(

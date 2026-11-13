@@ -20,7 +20,7 @@ from corral.persistence import SQLiteCommitStore, WorkspaceManager
 from corral.runtime.environment_loader import load_environment_group
 
 
-@pytest.fixture()
+@pytest.fixture
 def anyio_backend():
     return "asyncio"
 
@@ -72,11 +72,13 @@ async def _start_session(environment, store, *, dependency_outputs=None):
     )
 
 
-def _environment(work_dir: str = "") -> QualitativeAnalysisEnvironment:
+def _environment(
+    work_dir: str = "", *, shared_inventory: bool = False
+) -> QualitativeAnalysisEnvironment:
     task = QualitativeAnalysisTask(
         name="wetlab-state-test",
         description="Run a deterministic wetlab experiment.",
-        tools=["mix_two_solutions", "measure_pH"],
+        tools=["mix_two_solutions", "measure_pH", "check_inventory"],
         scoring_fn=lambda _answer: 1.0,
         submission_format="number",
         task_sys="K S(+6)",
@@ -99,6 +101,7 @@ def _environment(work_dir: str = "") -> QualitativeAnalysisEnvironment:
             workspace_factory=None,
         ),
         group_tasks={"wetlab-state-test": task},
+        shared_inventory=shared_inventory,
     )
 
 
@@ -128,6 +131,12 @@ def test_loader_binds_wetlab_scratch_per_execution(tmp_path, monkeypatch) -> Non
         assert list(Path(second.workspace_path).iterdir()) == []
     finally:
         registry.close()
+
+    shared = load_environment_group(
+        "wetlab", env_kwargs={"level": 1, "shared_inventory": True}
+    )[task_id]
+    assert shared.shared_inventory
+    assert shared.for_task("shared-trial").shared_inventory
 
 
 def test_structured_inventory_round_trip_is_exact() -> None:
@@ -170,7 +179,7 @@ def test_incompatible_chemistry_checkpoint_fails_loudly() -> None:
         WetlabEngine(incompatible)
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_action_replay_and_checkpoint_restore_are_deterministic(tmp_path) -> None:
     workspace_root = tmp_path / "workspace"
     private = tmp_path / "corral-state"
@@ -201,7 +210,8 @@ async def test_action_replay_and_checkpoint_restore_are_deterministic(tmp_path) 
         replay_result = await replay_session.execute(
             Action(**{**action.model_dump(), "id": "mix-replay"})
         )
-        assert first_result.success and replay_result.success
+        assert first_result.success
+        assert replay_result.success
         assert first_result.result == replay_result.result
         first = await store.materialize("main")
         replay = await store.materialize("replay")
@@ -249,7 +259,7 @@ async def test_action_replay_and_checkpoint_restore_are_deterministic(tmp_path) 
         assert set(continued.workspace.files) == {"notes.txt"}
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_chained_task_receives_inventory_through_dependency_output(
     tmp_path,
 ) -> None:
@@ -308,3 +318,115 @@ async def test_chained_task_receives_inventory_through_dependency_output(
         configured = await store.materialize("main")
 
     assert _wetlab_payload(configured) == output.metadata["wetlab"]
+
+
+@pytest.mark.anyio
+async def test_shared_inventory_limits_all_scientist_branches(tmp_path) -> None:
+    environment = _environment(str(tmp_path / "workspace"), shared_inventory=True)
+    async with SQLiteCommitStore(tmp_path / "state.sqlite3", "shared-wetlab") as store:
+        main = await _start_session(environment.for_task("shared-wetlab"), store)
+        first = await main.fork_branch(
+            branch_id="first", workspace_parent=main.workspace
+        )
+        second = await main.fork_branch(
+            branch_id="second", workspace_parent=main.workspace
+        )
+
+        def mix(action_id: str, label: str, sample_volume: int) -> Action:
+            return Action(
+                id=action_id,
+                name="mix_two_solutions",
+                arguments={
+                    "test_label": label,
+                    "sol1_label": "sample",
+                    "sol1_vol": sample_volume,
+                    "sol2_label": "KOH",
+                    "sol2_vol": 1,
+                },
+                actor_id="agent_0",
+            )
+
+        assert (await first.execute(mix("draw-1", "first_test", 12))).success
+        overdraw = await second.execute(mix("draw-2", "second_test", 9))
+        assert not overdraw.success
+        assert "only 8.00 mL available" in (overdraw.error or "")
+        assert (await second.execute(mix("draw-3", "second_test", 8))).success
+
+        inventory = await first.execute(
+            Action(
+                id="check-1", name="check_inventory", arguments={}, actor_id="agent_0"
+            )
+        )
+        assert inventory.success
+        assert "'remaining_volume': '0 mL'" in (inventory.result or "")
+
+        # A branch cloned after a physical experiment cannot copy its product.
+        clone = await first.fork_branch(
+            branch_id="clone", workspace_parent=main.workspace
+        )
+        use_product = Action(
+            id="consume-product",
+            name="mix_two_solutions",
+            arguments={
+                "test_label": "used_product",
+                "sol1_label": "first_test",
+                "sol1_vol": 12,
+                "sol2_label": "KOH",
+                "sol2_vol": 1,
+            },
+            actor_id="agent_0",
+        )
+        assert (await clone.execute(use_product)).success
+        duplicate = await first.execute(
+            Action(
+                **{
+                    **use_product.model_dump(),
+                    "id": "consume-again",
+                    "arguments": {
+                        **use_product.arguments,
+                        "test_label": "duplicate_product",
+                    },
+                }
+            )
+        )
+        assert not duplicate.success
+
+        assert (
+            await main.execute(
+                Action(
+                    id="submit-shared",
+                    name="submit_answer",
+                    arguments={"answer": "K+"},
+                    actor_id="agent_0",
+                )
+            )
+        ).success
+        output = main.environment.get_task_output(await store.materialize("main"))
+        assert output is not None
+        assert output.metadata["wetlab"]["inventory"]["sample"]["volume"] == 0
+
+    downstream_task = replace(
+        environment.current_task,
+        name="continue-wetlab",
+        initial=False,
+        input_map={"wetlab-state-test": InputRef("wetlab-state-test")},
+    )
+    downstream = QualitativeAnalysisEnvironment(
+        "continue-wetlab",
+        downstream_task,
+        base_work_dir=str(tmp_path / "next-workspace"),
+        toolset=Toolset(pool=create_tools(), workspace_factory=None),
+        group_tasks={
+            "wetlab-state-test": environment.current_task,
+            "continue-wetlab": downstream_task,
+        },
+        shared_inventory=True,
+    ).for_task("next")
+    async with SQLiteCommitStore(tmp_path / "next.sqlite3", "next") as next_store:
+        await _start_session(
+            downstream,
+            next_store,
+            dependency_outputs={"wetlab-state-test": output},
+        )
+        configured = await next_store.materialize("main")
+    assert _wetlab_payload(configured)["inventory"]["sample"]["volume"] == 0

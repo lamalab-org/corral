@@ -672,16 +672,32 @@ def build_terminal_tool(filesystem: WorkspaceFilesystem) -> Tool:
 
         # The shell inherits its caller's identity; Docker tool workers have
         # already dropped privileges at the shared execution boundary.
+        environment = {
+            "HOME": str(filesystem.root),
+            "TMPDIR": str(filesystem.root),
+            "LANG": "C.UTF-8",
+            "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+        }
+        # Preserve numerical library limits without exposing the controller's
+        # credentials to commands run by the agent.
+        for name in (
+            "OPENBLAS_NUM_THREADS",
+            "OPENBLAS_DEFAULT_NUM_THREADS",
+            "OMP_NUM_THREADS",
+            "OMP_THREAD_LIMIT",
+            "MKL_NUM_THREADS",
+            "BLIS_NUM_THREADS",
+            "VECLIB_MAXIMUM_THREADS",
+            "NUMEXPR_NUM_THREADS",
+            "NUMEXPR_MAX_THREADS",
+        ):
+            if name in os.environ:
+                environment[name] = os.environ[name]
         with tempfile.TemporaryFile() as output_stream:
             process = subprocess.Popen(
                 ["/bin/sh", "-c", command],
                 cwd=filesystem.root,
-                env={
-                    "HOME": str(filesystem.root),
-                    "TMPDIR": str(filesystem.root),
-                    "LANG": "C.UTF-8",
-                    "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
-                },
+                env=environment,
                 stdout=output_stream,
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
