@@ -821,6 +821,15 @@ def test_benchmark_runs_corral_mini_by_default():
     assert subset == {"name": "corral-mini", "version": mini_versions()[-1]}
 
 
+def test_benchmark_runs_v1_only_when_requested():
+    selected, subset = cli._select_tasks(
+        _bench_args("--mini-version", "1"), _afm_environments()
+    )
+
+    assert selected == list(mini_task_ids("afm", 1, version=1))
+    assert subset == {"name": "corral-mini", "version": 1}
+
+
 def test_benchmark_run_full_and_explicit_tasks_override_corral_mini():
     environments = _afm_environments()
 
@@ -916,3 +925,11 @@ def test_benchmark_reports_evaluation_failure_as_incomplete(
     assert trial["score"] is None
     assert trial["error_message"] is None
     assert trial["evaluation_error"]
+
+
+def test_benchmark_parser_defaults_to_verbose_reports():
+    base = ["bench", "--agent", "ReActAgent", "--environment", "samplemath"]
+
+    assert cli.build_parser().parse_args(base).verbose is True
+    assert cli.build_parser().parse_args([*base, "--verbose"]).verbose is True
+    assert cli.build_parser().parse_args([*base, "--no-verbose"]).verbose is False

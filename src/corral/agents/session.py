@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
+import tempfile
 from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -30,6 +32,7 @@ from corral.core.events import (
     AgentTurnRecorded,
     ContextImported,
     ParallelGroupCompleted,
+    RuntimeUpdate,
     SubmissionAccepted,
     TaskConfigured,
     ToolCompleted,
@@ -44,13 +47,16 @@ from corral.core.tool_catalog import ToolCatalogSnapshot
 from corral.core.transition import (
     ToolEffects,
     ToolRecoveryPending,
+    environment_operations,
     execute_action,
     is_surrender_answer,
     propose_action,
     surrender_enabled,
 )
+from corral.core.workspace import WorkspaceState
 from corral.observability import record_commit_safely
 from corral.persistence import CommitConflictError
+from corral.persistence.artifacts import iter_blob_refs
 from corral.runtime import permissions
 
 if TYPE_CHECKING:
@@ -252,6 +258,8 @@ class AgentSession:
         self._delegated_iteration_limit: ContextVar[int | None] = ContextVar(
             f"corral_delegate_budget_{id(self)}", default=None
         )
+        self._checkpoint_owner = self
+        self._checkpoint_lock = anyio.Lock()
         self._action_lock = anyio.Lock()
         self._record_lock = anyio.Lock()
         self._event_index: int | None = None
@@ -1435,6 +1443,7 @@ class AgentSession:
             agent=self._hook_agent,
             mcp_host=self.mcp_host,
         )
+        branch._checkpoint_owner = self._checkpoint_owner
         if node_workspace is not None:
             workspace = await environment.workspace_manager.snapshot(
                 node_workspace, previous=branch_state.workspace
@@ -1449,6 +1458,89 @@ class AgentSession:
             )
             await branch._refresh(observed_hash=commit.hash)
         return branch
+
+    async def checkpoint_branch(self) -> dict[str, Any]:
+        """Save branch state without exposing private environment values to workers.
+
+        The opaque blob and public workspace manifest are both retained in agent
+        bookkeeping so continuation imports the snapshot and its file bytes.
+        """
+        state = await self.state_store.materialize(self.branch_id)
+        payload = {
+            "environment": state.environment.values,
+            "workspace": state.workspace.model_dump(mode="json"),
+        }
+        blob = await self.environment.workspace_manager.artifact_store.put_bytes(
+            json.dumps(payload).encode()
+        )
+        owner = self._checkpoint_owner
+        async with owner._checkpoint_lock:
+            current = await owner._refresh()
+            refs = set(current.runtime.metadata.get("branch_checkpoints", ()))
+            refs.add(blob.blob_ref)
+            commit = await owner._append_runtime(
+                TaskConfigured(
+                    status="Branch checkpoint saved",
+                    runtime_update=RuntimeUpdate(
+                        metadata={"branch_checkpoints": sorted(refs)}
+                    ),
+                ),
+                f"branch-checkpoint:{uuid4()}",
+            )
+            await owner._refresh(observed_hash=commit.hash)
+        return {
+            "blob_ref": blob.blob_ref,
+            "workspace": payload["workspace"],
+            "environment_artifacts": [
+                {"blob_ref": ref}
+                for ref in sorted(set(iter_blob_refs(payload["environment"])))
+            ],
+        }
+
+    async def restore_branch_state(self, *, checkpoint: Mapping[str, Any]) -> None:
+        """Restore a saved branch in its assigned controller-owned workspace."""
+        if "blob_ref" in checkpoint:
+            payload = await self.environment.workspace_manager.artifact_store.get_bytes(
+                checkpoint["blob_ref"]
+            )
+            checkpoint = json.loads(payload)
+        # Historical local checkpoints stored their environment inline.
+        saved_workspace = WorkspaceState.model_validate(checkpoint["workspace"])
+        destination = self.workspace
+        if destination is None:
+            raise ValueError("branch checkpoint requires a workspace")
+        # Materialize all bytes before replacing the branch's physical files or
+        # publishing its logical state. Node directories are absent from the
+        # main trial snapshot and must be restored separately.
+        with tempfile.TemporaryDirectory(dir=Path(destination).parent) as temporary:
+            staged = Path(temporary) / "workspace"
+            await self.environment.workspace_manager.materialize(
+                saved_workspace, staged
+            )
+            for entry in Path(destination).iterdir():
+                if entry.is_dir() and not entry.is_symlink():
+                    shutil.rmtree(entry)
+                else:
+                    entry.unlink()
+            permissions.copy_workspace(staged, destination)
+
+        current = await self._refresh()
+        restored = WorkspaceState.model_validate(
+            {**saved_workspace.model_dump(mode="json"), "id": current.workspace.id}
+        )
+        commit = await self._append_runtime(
+            TaskConfigured(
+                status="Branch checkpoint restored",
+                environment_operations=environment_operations(
+                    current.environment.values, checkpoint["environment"]
+                ),
+                workspace_delta=WorkspaceDelta.from_workspace(restored),
+                expected_environment_revision=current.environment.revision,
+                expected_workspace_revision=current.workspace.revision,
+            ),
+            f"branch:{self.branch_id}:restored:{uuid4()}",
+        )
+        await self._refresh(observed_hash=commit.hash)
 
     async def promote_artifacts(self, *, source_workspace: str) -> list[str]:
         """Copy a selected node's files into this agent's canonical workspace."""

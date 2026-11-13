@@ -44,6 +44,7 @@ class DockerSandboxSpec:
         "AZURE_OPENAI_API_KEY",
         "AZURE_OPENAI_ENDPOINT",
         "CORRAL_LANGFUSE_ENABLED",
+        "CORRAL_LANGFUSE_SESSION_ID",
         "HF_TOKEN",
         "LANGFUSE_BASE_URL",
         "LANGFUSE_HOST",
@@ -52,6 +53,7 @@ class DockerSandboxSpec:
         "LANGFUSE_TRACING_ENABLED",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
+        "OPENROUTER_API_KEY",
     )
     retention: str = SandboxRetention.ON_FAILURE.value
     registry_module: str | None = None

@@ -919,7 +919,15 @@ def _add_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
         default_commit_file=str(Path(".corral") / "benchmark-commits.sqlite3"),
     )
     execution.add_argument("--report")
-    execution.add_argument("--verbose", action="store_true")
+    execution.add_argument(
+        "--verbose",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Include agent messages and tool calls in the report "
+            "(default: on; --no-verbose turns it off)."
+        ),
+    )
     sandbox = parser.add_argument_group("sandbox")
     sandbox.add_argument(
         "--sandbox",
