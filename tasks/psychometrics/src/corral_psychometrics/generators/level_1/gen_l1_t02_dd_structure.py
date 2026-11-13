@@ -112,9 +112,9 @@ A single JSON object:
 
 `model_syntax` uses semopy syntax (`=~` loadings, `~~` (co)variances, `0*` to fix a parameter to zero).
 
-`loadings` gives, for each item you analysed, the largest absolute standardised loading that item has on any factor in your model.
+`loadings`: Largest absolute standardised loading per item across all model factors.
 
-`factor_correlation` is the correlation between the factors when your model has exactly two correlated factors, and null otherwise.
+`factor_correlation`: Factor correlation for a model with exactly two correlated factors; otherwise `null`.
 """
 
 

@@ -96,9 +96,9 @@ A single JSON object:
 `model_syntax` uses semopy syntax (`=~` loadings, `~~` (co)variances, `0*` to fix a
 parameter to zero).
 
-`loadings` gives, for each item you analysed, the absolute standardised loading on the broad trait factor covering all ten items, excluding narrow method factors.
+`loadings`: Absolute standardised item loadings on the broad trait factor, excluding method factors.
 
-`factor_correlation` is the correlation between the factors when your model has exactly two correlated factors, and null otherwise.
+`factor_correlation`: Correlation between two trait factors, if applicable; otherwise `null`.
 """
 
 
