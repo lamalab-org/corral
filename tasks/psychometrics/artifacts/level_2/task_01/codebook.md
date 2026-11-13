@@ -1,6 +1,6 @@
 # Codebook - group comparability study
 
-Tab-separated, one row per respondent. Questionnaire responses are ratings from 1 (Disagree) to 5 (Agree); 0 denotes a missing response.
+Tab-separated, one row per respondent. Questionnaire responses are ratings on a continuous unbounded scale centered around zero; empty fields denote missing responses.
 
 The separate `behavior.csv` file contains two independent behavioural indicators for the same participants.
 

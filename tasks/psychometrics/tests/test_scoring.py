@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Check the expected scoring results for every task.
-
-    uv run --with numpy --with pandas --with scipy --with semopy \
-      python tests/test_scoring.py
-"""
+"""Validate reference answers, competing analyses, and equivalent submission syntax."""
 
 from __future__ import annotations
 
@@ -29,8 +25,8 @@ ROOT = paths.task_root()
 # follows from that numbering -- see corral_psychometrics.paths.
 TASKS = [
     (1, 1, "two_correlated_factors"),
-    (1, 2, "bifactor_general_plus_specifics"),
-    (1, 3, "unidimensional_with_correlated_residuals"),
+    (1, 2, "bifactor_s1_machiavellianism_reference"),
+    (1, 3, "correct"),
     (1, 4, "DD, bifactor (CORRECT)"),
     (1, 5, "correct"),
     (1, 6, "joint latent model (CORRECT)"),
@@ -172,7 +168,7 @@ def run_task(level, number, expected_winner):
     for col, val in params.get("subset", {}).items():
         data = data[data[col].isin(val)] if isinstance(val, list) else data[data[col] == val]
     X = data[[c for c in keep if c in data.columns]]
-    X = X[(X != 0).all(axis=1)].astype(float)
+    X = X[X.notna().all(axis=1)].astype(float)
 
     failures = []
     print(f"\n{gen.TASK_ID}")
@@ -199,7 +195,7 @@ def run_task(level, number, expected_winner):
     if "gender" in items:
         pooled_X = pooled_X[pooled_X.gender.isin([1, 2])]
     pooled_X = pooled_X[items]
-    pooled_X = pooled_X[(pooled_X != 0).all(axis=1)].astype(float)
+    pooled_X = pooled_X[pooled_X.notna().all(axis=1)].astype(float)
     key = (
         "item_quality"
         if "item_quality" in good

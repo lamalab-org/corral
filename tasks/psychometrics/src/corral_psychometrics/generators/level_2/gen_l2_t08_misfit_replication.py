@@ -1,20 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Level 2 Task 08 artifacts and scoring metadata.
-
-Generating model: two correlated HSNS factors (phi 0.28), with four problems
-planted in both samples and one planted in the development sample alone.
-
-    HSNS5 ~~ HSNS7      residual covariance 0.22        replicates
-    HSNS9 -> F1         cross-loading 0.38              replicates
-    HSNS3               differential item functioning   replicates
-    HSNS6               loading 0.30, too weak to keep  replicates
-    HSNS1 ~~ HSNS2      residual covariance 0.30        development only
-
-The development-only pair is the largest single improvement to development fit
-and is absent from the replication sample, so chasing fit alone gets it wrong.
-Both replicating covariances cross the two factors; a pair inside one factor
-would be absorbed by it and leave nothing to find.
-"""
+"""Generate the task testing whether measurement modifications replicate."""
 
 from __future__ import annotations
 
@@ -23,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from corral_psychometrics.scoring_policy import POLICY_NAME
 from corral_psychometrics import paths
 from corral_psychometrics.generators import common as C
 
@@ -54,12 +40,12 @@ LOADINGS = {
 FACTOR_CORRELATION = 0.28
 LATENT_GROUP_DIFFERENCE = 0.20
 
-# Both residual covariances cross the two factors. A pair inside one factor is
-# absorbed by that factor and leaves almost nothing to find.
-STABLE_RESIDUAL = ("HSNS5", "HSNS7")
-STABLE_RESIDUAL_CORR = 0.22
-DEVELOPMENT_ONLY_RESIDUAL = ("HSNS1", "HSNS2")
-DEVELOPMENT_RESIDUAL_CORR = 0.30
+# Presentation groups span the personality dimensions. Factors are orthogonal
+# to the traits and each other, with unit loadings and estimated variances.
+METHOD_ITEMS = ("HSNS4", "HSNS5", "HSNS7", "HSNS10")
+METHOD_VARIANCE = 0.22
+DEVELOPMENT_METHOD_ITEMS = ("HSNS1", "HSNS2")
+DEVELOPMENT_METHOD_VARIANCE = 0.36
 
 CROSS_LOADING = ("HSNS9", "F1", 0.38)
 STABLE_DIF = "HSNS3"
@@ -72,7 +58,7 @@ REPLICATION_GAIN = 0.010
 WEAK_LOADING = 0.30
 
 FINDINGS = {
-    "local_dependence": [list(STABLE_RESIDUAL)],
+    "local_dependence": [list(METHOD_ITEMS)],
     "cross_loadings": [CROSS_LOADING[0]],
     "dif_items": [STABLE_DIF],
     "poor_items": [WEAK_ITEM],
@@ -82,12 +68,12 @@ REPLICATION = {
     "cross_loadings": "replicates",
     "dif_items": "replicates",
     "poor_items": "replicates",
-    "rejected_development_modifications": [list(DEVELOPMENT_ONLY_RESIDUAL)],
+    "rejected_development_modifications": [list(DEVELOPMENT_METHOD_ITEMS)],
 }
 
 PROMPT = """You are reviewing a two-factor HSNS measurement model. A development sample shows several item-level signs of misfit. An independently collected replication sample has the same questionnaire and group variable.
 
-Decide which of the apparent problems are real, and classify each as local dependence between two items, a cross-loading on the second factor, an item the two groups answer differently at the same trait level, or an item too weak to keep. An item may fall under more than one of these.
+Decide which of the apparent problems are real, and classify each as a shared presentation effect among an item cluster, a cross-loading on the second factor, an item the two groups answer differently at the same trait level, or an item too weak to keep. An item may fall under more than one of these.
 
 Return a final model, your findings, and for each kind of finding whether it holds up in the replication sample. Also list any modification the development sample supports that you rejected.
 """
@@ -95,9 +81,9 @@ Return a final model, your findings, and for each kind of finding whether it hol
 SUBMISSION_FORMAT = """A single JSON object:
 
 {
-  "model_syntax": "<complete two-factor model with group paths>",
+  "model_syntax": "<complete model>",
   "findings": {
-    "local_dependence": [["<item>", "<item>"], ...],
+    "local_dependence": [["<items sharing a method effect>"], ...],
     "cross_loadings": ["<item>", ...],
     "dif_items": ["<item>", ...],
     "poor_items": ["<item>", ...]
@@ -107,12 +93,14 @@ SUBMISSION_FORMAT = """A single JSON object:
     "cross_loadings": "does_not_replicate|replicates",
     "dif_items": "does_not_replicate|replicates",
     "poor_items": "does_not_replicate|replicates",
-    "rejected_development_modifications": [["<item>", "<item>"], ...]
+    "rejected_development_modifications": [["<items sharing a candidate effect>"], ...]
   }
 }
 
-The model may include residual covariances, cross-loadings and item paths from
-`gender`, and must give `gender` a path to each factor. An item reported as a
+The model may include orthogonal method factors, cross-loadings and item paths from
+`gender`. Give `gender` a path to each personality factor. Method factors must be
+orthogonal to the personality factors and each other. Use an identified
+parameterization for every factor. An item reported as a
 poor item may be left out of the measurement model; no other item may be.
 
 Each replication verdict is recomputed by removing that modification from your
@@ -120,22 +108,22 @@ model and refitting in the replication sample, so the verdicts have to match wha
 your own model does there. A kind of finding `replicates` when removing each of its
 modifications lowers CFI in the replication sample by at least 0.01. Poor items
 replicate when every one still has a standardised loading below 0.30 there. A
-rejected modification is written as the pair of items it would join with a residual
-covariance; it must raise CFI by at least 0.01 in the development sample and by
+rejected modification is written as the items that would share an additional
+method factor; it must raise CFI by at least 0.01 in the development sample and by
 less than 0.01 in the replication sample. The final model must reach CFI >= 0.95
 and RMSEA <= 0.08 in the replication sample."""
 
 
 def baseline_syntax():
     """Two correlated factors and a group path to each, with nothing added."""
-    return build_syntax(cross_loading=False, residual=False, dif=False, drop_weak=False)
+    return build_syntax(cross_loading=False, method=False, dif=False, drop_weak=False)
 
 
-def build_syntax(cross_loading=True, residual=True, dif=True, drop_weak=True, extra=()):
+def build_syntax(cross_loading=True, method=True, dif=True, drop_weak=True, extra=()):
     """Assemble a model from the modifications it does and does not contain.
 
     cross_loading  let the cross-loading item load on F1 as well
-    residual       free the stable residual covariance
+    method         include the stable presentation factor
     dif            free the group path on the DIF item
     drop_weak      leave the weak item out of the measurement model
     extra          further lines to append
@@ -150,8 +138,8 @@ def build_syntax(cross_loading=True, residual=True, dif=True, drop_weak=True, ex
         f"F1 ~ {GROUP}",
         f"F2 ~ {GROUP}",
     ]
-    if residual:
-        lines.append(f"{STABLE_RESIDUAL[0]} ~~ {STABLE_RESIDUAL[1]}")
+    if method:
+        lines.append(C.method_syntax("Format", METHOD_ITEMS, ["F1", "F2"]))
     if dif:
         lines.append(f"{STABLE_DIF} ~ {GROUP}")
     return "\n".join(lines + list(extra))
@@ -165,7 +153,7 @@ def reference_syntax():
 def decoy_syntax():
     """The reference model with the development-only pair added."""
     return build_syntax(
-        extra=(f"{DEVELOPMENT_ONLY_RESIDUAL[0]} ~~ {DEVELOPMENT_ONLY_RESIDUAL[1]}",)
+        extra=(C.method_syntax("Transient", DEVELOPMENT_METHOD_ITEMS, ["F1", "F2", "Format"]),)
     )
 
 
@@ -186,23 +174,25 @@ def simulate(rng, n, development):
             extra = CROSS_LOADING[2]
             signal += extra * eta[:, 0]
             explained += extra**2 + 2 * extra * loading * FACTOR_CORRELATION
-        if item in STABLE_RESIDUAL:
-            signal += np.sqrt(STABLE_RESIDUAL_CORR) * shared_stable
-            explained += STABLE_RESIDUAL_CORR
-        if development and item in DEVELOPMENT_ONLY_RESIDUAL:
-            signal += np.sqrt(DEVELOPMENT_RESIDUAL_CORR) * shared_decoy
-            explained += DEVELOPMENT_RESIDUAL_CORR
+        if item in METHOD_ITEMS:
+            signal += np.sqrt(METHOD_VARIANCE) * shared_stable
+            explained += METHOD_VARIANCE
+        if development and item in DEVELOPMENT_METHOD_ITEMS:
+            signal += np.sqrt(DEVELOPMENT_METHOD_VARIANCE) * shared_decoy
+            explained += DEVELOPMENT_METHOD_VARIANCE
         y = signal + rng.normal(0, np.sqrt(max(1 - explained, 1e-6)), n)
-        tau = np.asarray(C.THRESHOLDS[item], dtype=float)
+        intercept = np.asarray(C.INTERCEPTS[item], dtype=float)
         if item == STABLE_DIF:
             out[item] = np.where(
-                gender == 2, C.categorize(y, tau - DIF_SHIFT), C.categorize(y, tau)
+                gender == 2,
+                C.continuous_response(y, intercept + DIF_SHIFT),
+                C.continuous_response(y, intercept),
             )
         else:
-            out[item] = C.categorize(y, tau)
+            out[item] = C.continuous_response(y, intercept)
     frame = pd.DataFrame(out)[ITEMS]
     frame[GROUP] = gender
-    frame[ITEMS] = frame[ITEMS].mask(rng.random((n, len(ITEMS))) < MISSING_RATE, 0)
+    frame[ITEMS] = frame[ITEMS].mask(rng.random((n, len(ITEMS))) < MISSING_RATE, np.nan)
     prefix = "D" if development else "R"
     frame.insert(0, "participant_id", [f"{prefix}{i:05d}" for i in range(n)])
     return frame[["participant_id", *ITEMS, GROUP]]
@@ -211,7 +201,7 @@ def simulate(rng, n, development):
 def complete(frame, items=None):
     """Rows answering every item the model uses."""
     columns = items or ITEMS
-    return frame[(frame[columns] != 0).all(axis=1)][columns + [GROUP]].astype(float)
+    return frame[frame[columns].notna().all(axis=1)][columns + [GROUP]].astype(float)
 
 
 def cfi(frame, syntax, items=None):
@@ -224,7 +214,7 @@ def cfi(frame, syntax, items=None):
 
 def without(syntax, line):
     """The same model with one line taken out."""
-    return "\n".join(ln for ln in syntax.splitlines() if ln.strip() != line)
+    return syntax.replace(line, "")
 
 
 def modification_gain(frame, syntax, line, items=None):
@@ -233,14 +223,23 @@ def modification_gain(frame, syntax, line, items=None):
 
 
 def write_codebook(path):
+    """Write the public variable and response-format descriptions."""
     path.write_text(
         "# Codebook - misfit replication\n\n"
         "The development and replication files are tab-separated and hold the same ten "
-        "HSNS items. Ratings run from 1 (Disagree) to 5 (Agree); `0` denotes a missing "
+        "HSNS items. Responses are continuous and unbounded; empty fields denote a missing "
         "response.\n\n"
         "| variable | description |\n|---|---|\n"
         "| `participant_id` | identifier, unique within each file |\n"
         f"| `{GROUP}` | 1 = Group 1, 2 = Group 2 |\n\n"
+        "Presentation log (the same format in both samples): "
+        + ", ".join(METHOD_ITEMS)
+        + " appeared together on one matrix page; "
+        + ", ".join(DEVELOPMENT_METHOD_ITEMS)
+        + " shared a separate page. "
+        "HSNS8 and HSNS9 shared a third page; other items appeared individually. "
+        "Whether a shared response influence "
+        "exists or replicates must be checked in the responses.\n\n"
         "| item | text |\n|---|---|\n"
         + "\n".join(f"| `{item}` | {C.ITEM_TEXT[item]} |" for item in ITEMS)
         + "\n"
@@ -248,6 +247,7 @@ def write_codebook(path):
 
 
 def write_memo(path):
+    """Write the preliminary analysis for the agent to assess."""
     path.write_text(
         "# Preliminary analysis\n\n"
         "The two-factor model fits the development sample poorly. Several item-level "
@@ -262,6 +262,7 @@ def write_memo(path):
 
 
 def build_task_json(data_sha):
+    """Build the task definition and private scoring configuration."""
     return [
         {
             "id": TASK_ID,
@@ -273,7 +274,6 @@ def build_task_json(data_sha):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "codebook.md",
                     "data.csv",
@@ -290,6 +290,7 @@ def build_task_json(data_sha):
             "scoring_function": "score_misfit_replication",
             "scoring_params": {
                 "task_type": "misfit_replication",
+                "model_quality_policy": POLICY_NAME,
                 "data_dir": TASK.artifacts_relpath,
                 "truth_path": TASK.truth_relpath,
                 "dataset": "data.csv",
@@ -297,7 +298,7 @@ def build_task_json(data_sha):
                 "items": ITEMS,
                 "factor_items": {"F1": F1_ITEMS, "F2": F2_ITEMS},
                 "covariate": GROUP,
-                "max_factors": 3,
+                "max_factors": 5,
                 "replication_gain": REPLICATION_GAIN,
                 "weak_loading": WEAK_LOADING,
             },
@@ -306,14 +307,16 @@ def build_task_json(data_sha):
 
 
 def truth(data_sha, rows):
+    """Build the private answers, model parameters, and provenance."""
     return {
         "task_id": TASK_ID,
         "scored": {"findings": FINDINGS, "replication": REPLICATION},
+        "scoring_reference": {"reference_model_syntax": build_syntax(drop_weak=False)},
         "generative_parameters": {
-            "stable_residual": {"pair": list(STABLE_RESIDUAL), "correlation": STABLE_RESIDUAL_CORR},
-            "development_only_residual": {
-                "pair": list(DEVELOPMENT_ONLY_RESIDUAL),
-                "correlation": DEVELOPMENT_RESIDUAL_CORR,
+            "stable_method": {"items": list(METHOD_ITEMS), "variance": METHOD_VARIANCE},
+            "development_only_method": {
+                "items": list(DEVELOPMENT_METHOD_ITEMS),
+                "variance": DEVELOPMENT_METHOD_VARIANCE,
             },
             "cross_loading": list(CROSS_LOADING),
             "stable_dif_item": STABLE_DIF,
@@ -338,7 +341,7 @@ def candidate_submissions():
             "model_syntax": decoy_syntax(),
             "findings": {
                 **FINDINGS,
-                "local_dependence": [list(STABLE_RESIDUAL), list(DEVELOPMENT_ONLY_RESIDUAL)],
+                "local_dependence": [list(METHOD_ITEMS), list(DEVELOPMENT_METHOD_ITEMS)],
             },
             "replication": {**REPLICATION, "rejected_development_modifications": []},
         },
@@ -356,7 +359,7 @@ def candidate_submissions():
                 **FINDINGS,
                 "cross_loadings": [],
                 "dif_items": [],
-                "local_dependence": [list(STABLE_RESIDUAL), [CROSS_LOADING[0], "HSNS8"]],
+                "local_dependence": [list(METHOD_ITEMS), [CROSS_LOADING[0], "HSNS8"]],
             },
         },
         "keeps the weak item": {
@@ -373,10 +376,10 @@ def verify(development, replication):
     ref, dec = reference_syntax(), decoy_syntax()
     lines = {
         "cross_loadings": None,
-        "local_dependence": f"{STABLE_RESIDUAL[0]} ~~ {STABLE_RESIDUAL[1]}",
+        "local_dependence": C.method_syntax("Format", METHOD_ITEMS, ["F1", "F2"]),
         "dif_items": f"{STABLE_DIF} ~ {GROUP}",
     }
-    decoy_line = f"{DEVELOPMENT_ONLY_RESIDUAL[0]} ~~ {DEVELOPMENT_ONLY_RESIDUAL[1]}"
+    decoy_line = C.method_syntax("Transient", DEVELOPMENT_METHOD_ITEMS, ["F1", "F2", "Format"])
 
     print("what each modification is worth, in CFI, in each sample\n")
     print(f"  {'modification':34s} {'development':>12s} {'replication':>12s}")
@@ -455,9 +458,9 @@ def naive(development, replication):
     """Confirm the largest development modification is the one to throw away."""
     kept = [item for item in ITEMS if item != WEAK_ITEM]
     ref, dec = reference_syntax(), decoy_syntax()
-    decoy_line = f"{DEVELOPMENT_ONLY_RESIDUAL[0]} ~~ {DEVELOPMENT_ONLY_RESIDUAL[1]}"
+    decoy_line = C.method_syntax("Transient", DEVELOPMENT_METHOD_ITEMS, ["F1", "F2", "Format"])
     candidates = {
-        f"{STABLE_RESIDUAL[0]} ~~ {STABLE_RESIDUAL[1]}": "real",
+        C.method_syntax("Format", METHOD_ITEMS, ["F1", "F2"]): "real",
         f"{STABLE_DIF} ~ {GROUP}": "real",
         decoy_line: "development only",
     }
@@ -494,6 +497,7 @@ def naive(development, replication):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     development = simulate(np.random.default_rng(SEED), N_DEVELOPMENT, True)
     replication = simulate(np.random.default_rng(SEED + 1), N_REPLICATION, False)

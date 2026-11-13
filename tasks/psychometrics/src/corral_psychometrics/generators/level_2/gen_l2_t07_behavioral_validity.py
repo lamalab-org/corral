@@ -1,16 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Level 2 Task 07 artifacts and scoring metadata.
-
-Generating model: one HSNS factor, with an outcome driven by both the trait and
-the group.
-
-    behavior ~ 0.18 * trait + 0.40 * gender
-
-The groups also differ by 0.80 on the trait itself, so a pooled coefficient
-overstates the trait's contribution and the association has to be read within
-groups. HSNS7 carries a direct 0.28 association with the outcome in the training
-sample and none in the holdout, which is the item the task asks for.
-"""
+"""Generate the task assessing behavioral validity beyond group membership."""
 
 from __future__ import annotations
 
@@ -19,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from corral_psychometrics.scoring_policy import POLICY_NAME
 from corral_psychometrics import paths
 from corral_psychometrics.generators import common as C
 
@@ -89,6 +79,7 @@ samples and reproducing the within-group and item checks.
 
 
 def reference_syntax():
+    """Return the reference model in semopy syntax."""
     return f"F =~ {'+'.join(ITEMS)}\n{OUTCOME} ~ F + {GROUP} + {ITEM_WITHOUT_REPLICATION}"
 
 
@@ -102,7 +93,7 @@ def simulate(rng, n, item_effect):
     for item, loading in LOADINGS.items():
         signal = loading * eta + rng.normal(0, np.sqrt(1 - loading**2), n)
         signals[item] = signal
-        responses[item] = C.categorize(signal, C.THRESHOLDS[item])
+        responses[item] = C.continuous_response(signal, C.INTERCEPTS[item])
 
     outcome = (
         LATENT_EFFECT * eta
@@ -113,16 +104,17 @@ def simulate(rng, n, item_effect):
     frame = pd.DataFrame(responses)
     frame[GROUP] = group
     frame[OUTCOME] = outcome
-    frame[ITEMS] = frame[ITEMS].mask(rng.random((n, len(ITEMS))) < MISSING_RATE, 0)
+    frame[ITEMS] = frame[ITEMS].mask(rng.random((n, len(ITEMS))) < MISSING_RATE, np.nan)
     frame.insert(0, "participant_id", [f"{'T' if item_effect else 'H'}{i:05d}" for i in range(n)])
     return frame[["participant_id", *ITEMS, GROUP, OUTCOME]]
 
 
 def write_codebook(path):
+    """Write the public variable and response-format descriptions."""
     path.write_text(
         "# Codebook - behavioural validity\n\n"
         "The training and holdout files are tab-separated and already joined by "
-        "`participant_id`. Ratings run from 1 (Disagree) to 5 (Agree); 0 denotes a "
+        "`participant_id`. Responses are continuous and unbounded, centered around zero; an empty field denotes a "
         "missing item response. The behavioural outcome is continuous.\n\n"
         "| variable | description |\n|---|---|\n"
         "| `participant_id` | participant identifier, unique within each file |\n"
@@ -137,6 +129,7 @@ def write_codebook(path):
 
 
 def write_memo(path):
+    """Write the preliminary analysis for the agent to assess."""
     path.write_text(
         "# Preliminary analysis\n\n"
         "The training sample shows a statistically clear association between the "
@@ -146,6 +139,7 @@ def write_memo(path):
 
 
 def build_task_json(data_sha):
+    """Build the task definition and private scoring configuration."""
     return [
         {
             "id": TASK_ID,
@@ -157,7 +151,6 @@ def build_task_json(data_sha):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "codebook.md",
                     "data.csv",
@@ -174,6 +167,7 @@ def build_task_json(data_sha):
             "scoring_function": "score_behavioral_validity",
             "scoring_params": {
                 "task_type": "behavioral_validity",
+                "model_quality_policy": POLICY_NAME,
                 "data_dir": TASK.artifacts_relpath,
                 "truth_path": TASK.truth_relpath,
                 "dataset": "data.csv",
@@ -192,6 +186,7 @@ def build_task_json(data_sha):
 
 
 def truth(data_sha, rows):
+    """Build the private answers, model parameters, and provenance."""
     return {
         "task_id": TASK_ID,
         "scored": {
@@ -202,6 +197,7 @@ def truth(data_sha, rows):
             },
             "unstable_items": [ITEM_WITHOUT_REPLICATION],
         },
+        "scoring_reference": {"reference_model_syntax": reference_syntax()},
         "generative_parameters": {
             "latent_effect": LATENT_EFFECT,
             "latent_group_shift": LATENT_GROUP_SHIFT,
@@ -220,6 +216,7 @@ def truth(data_sha, rows):
 
 
 def candidate_submissions():
+    """Return the reference answer and competing analyses for scoring checks."""
     correct = {
         "model_syntax": reference_syntax(),
         "association": {
@@ -245,6 +242,7 @@ def candidate_submissions():
 
 
 def _fit_coefficients(frame, syntax):
+    """Fit the outcome model and extract its standardized coefficients."""
     import semopy
 
     model = semopy.Model(syntax)
@@ -257,15 +255,18 @@ def _fit_coefficients(frame, syntax):
 
 
 def _measurement_syntax():
+    """Specify a single HSNS factor for auxiliary outcome analyses."""
     return f"F =~ {'+'.join(ITEMS)}"
 
 
 def _within(frame, gender):
+    """Estimate the trait-outcome coefficient within one group."""
     syntax = _measurement_syntax() + f"\n{OUTCOME} ~ F + {ITEM_WITHOUT_REPLICATION}"
     return _fit_coefficients(frame[frame[GROUP] == gender], syntax)
 
 
 def _item_effect(frame, item):
+    """Estimate an item-outcome association beyond the trait and group."""
     syntax = _measurement_syntax() + f"\n{OUTCOME} ~ F + {GROUP} + {item}"
     import semopy
 
@@ -277,8 +278,9 @@ def _item_effect(frame, item):
 
 
 def verify(train, holdout):
-    train = train[(train[ITEMS] != 0).all(axis=1)]
-    holdout = holdout[(holdout[ITEMS] != 0).all(axis=1)]
+    """Check that the data support the intended scientific conclusions."""
+    train = train[train[ITEMS].notna().all(axis=1)]
+    holdout = holdout[holdout[ITEMS].notna().all(axis=1)]
     pooled = _fit_coefficients(
         train, _measurement_syntax() + f"\n{OUTCOME} ~ F + {ITEM_WITHOUT_REPLICATION}"
     )["F"]
@@ -313,8 +315,9 @@ def verify(train, holdout):
 
 
 def naive(train, holdout):
-    train = train[(train[ITEMS] != 0).all(axis=1)]
-    holdout = holdout[(holdout[ITEMS] != 0).all(axis=1)]
+    """Check that the specified shortcut leads to an incorrect conclusion."""
+    train = train[train[ITEMS].notna().all(axis=1)]
+    holdout = holdout[holdout[ITEMS].notna().all(axis=1)]
     pooled = _fit_coefficients(train, reference_syntax())["F"]
     print(f"pooled coefficient: {pooled:+.3f}")
     print("A pooled coefficient alone cannot distinguish a between-group association,")
@@ -331,6 +334,7 @@ def naive(train, holdout):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     train = simulate(np.random.default_rng(SEED), N_TRAIN, TRAIN_ITEM_EFFECT)
     holdout = simulate(np.random.default_rng(SEED + 1), N_HOLDOUT, 0.0)

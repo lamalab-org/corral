@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Task 03 artifacts and scoring metadata.
-
-Generating model, HSNS in the United States: one factor over all ten items,
-plus two pairs that agree beyond it - HSNS2 with HSNS7 at 0.38 and HSNS5 with
-HSNS10 at 0.33. Both pairs read as near-paraphrases.
-
-HSNS1 and HSNS8 are the decoy: they load highest (0.82, 0.80), so they are the
-most correlated pair in the raw data, but nothing is planted between them.
-Outside the United States no pair agrees beyond the factor and every item is
-measured worse.
-"""
+"""Generate the HSNS task separating personality and presentation effects."""
 
 from __future__ import annotations
 
@@ -43,10 +33,11 @@ LOADINGS = {
     "HSNS10": (TRAIT, 0.53),
 }
 
-# Pairs that agree beyond what the trait explains. Both read as near-
-# paraphrases: HSNS2 and HSNS7 are about other people's remarks, HSNS5 and
-# HSNS10 about other people's troubles.
-RESIDUAL_PAIRS = [(("HSNS2", "HSNS7"), 0.38), (("HSNS5", "HSNS10"), 0.33)]
+# These four items share a matrix page. The method influence is independent
+# of the personality trait; unit loadings identify its variance.
+METHOD_ITEMS = ("HSNS2", "HSNS5", "HSNS7", "HSNS10")
+METHOD_VARIANCE = 0.30
+CONTROL_PAGE_ITEMS = ("HSNS1", "HSNS3", "HSNS6", "HSNS8")
 
 # HSNS1 and HSNS8 read as the most similar pair of all and have no such
 # agreement between them. They are the decoy.
@@ -54,7 +45,7 @@ DECOY_PAIR = ("HSNS1", "HSNS8")
 
 # Outside the US the items are measured worse and no pair agrees beyond the
 # trait, so analysing everyone together weakens every loading.
-LOADING_SCALE_NON_US = 0.75
+LOADING_SCALE_NON_US = 0.65
 
 # The Dark Triad items are in the file but are not part of this task.
 DD_LOADINGS = {
@@ -90,33 +81,35 @@ A single JSON object:
 {
   "model_syntax": "<complete semopy model>",
   "loadings": {"<item>": <float>, ...},
-  "factor_correlation": <float or null>
+  "factor_correlation": <float or null>,
+  "measurement_explanation": "one_trait|multiple_traits|one_trait_with_method_effect|multiple_traits_with_method_effect",
+  "trait_variance_share": <float>
 }
 
 `model_syntax` uses semopy syntax (`=~` loadings, `~~` (co)variances, `0*` to fix a
 parameter to zero).
 
-`loadings` gives, for each item you analysed, the largest absolute standardised loading that item has on any factor in your model.
+`loadings`: Largest absolute standardised loading per item on a personality factor.
 
-`factor_correlation` is the correlation between the factors when your model has exactly two correlated factors, and null otherwise.
+`factor_correlation`: Correlation between two trait factors, if applicable; otherwise `null`.
+
+`trait_variance_share`: Proportion of variance in the ten-item sum attributable to personality factors, excluding any method variance.
 """
 
 
 def simulate_hsns(n, rng, scale=1.0, dependent=True):
-    """Draw HSNS responses from one trait, optionally with the duplicate pairs."""
+    """Draw one trait and an optional independent matrix-page method effect."""
     eta = rng.normal(size=n)
-    shared = {pair: rng.normal(size=n) for pair, _ in RESIDUAL_PAIRS}
+    method = rng.normal(size=n)
     out = {}
     for item in ITEMS:
         lam = LOADINGS[item][1] * scale
         common, explained = lam * eta, lam**2
-        if dependent:
-            for pair, cov in RESIDUAL_PAIRS:
-                if item in pair:
-                    common = common + np.sqrt(cov) * shared[pair]
-                    explained += cov
+        if dependent and item in METHOD_ITEMS:
+            common += np.sqrt(METHOD_VARIANCE) * method
+            explained += METHOD_VARIANCE
         ystar = common + rng.normal(0, np.sqrt(max(1 - explained, 1e-6)), n)
-        out[item] = C.categorize(ystar, C.THRESHOLDS[item])
+        out[item] = C.continuous_response(ystar, C.INTERCEPTS[item])
     return pd.DataFrame(out)[ITEMS]
 
 
@@ -133,16 +126,21 @@ def build_dataset(rng):
             phi[names.index(b), names.index(a)] = v
         # Three correlated traits, the same everywhere: filler for this task.
         dd = C.correlated_block(
-            n, rng, loadings=DD_LOADINGS, phi_matrix=phi, factor_names=names, taus=C.THRESHOLDS
+            n,
+            rng,
+            loadings=DD_LOADINGS,
+            phi_matrix=phi,
+            factor_names=names,
+            intercepts=C.INTERCEPTS,
         )
         frames.append(pd.concat([hsns, dd, C.demographics(n, rng, country)], axis=1))
     return C.finalize(frames, rng, SEED)
 
 
 def reference_syntax():
-    """lavaan syntax for the generating model, used as the scoring floor."""
+    """Reference measurement model in semopy syntax."""
     lines = [f"G =~ {'+'.join(ITEMS)}"]
-    lines += [f"{a} ~~ {b}" for (a, b), _ in RESIDUAL_PAIRS]
+    lines.append(C.method_syntax("Format", METHOD_ITEMS, ["G"]))
     return "\n".join(lines)
 
 
@@ -158,7 +156,7 @@ def candidate_models():
             "S2 =~ HSNS1+HSNS4+HSNS5+HSNS6+HSNS8+HSNS10\n"
             "G ~~ 0*S1\nG ~~ 0*S2\nS1 ~~ 0*S2"
         ),
-        "unidimensional_with_correlated_residuals": reference_syntax(),
+        "trait_with_method_factor": reference_syntax(),
         "unidim_with_decoy_pair_freed": (
             reference_syntax() + f"\n{DECOY_PAIR[0]} ~~ {DECOY_PAIR[1]}"
         ),
@@ -166,6 +164,37 @@ def candidate_models():
             f"G =~ {every}\nHSNS2 ~~ HSNS7\n{DECOY_PAIR[0]} ~~ {DECOY_PAIR[1]}"
         ),
     }
+
+
+def variance_shares():
+    """Variance decomposition of the unit-weighted ten-item total score."""
+    trait = sum(value[1] for value in LOADINGS.values()) ** 2
+    method = len(METHOD_ITEMS) ** 2 * METHOD_VARIANCE
+    unique = sum(
+        1 - value[1] ** 2 - (METHOD_VARIANCE if item in METHOD_ITEMS else 0)
+        for item, value in LOADINGS.items()
+    )
+    total = trait + method + unique
+    return {"trait": trait / total, "method": method / total, "unique": unique / total}
+
+
+def candidate_submissions(X):
+    """Reference answer and plausible competing substantive explanations."""
+    cases = {}
+    for name, syntax in candidate_models().items():
+        fitted = C.fit(syntax, X, ITEMS)
+        broad = ["G"] if "G" in fitted.vars["latent"] else None
+        loading = C.loadings(fitted, factors=broad)
+        cases["correct" if name == "trait_with_method_factor" else name] = {
+            "model_syntax": syntax,
+            "loadings": {item: abs(value) for item, value in loading.items()},
+            "factor_correlation": None,
+            "measurement_explanation": "one_trait_with_method_effect"
+            if name == "trait_with_method_factor"
+            else "multiple_traits",
+            "trait_variance_share": variance_shares()["trait"],
+        }
+    return cases
 
 
 def population_correlation_matrix():
@@ -179,10 +208,15 @@ def build_truth(floor, pop, data_sha, rows):
     return {
         "task_id": TASK_ID,
         "scored": {
-            "model_family": "unidimensional_with_correlated_residuals",
-            "n_factors": 1,
+            "model_family": "trait_with_method_factor",
+            "measurement_explanation": "one_trait_with_method_effect",
+            "n_trait_factors": 1,
+            "n_method_factors": 1,
+            "trait_variance_share": variance_shares()["trait"],
             "loadings": {k: v[1] for k, v in LOADINGS.items()},
-            "residual_pairs": [list(pair) for pair, _ in RESIDUAL_PAIRS],
+            "residual_pairs": [
+                [a, b] for index, a in enumerate(METHOD_ITEMS) for b in METHOD_ITEMS[index + 1 :]
+            ],
             "item_assignment": {k: "G" for k in ITEMS},
         },
         "scoring_reference": {
@@ -196,19 +230,24 @@ def build_truth(floor, pop, data_sha, rows):
         "generative_parameters": {
             "us": {
                 "loadings": {k: v[1] for k, v in LOADINGS.items()},
-                "residual_covariances": {f"{a}_{b}": v for (a, b), v in RESIDUAL_PAIRS},
+                "method_factor": {
+                    "items": list(METHOD_ITEMS),
+                    "unit_loadings": True,
+                    "variance": METHOD_VARIANCE,
+                },
+                "total_score_variance_shares": variance_shares(),
                 "decoy_pair": list(DECOY_PAIR),
                 "decoy_residual_covariance": 0.0,
             },
             "non_us": {
                 "loading_scale": LOADING_SCALE_NON_US,
-                "residual_covariances": {},
+                "method_variance": 0.0,
             },
             "dark_triad": {
                 "loadings": {k: v[1] for k, v in DD_LOADINGS.items()},
                 "phi": {f"{a}_{b}": v for (a, b), v in DD_PHI.items()},
             },
-            "thresholds": C.THRESHOLDS,
+            "item_intercepts": C.INTERCEPTS,
         },
         "provenance": C.provenance(Path(__file__).name, SEED, rows, data_sha),
     }
@@ -219,7 +258,7 @@ def build_task_json(data_sha):
     return [
         {
             "id": TASK_ID,
-            "name": "HSNS dimensionality versus item redundancy",
+            "name": "HSNS structure and score interpretation",
             "uuid": "6c40b18e-9d2f-4a77-93e1-58aa0c7f5d03",
             "keywords": [
                 "psychometrics",
@@ -233,7 +272,6 @@ def build_task_json(data_sha):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "codebook.md",
                     "data.csv",
@@ -256,12 +294,25 @@ def build_task_json(data_sha):
                         "all_must_be_within": True,
                         "criterion": "parameter_quality",
                     },
+                    {
+                        "key": "measurement_explanation",
+                        "fn": "score_label",
+                        "truth_key": "scored.measurement_explanation",
+                        "criterion": "interpretation",
+                    },
+                    {
+                        "key": "trait_variance_share",
+                        "fn": "score_scalar",
+                        "truth_key": "scored.trait_variance_share",
+                        "tol": 0.04,
+                        "criterion": "trait_score_interpretation",
+                    },
                     # The answer: which pairs agree beyond the trait. Read from the
                     # submitted model rather than asked for separately.
                     {
                         "key": "residual_pairs",
                         "fn": "score_pair_set",
-                        "derive_from": "refit_residual_covariances",
+                        "derive_from": "refit_local_dependence",
                         "truth_key": "scored.residual_pairs",
                         "criterion": "local_dependence",
                     },
@@ -295,7 +346,7 @@ def verify(df, pop):
         )
     print(pd.DataFrame(rows).to_string(index=False, float_format=lambda v: f"{v:.4f}"))
 
-    truth = criteria["unidimensional_with_correlated_residuals"]
+    truth = criteria["trait_with_method_factor"]
     corr = pd.DataFrame(np.corrcoef(X.values.T), index=ITEMS, columns=ITEMS)
     ranked = sorted(
         ((a, b, corr.loc[a, b]) for i, a in enumerate(ITEMS) for b in ITEMS[i + 1 :]),
@@ -308,7 +359,7 @@ def verify(df, pop):
     print("\ntop raw correlations: " + "  ".join(f"{a}-{b} {r:.3f}" for a, b, r in ranked[:3]))
     print(
         "residual correlations under one factor: "
-        + "  ".join(f"{a}-{b} {res.loc[a, b]:+.3f}" for (a, b), _ in RESIDUAL_PAIRS)
+        + "  ".join(f"{a}-{b} {res.loc[a, b]:+.3f}" for a, b in zip(METHOD_ITEMS, METHOD_ITEMS[1:]))
         + f"   decoy {DECOY_PAIR[0]}-{DECOY_PAIR[1]} "
         f"{res.loc[DECOY_PAIR[0], DECOY_PAIR[1]]:+.3f}"
     )
@@ -325,9 +376,12 @@ def verify(df, pop):
         ),
         ("the decoy pair ranks in the top 3 raw correlations", decoy_rank <= 3),
         (
-            "but its residual correlation is an order of magnitude smaller",
-            abs(res.loc[DECOY_PAIR[0], DECOY_PAIR[1]]) * 5
-            < min(abs(res.loc[a, b]) for (a, b), _ in RESIDUAL_PAIRS),
+            "the decoy correlation is explained by trait loadings alone",
+            abs(
+                corr.loc[DECOY_PAIR[0], DECOY_PAIR[1]]
+                - LOADINGS[DECOY_PAIR[0]][1] * LOADINGS[DECOY_PAIR[1]][1]
+            )
+            < 0.02,
         ),
     ]
     return C.report(checks)
@@ -350,7 +404,6 @@ def _implied(unidim_spec, X):
 def naive(df, pop):
     """Confirm the default dimensionality check and the US filter both matter."""
     del pop
-    from factor_analyzer import FactorAnalyzer
 
     X = C.analysis_sample(df, ITEMS)
     corr = np.corrcoef(X.values.T)
@@ -364,7 +417,6 @@ def naive(df, pop):
         f"parallel analysis on the US sample -> {n_factors} factors "
         f"(eigenvalues {np.round(eigen[:3], 2)})"
     )
-    FactorAnalyzer(n_factors=2, rotation="oblimin", method="minres").fit(X.values)
 
     truth = {k: v[1] for k, v in LOADINGS.items()}
     print(f"\n{'sample':22s} {'N':>7s} {'worst |error|':>14s}  within 0.08?")
@@ -374,7 +426,7 @@ def naive(df, pop):
         ("pooled (no filter)", df),
     ):
         Xs = sub[ITEMS]
-        Xs = Xs[(Xs != 0).all(axis=1)].astype(float)
+        Xs = Xs[Xs.notna().all(axis=1)].astype(float)
         fitted = {k: abs(v) for k, v in C.loadings(C.fit(reference_syntax(), Xs, ITEMS)).items()}
         worst = max(abs(fitted[i] - truth[i]) for i in ITEMS)
         outcome[label] = worst <= 0.08
@@ -392,6 +444,7 @@ def naive(df, pop):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     rng = np.random.default_rng(SEED)
     print("Simulating ...")
@@ -409,6 +462,16 @@ def main():
         df,
         lambda sha: build_truth(floor, pop.tolist(), sha, len(df)),
         build_task_json,
+    )
+    book = TASK.artifacts / "codebook.md"
+    book.write_text(
+        book.read_text()
+        + "\nPresentation log: "
+        + ", ".join(CONTROL_PAGE_ITEMS)
+        + " appeared on matrix page A; "
+        + ", ".join(METHOD_ITEMS)
+        + " appeared on matrix page B. Remaining items appeared individually. "
+        "Presentation records do not establish whether a page influences responses.\n"
     )
     return 0
 

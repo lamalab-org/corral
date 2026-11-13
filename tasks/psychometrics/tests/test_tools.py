@@ -1,3 +1,5 @@
+"""Validate workspace analysis tools and persistent REPL sessions."""
+
 from tempfile import TemporaryDirectory
 
 from corral_psychometrics.tools import validate_model_syntax, workspace_tools
@@ -18,20 +20,20 @@ def test_validate_model_syntax_is_in_workspace_toolset() -> None:
         assert "validate_model_syntax" in workspace_tools(workspace)
 
 
-def test_repl_fits_ordinal_semopy_models() -> None:
+def test_repl_fits_continuous_semopy_models() -> None:
     code = """
 import pandas as pd
 from semopy import Model
-from semopy.polycorr import polychoric_corr
 
 rng = np.random.default_rng(0)
 f = rng.normal(size=600)
 df = pd.DataFrame(
-    {f"x{i}": np.digitize(0.8 * f + 0.6 * rng.normal(size=600), [-1, 0, 1]) for i in range(4)}
+    {f"x{i}": 0.8 * f + 0.6 * rng.normal(size=600) for i in range(4)}
 )
-model = Model("F =~ x0 + x1 + x2 + x3\\nDEFINE(ordinal) x0 x1 x2 x3")
-model.fit(df, obj="DWLS")
-print("polychoric", round(polychoric_corr(df.x0, df.x1), 2))
+model = Model("F =~ x0 + x1 + x2 + x3")
+model.fit(df)
+rows = model.inspect(std_est=True)
+print("loading", round(rows.loc[rows.op == "~", "Est. Std"].mean(), 2))
 """
     with TemporaryDirectory() as workspace:
         repl = workspace_tools(workspace)["PythonREPL"]
@@ -39,8 +41,8 @@ print("polychoric", round(polychoric_corr(df.x0, df.x1), 2))
             output = session.execute(code)
 
     assert "Traceback" not in output
-    # Latent correlation between two items with 0.8 loadings is 0.64.
-    assert abs(float(output.split()[-1]) - 0.64) < 0.08
+    # Recover the known standardized loading through the public analysis tool.
+    assert abs(float(output.split()[-1]) - 0.8) < 0.08
 
 
 def test_repl_call_past_its_time_limit_is_stopped_and_session_kept() -> None:

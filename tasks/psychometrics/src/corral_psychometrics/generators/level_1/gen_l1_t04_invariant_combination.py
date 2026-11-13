@@ -1,19 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Task 04 artifacts and scoring metadata.
-
-Two instruments, only one of which supports a gender comparison.
-
-    HSNS          one factor. Women really are 0.45 higher on the trait, but
-                  four items are also biased, two against them and two in
-                  their favour, so the observed gap mixes trait and bias and the comparison is not defensible.
-    Dirty Dozen   bifactor - one broad trait plus a narrow one per subscale.
-                  No item is biased; women are simply 0.30 higher. This is the
-                  instrument that supports the comparison.
-
-Outside the United States no item is biased and the Dirty Dozen difference runs
-the other way, so pooling the countries moves the answer out of tolerance
-rather than merely diluting it.
-"""
+"""Generate the instrument-selection task for a defensible gender comparison."""
 
 from __future__ import annotations
 
@@ -34,9 +20,6 @@ DD = C.DD_ITEMS
 ALL_VARS = HSNS + DD + ["gender"]
 MODEL_VARS = DD + ["gender"]  # the combination that works
 
-# --------------------------------------------------------------------------
-# HSNS: a real gender difference, hidden by bias against women on four items
-# --------------------------------------------------------------------------
 HSNS_LOADINGS = {
     "HSNS1": 0.55,
     "HSNS2": 0.76,
@@ -59,8 +42,8 @@ HSNS_BIASED_ITEMS = ["HSNS1", "HSNS5", "HSNS8", "HSNS10"]
 HSNS_BIAS_SHIFT = {"HSNS1": -0.15, "HSNS5": 0.20, "HSNS8": 0.20, "HSNS10": 0.15}
 
 # --------------------------------------------------------------------------
-# Dirty Dozen: a general factor plus three specifics, identical in both groups.
-# Women simply have more of the general trait. Nothing here is biased.
+# Dirty Dozen: Machiavellianism is the reference facet in both groups.
+# Women differ on that reference trait. Neither group has item-level bias.
 # --------------------------------------------------------------------------
 SPECIFIC_OF = {
     "DDM1": "M",
@@ -91,10 +74,6 @@ DD_GENERAL = {
     "DDN4": 0.52,
 }
 DD_SPECIFIC = {
-    "DDM1": 0.48,
-    "DDM2": 0.44,
-    "DDM3": 0.42,
-    "DDM4": 0.50,
     "DDP1": 0.52,
     "DDP2": 0.48,
     "DDP3": 0.55,
@@ -104,6 +83,7 @@ DD_SPECIFIC = {
     "DDN3": 0.45,
     "DDN4": 0.30,
 }
+DD_SPECIFIC_PHI = 0.25
 DD_LATENT_DIFFERENCE = 0.30
 
 # Outside the US there is no item bias, and the gender difference on the Dirty
@@ -144,9 +124,6 @@ A single JSON object:
 """
 
 
-# --------------------------------------------------------------------------
-# Simulation
-# --------------------------------------------------------------------------
 def simulate_hsns(n, rng, female, scale=1.0, us=True):
     """One trait, a real gender difference, and gender bias on four items."""
     eta = rng.normal(0.0, 1.0, n) + (np.where(female, HSNS_LATENT_DIFFERENCE, 0.0) if us else 0.0)
@@ -154,32 +131,35 @@ def simulate_hsns(n, rng, female, scale=1.0, us=True):
     for item in HSNS:
         lam = HSNS_LOADINGS[item] * scale
         ystar = lam * eta + rng.normal(0, np.sqrt(1 - lam**2), n)
-        tau = np.asarray(C.THRESHOLDS[item])
+        intercept = np.asarray(C.INTERCEPTS[item])
         if us and item in HSNS_BIASED_ITEMS:
             out[item] = np.where(
                 female,
-                C.categorize(ystar, tau + HSNS_BIAS_SHIFT[item]),
-                C.categorize(ystar, tau),
+                C.continuous_response(ystar, intercept - HSNS_BIAS_SHIFT[item]),
+                C.continuous_response(ystar, intercept),
             )
         else:
-            out[item] = C.categorize(ystar, tau)
+            out[item] = C.continuous_response(ystar, intercept)
     return pd.DataFrame(out)[HSNS]
 
 
 def simulate_dd(n, rng, female, scale=1.0, us=True):
-    """A general factor plus three specifics, identical in both groups."""
+    """Machiavellianism reference factor plus correlated P and N residuals."""
     shift = DD_LATENT_DIFFERENCE if us else NON_US_DD_DIFFERENCE
     general = rng.normal(0.0, 1.0, n) + np.where(female, shift, 0.0)
-    specific = {k: rng.normal(size=n) for k in dict.fromkeys(SPECIFIC_OF.values())}
+    p = rng.normal(size=n)
+    n_residual = DD_SPECIFIC_PHI * p + np.sqrt(1 - DD_SPECIFIC_PHI**2) * rng.normal(size=n)
+    residuals = np.column_stack([p, n_residual])
+    specific = {"P": residuals[:, 0], "N": residuals[:, 1]}
     out = {}
     for item in DD:
-        g, s = DD_GENERAL[item] * scale, DD_SPECIFIC[item] * scale
+        g, s = DD_GENERAL[item] * scale, DD_SPECIFIC.get(item, 0.0) * scale
         ystar = (
             g * general
-            + s * specific[SPECIFIC_OF[item]]
+            + (s * specific[SPECIFIC_OF[item]] if SPECIFIC_OF[item] != "M" else 0.0)
             + rng.normal(0, np.sqrt(max(1 - g**2 - s**2, 1e-6)), n)
         )
-        out[item] = C.categorize(ystar, C.THRESHOLDS[item])
+        out[item] = C.continuous_response(ystar, C.INTERCEPTS[item])
     return pd.DataFrame(out)[DD]
 
 
@@ -209,19 +189,16 @@ def comparison_sample(df, variables):
     sub = df[(df.country == "US") & df.gender.isin([1, 2])]
     items = [v for v in variables if v != "gender"]
     X = sub[variables]
-    return X[(X[items] != 0).all(axis=1)].astype(float)
+    return X[X[items].notna().all(axis=1)].astype(float)
 
 
-# --------------------------------------------------------------------------
-# Models
-# --------------------------------------------------------------------------
 def dd_bifactor():
-    """The Dirty Dozen's real structure: general factor plus three specifics."""
+    """The Dirty Dozen's Machiavellianism-reference S-1 structure."""
     by = {k: [i for i in DD if SPECIFIC_OF[i] == k] for k in "MPN"}
     lines = [f"G =~ {'+'.join(DD)}"]
-    lines += [f"S{k} =~ {'+'.join(by[k])}" for k in "MPN"]
-    lines += [f"G ~~ 0*S{k}" for k in "MPN"]
-    lines += ["SM ~~ 0*SP", "SM ~~ 0*SN", "SP ~~ 0*SN"]
+    lines += [f"S{k} =~ {'+'.join(by[k])}" for k in "PN"]
+    lines += [f"G ~~ 0*S{k}" for k in "PN"]
+    lines += ["SP ~~ SN"]
     return "\n".join(lines)
 
 
@@ -233,7 +210,7 @@ def dd_three_factor():
 
 def reference_syntax():
     """The combination that works: the Dirty Dozen under its real structure."""
-    return dd_bifactor() + "\nG ~ gender\nSM ~ gender\nSP ~ gender\nSN ~ gender"
+    return dd_bifactor() + "\nG ~ gender\nSP ~ gender\nSN ~ gender"
 
 
 def candidate_models():
@@ -269,16 +246,13 @@ def population_reference():
     return target, pop.round(3)
 
 
-# --------------------------------------------------------------------------
-# Artifacts
-# --------------------------------------------------------------------------
 def build_truth(target, floor, pop, data_sha, rows):
     """Assemble the hidden ground truth, scoring reference and provenance."""
     return {
         "task_id": TASK_ID,
         "scored": {
             "instrument": "dirty_dozen",
-            "model_family": "bifactor_general_plus_specifics",
+            "model_family": "bifactor_s1_machiavellianism_reference",
             "latent_difference": round(target, 3),
             "biased_items": sorted(HSNS_BIASED_ITEMS),
             "spurious_bias_in_selected_instrument": [],
@@ -296,7 +270,7 @@ def build_truth(target, floor, pop, data_sha, rows):
                 "loadings": HSNS_LOADINGS,
                 "latent_difference_women_minus_men": HSNS_LATENT_DIFFERENCE,
                 "biased_items": HSNS_BIASED_ITEMS,
-                "bias_threshold_shift": HSNS_BIAS_SHIFT,
+                "bias_intercept_shift": {item: -value for item, value in HSNS_BIAS_SHIFT.items()},
                 "bias_direction": "against women",
                 "invariant": False,
             },
@@ -304,6 +278,8 @@ def build_truth(target, floor, pop, data_sha, rows):
                 "general_loadings": DD_GENERAL,
                 "specific_loadings": DD_SPECIFIC,
                 "specific_of_item": SPECIFIC_OF,
+                "reference_facet": "M",
+                "specific_factor_correlation": DD_SPECIFIC_PHI,
                 "latent_difference_women_minus_men": DD_LATENT_DIFFERENCE,
                 "biased_items": [],
                 "invariant": True,
@@ -314,7 +290,7 @@ def build_truth(target, floor, pop, data_sha, rows):
                 "hsns_latent_difference": 0.0,
                 "biased_items": [],
             },
-            "thresholds": C.THRESHOLDS,
+            "item_intercepts": C.INTERCEPTS,
         },
         "provenance": C.provenance(Path(__file__).name, SEED, rows, data_sha),
     }
@@ -372,7 +348,6 @@ def build_task_json(data_sha):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "codebook.md",
                     "data.csv",
@@ -388,9 +363,6 @@ def build_task_json(data_sha):
     ]
 
 
-# --------------------------------------------------------------------------
-# Checks
-# --------------------------------------------------------------------------
 def _bias_scan(spec, X, variables, items, factors):
     """Items that look biased: chi-square gain from freeing a direct gender path."""
     import semopy
@@ -442,7 +414,11 @@ def verify(df, target, pop):
 
     hs_flagged = _bias_recover(f"F =~ {'+'.join(HSNS)}", X_hs, HSNS + ["gender"], HSNS, ["F"])
     dd3_flagged = _bias_scan(dd_three_factor(), X_dd, MODEL_VARS, DD, ["FM", "FP", "FN"])
-    ddb_flagged = _bias_scan(dd_bifactor(), X_dd, MODEL_VARS, DD, ["G", "SM", "SP", "SN"])
+    ddb_flagged = _bias_scan(dd_bifactor(), X_dd, MODEL_VARS, DD, ["G", "SP", "SN"])
+    dd_three_fit = C.evaluate_model(
+        candidate_models()["DD, nominal three-factor"], X_dd, MODEL_VARS, pop
+    )
+    dd_s1_fit = C.evaluate_model(reference_syntax(), X_dd, MODEL_VARS, pop)
 
     print("  items that look biased across gender:")
     print(f"    HSNS, one factor              {hs_flagged}")
@@ -463,10 +439,7 @@ def verify(df, target, pop):
 
     checks = [
         ("the HSNS really is biased", set(hs_flagged) == set(HSNS_BIASED_ITEMS)),
-        (
-            "the Dirty Dozen looks biased under its nominal structure",
-            len(dd3_flagged) > 0,
-        ),
+        ("the S-1 model fits better than nominal facets", dd_s1_fit["CFI"] > dd_three_fit["CFI"]),
         ("but is clean under its real structure", ddb_flagged == []),
         (
             "the correct route lands on the calibrated target",
@@ -477,32 +450,29 @@ def verify(df, target, pop):
 
 
 def naive(df, target, pop):
-    """Confirm the face-value analysis rejects both instruments."""
+    """Confirm pooling countries changes the latent comparison."""
     del pop
-    X_dd = comparison_sample(df, MODEL_VARS)
     X_hs = comparison_sample(df, HSNS + ["gender"])
     hs = _bias_scan(f"F =~ {'+'.join(HSNS)}", X_hs, HSNS + ["gender"], HSNS, ["F"])
-    dd = _bias_scan(dd_three_factor(), X_dd, MODEL_VARS, DD, ["FM", "FP", "FN"])
-    print("  taking each instrument at face value:")
-    print(f"    HSNS (one factor)         -> {len(hs)} biased items {hs}")
-    print(f"    Dirty Dozen (3 subscales) -> {len(dd)} biased items {dd}")
-    print("    conclusion: neither instrument supports the comparison")
-    print(f"  truth: the Dirty Dozen does, and the difference is {target:+.3f}")
+    pooled = df[df.gender.isin([1, 2])][MODEL_VARS]
+    pooled = pooled[pooled[DD].notna().all(axis=1)].astype(float)
+    pooled_effect = latent_difference(reference_syntax(), pooled, MODEL_VARS)
+    print(f"  HSNS biased items in US: {hs}")
+    print(f"  US Dirty Dozen reference-facet difference: {target:+.3f}")
+    print(f"  pooled-country estimate: {pooled_effect:+.3f}")
     return C.report(
         [
+            ("HSNS item bias invalidates its unadjusted comparison", len(hs) > 0),
             (
-                "the face-value analysis rejects both instruments",
-                len(hs) > 0 and len(dd) > 0,
-            ),
-            (
-                "the items it flags in the Dirty Dozen are not really biased",
-                len(dd) > 0,
+                "pooling countries changes the reference-facet comparison",
+                abs(pooled_effect - target) > 0.06,
             ),
         ]
     )
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     rng = np.random.default_rng(SEED)
     print("Simulating ...")

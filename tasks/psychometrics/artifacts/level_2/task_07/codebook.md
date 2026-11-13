@@ -1,6 +1,6 @@
 # Codebook - behavioural validity
 
-The training and holdout files are tab-separated and already joined by `participant_id`. Ratings run from 1 (Disagree) to 5 (Agree); 0 denotes a missing item response. The behavioural outcome is continuous.
+The training and holdout files are tab-separated and already joined by `participant_id`. Responses are continuous and unbounded, centered around zero; an empty field denotes a missing item response. The behavioural outcome is continuous.
 
 | variable | description |
 |---|---|

@@ -122,7 +122,6 @@ def test_inference_prompt_is_independent_of_private_grading_rules(path):
 def test_public_guides_and_starter_files_describe_usable_outputs():
     files = [
         *TASKS.glob("psychometrics/artifacts/**/*.md"),
-        *TASKS.glob("psychometrics/src/corral_psychometrics/generators/**/task_*.md"),
         *INFERENCE_ROOT.glob("inference_opt/guide/*.md"),
         *INFERENCE_ROOT.glob("inference_opt/templates/**/*.py"),
         TASKS / "stargazer/src/stargazer/public_rv.py",

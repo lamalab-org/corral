@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Level 2 Task 01 artifacts and scoring metadata.
-
-Generating model: two correlated HSNS factors (phi 0.35), with HSNS9 also
-loading 0.15 on the first and HSNS5 and HSNS10 agreeing 0.10 beyond them.
-
-The two groups are identical on both traits - the latent difference is exactly
-zero. Four items, two on each factor, are cleared more easily by group 2, so
-every point of the visible gap is item bias. A model that frees those four
-items recovers a difference of zero; the memo's model, which frees nothing,
-does not.
-"""
+"""Generate the group-comparability task with item-intercept bias."""
 
 from __future__ import annotations
 
@@ -40,9 +30,9 @@ LOADINGS = {
     "HSNS9": ("oversensitivity", 0.52),
 }
 
-# Group 2 clears these four items' thresholds more easily at any trait level.
+# Group 2 scores higher on these four items at any trait level.
 # Two sit on each factor, so both traits look different until the items are freed.
-ITEM_DIF = {"HSNS1": -0.65, "HSNS8": -0.65, "HSNS3": -0.65, "HSNS7": -0.65}
+ITEM_DIF = {"HSNS1": -0.75, "HSNS8": -0.75, "HSNS3": -0.75, "HSNS7": -0.35}
 
 # The groups are identical on both traits. Every point of the observed gap is bias.
 LATENT_DIFFERENCE = {"egocentrism": 0.0, "oversensitivity": 0.0}
@@ -53,7 +43,6 @@ ADJUSTED_TOLERANCE = 0.06
 
 PHI = 0.35
 CROSS_LOADING = ("HSNS9", 0.15)
-RESIDUAL_CORR = (("HSNS5", "HSNS10"), 0.10)
 N_GROUP_1, N_GROUP_2 = 6_000, 6_000
 POP_REFERENCE_N = 200_000
 
@@ -113,7 +102,7 @@ def responses(rng, n_1, n_2, apply_dif=True):
     """Draw item responses for both groups.
 
     n_1, n_2   respondents per group
-    apply_dif  shift the four biased items' thresholds for group 2
+    apply_dif  shift the four biased items' intercepts for group 2
     """
     gender = np.r_[np.ones(n_1), np.full(n_2, 2)]
     eta = rng.multivariate_normal([0.0, 0.0], [[1.0, PHI], [PHI, 1.0]], len(gender))
@@ -122,7 +111,6 @@ def responses(rng, n_1, n_2, apply_dif=True):
         [LATENT_DIFFERENCE["egocentrism"], LATENT_DIFFERENCE["oversensitivity"]],
         0.0,
     )
-    shared = rng.normal(size=len(gender))
     out = {}
     for item, (factor, loading) in LOADINGS.items():
         factor_index = 0 if factor == "egocentrism" else 1
@@ -132,17 +120,13 @@ def responses(rng, n_1, n_2, apply_dif=True):
             cross_loading = CROSS_LOADING[1]
             common += cross_loading * eta[:, 0]
             explained += cross_loading**2 + 2 * cross_loading * loading * PHI
-        if item in RESIDUAL_CORR[0]:
-            residual = RESIDUAL_CORR[1]
-            common += np.sqrt(residual) * shared
-            explained += residual
         y = common + rng.normal(0, np.sqrt(max(1 - explained, 1e-6)), len(gender))
-        tau = np.asarray(C.THRESHOLDS[item])
+        intercept = np.asarray(C.INTERCEPTS[item])
         shift = ITEM_DIF.get(item, 0.0) if apply_dif else 0.0
-        values = np.empty(len(y), dtype=int)
-        for group, threshold in ((1, tau), (2, tau + shift)):
+        values = np.empty(len(y), dtype=float)
+        for group, intercept_value in ((1, intercept), (2, intercept - shift)):
             mask = gender == group
-            values[mask] = C.categorize(y[mask], threshold)
+            values[mask] = C.continuous_response(y[mask], intercept_value)
         out[item] = values
     frame = pd.DataFrame(out)
     frame["gender"] = gender.astype(int)
@@ -155,7 +139,7 @@ def simulate(rng):
     frame["age"] = np.clip(rng.normal(35, 11, len(frame)).round(), 18, 78).astype(int)
     frame["accuracy"] = np.clip(rng.beta(8, 1.5, len(frame)) * 100, 1, 100).round().astype(int)
     frame["country"] = "US"
-    frame[ITEMS] = frame[ITEMS].mask(rng.random((len(frame), len(ITEMS))) < 0.01, 0)
+    frame[ITEMS] = frame[ITEMS].mask(rng.random((len(frame), len(ITEMS))) < 0.01, np.nan)
     frame = frame[ITEMS + ["age", "gender", "accuracy", "country"]]
     frame.insert(0, "participant_id", [f"P{i:05d}" for i in range(1, len(frame) + 1)])
     behavior = pd.DataFrame(
@@ -173,7 +157,6 @@ def responses_with_latents(rng, n_1, n_2, apply_dif=True):
     """Draw responses and retain the latent traits for the auxiliary file."""
     gender = np.r_[np.ones(n_1), np.full(n_2, 2)]
     eta = rng.multivariate_normal([0.0, 0.0], [[1.0, PHI], [PHI, 1.0]], len(gender))
-    shared = rng.normal(size=len(gender))
     out = {}
     for item, (factor, loading) in LOADINGS.items():
         factor_index = 0 if factor == "egocentrism" else 1
@@ -183,17 +166,13 @@ def responses_with_latents(rng, n_1, n_2, apply_dif=True):
             cross_loading = CROSS_LOADING[1]
             common += cross_loading * eta[:, 0]
             explained += cross_loading**2 + 2 * cross_loading * loading * PHI
-        if item in RESIDUAL_CORR[0]:
-            residual = RESIDUAL_CORR[1]
-            common += np.sqrt(residual) * shared
-            explained += residual
         y = common + rng.normal(0, np.sqrt(max(1 - explained, 1e-6)), len(gender))
-        tau = np.asarray(C.THRESHOLDS[item])
+        intercept = np.asarray(C.INTERCEPTS[item])
         shift = ITEM_DIF.get(item, 0.0) if apply_dif else 0.0
-        values = np.empty(len(y), dtype=int)
-        for group, threshold in ((1, tau), (2, tau + shift)):
+        values = np.empty(len(y), dtype=float)
+        for group, intercept_value in ((1, intercept), (2, intercept - shift)):
             mask = gender == group
-            values[mask] = C.categorize(y[mask], threshold)
+            values[mask] = C.continuous_response(y[mask], intercept_value)
         out[item] = values
     frame = pd.DataFrame(out)
     frame["gender"] = gender.astype(int)
@@ -209,7 +188,7 @@ def population_matrix(rng):
 def analysis_sample(df):
     """Complete responses from both groups."""
     sub = df[df.gender.isin([1, 2])]
-    return sub[ALL_VARS][(sub[ITEMS] != 0).all(axis=1)].astype(float)
+    return sub[ALL_VARS][sub[ITEMS].notna().all(axis=1)].astype(float)
 
 
 def group_difference(X, syntax):
@@ -230,6 +209,7 @@ def raw_effect_size(X):
 
 
 def write_task_memo(path):
+    """Write the preliminary group-comparison analysis."""
     path.write_text(
         "# Preliminary analysis memo\n\n"
         "Total HSNS scores were compared between the two groups. Group 2 scored "
@@ -240,11 +220,12 @@ def write_task_memo(path):
 
 
 def write_codebook(path, df):
+    """Write the public variable and response-format descriptions."""
     lines = [
         "# Codebook - group comparability study",
         "",
         "Tab-separated, one row per respondent. Questionnaire responses are ratings "
-        "from 1 (Disagree) to 5 (Agree); 0 denotes a missing response.",
+        "on a continuous unbounded scale centered around zero; empty fields denote missing responses.",
         "",
         "The separate `behavior.csv` file contains two independent behavioural "
         "indicators for the same participants.",
@@ -267,10 +248,12 @@ def write_codebook(path, df):
 
 
 def write_behavior(path, behavior):
+    """Write the behavioral indicators for the group comparison."""
     behavior.to_csv(path, sep="\t", index=False)
 
 
 def write_behavior_codebook(path):
+    """Describe the behavioral data columns."""
     path.write_text(
         "# Codebook - behavioural indicators\n\n"
         "`behavior.csv` is tab-separated and uses the same `participant_id` and "
@@ -286,6 +269,7 @@ def write_behavior_codebook(path):
 
 
 def build_truth(floor, pop, data_sha, rows):
+    """Build the private answers, model parameters, and provenance."""
     return {
         "task_id": TASK_ID,
         "scored": {
@@ -305,18 +289,18 @@ def build_truth(floor, pop, data_sha, rows):
             "items": ITEMS,
             "loadings": LOADINGS,
             "group_latent_difference": LATENT_DIFFERENCE,
-            "item_threshold_shifts_for_group_2": ITEM_DIF,
+            "item_intercept_shifts_for_group_2": {item: -value for item, value in ITEM_DIF.items()},
             "metric_invariance": True,
             "scalar_invariance": False,
             "cross_loading": CROSS_LOADING,
-            "residual_correlation": RESIDUAL_CORR,
-            "thresholds": C.THRESHOLDS,
+            "item_intercepts": C.INTERCEPTS,
         },
         "provenance": C.provenance(Path(__file__).name, SEED, rows, data_sha),
     }
 
 
 def build_task_json(data_sha):
+    """Build the task definition and private scoring configuration."""
     contract = C.scoring_contract(
         TASK,
         ALL_VARS,
@@ -365,7 +349,6 @@ def build_task_json(data_sha):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "behavior.csv",
                     "behavior_codebook.md",
@@ -561,6 +544,7 @@ def naive(df):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     df, behavior = simulate(np.random.default_rng(SEED))
     if action == "verify":

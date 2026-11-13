@@ -1,18 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Level 2 Task 09 artifacts and scoring metadata.
-
-Generating model: a two-parameter logistic item response model over 20 binary
-items, difficulties evenly spaced from -2 to +2.
-
-    P(correct) = 1 / (1 + exp(-slope * (theta - difficulty)))
-
-Three items should leave the bank, and the vendor's review finds only one of
-them. CAT06 and CAT07 are redundant with each other and the vendor flags them;
-CAT13 and CAT14 are equally redundant and it misses them; CAT12's
-discrimination collapses from 1.15 to 0.30 in the holdout. CAT03 is flagged and
-is fine. All four dependent items have high discrimination, so an adaptive test
-reaches for them first.
-"""
+"""Generate the binary IRT bank-selection task and adaptive-test diagnostics."""
 
 from __future__ import annotations
 
@@ -235,6 +222,7 @@ def dependent_pairs(X, a, b, cutoff=0.15):
 
 
 def bank_index(bank):
+    """Return the bank positions of the requested items."""
     return [ITEMS.index(item) for item in bank]
 
 
@@ -271,6 +259,7 @@ def write_vendor_review(path):
 
 
 def write_codebook(path):
+    """Write the public variable and response-format descriptions."""
     path.write_text(
         "# Codebook - adaptive item bank\n\n"
         "`data.csv` and `holdout.csv` are tab-separated and hold binary responses to the "
@@ -290,6 +279,7 @@ def write_codebook(path):
 
 
 def write_memo(path):
+    """Write the preliminary analysis for the agent to assess."""
     path.write_text(
         "# Preliminary analysis\n\n"
         "The vendor recommends its full twenty-item bank. Its case is that the bank "
@@ -300,6 +290,7 @@ def write_memo(path):
 
 
 def build_task_json(data_sha):
+    """Build the task definition and private scoring configuration."""
     return [
         {
             "id": TASK_ID,
@@ -311,7 +302,6 @@ def build_task_json(data_sha):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "codebook.md",
                     "data.csv",
@@ -341,6 +331,7 @@ def build_task_json(data_sha):
 
 
 def truth(data_sha, rows, vendor, screened):
+    """Build the private answers, model parameters, and provenance."""
     return {
         "task_id": TASK_ID,
         "scored": {
@@ -370,6 +361,7 @@ def truth(data_sha, rows, vendor, screened):
 
 
 def candidate_submissions():
+    """Return the reference answer and competing analyses for scoring checks."""
     correct = {
         "removed_items": SCREENED_OUT,
         "vendor_flags": VENDOR_VERDICTS,
@@ -524,6 +516,7 @@ def naive(calibration, holdout, theta_holdout):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     rng = np.random.default_rng(SEED)
     calibration, _ = simulate(rng, N_CALIBRATION)

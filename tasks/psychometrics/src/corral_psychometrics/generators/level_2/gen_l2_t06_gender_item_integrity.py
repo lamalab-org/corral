@@ -1,20 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Level 2 Task 06 artifacts and scoring metadata.
-
-Generating model: one HSNS factor, with group 2 genuinely 0.25 higher on the
-trait, and five kinds of item planted on top.
-
-    HSNS2 HSNS3   export wrote a middle response over the real answer, group 2
-    HSNS5 HSNS9   real differential item functioning - the trait is the same,
-                  the response function is not
-    HSNS7         mis-keyed
-    HSNS6         no fault; the item simply measures poorly
-    the rest      sound
-
-The delivery audit flags the re-sent batch as HSNS2, HSNS3 and HSNS4 - HSNS4
-rode along undamaged, and neither genuinely biased item was in that batch, so
-the audit alone gives the wrong answer.
-"""
+"""Generate the task distinguishing export faults from genuine item differences."""
 
 from __future__ import annotations
 
@@ -23,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from corral_psychometrics.scoring_policy import POLICY_NAME
 from corral_psychometrics import paths
 from corral_psychometrics.generators import common as C
 
@@ -53,8 +39,8 @@ LOADINGS = {
 # The export wrote a middle response over the real answer, for group 2 only.
 INSERTED_NEUTRAL = {"HSNS2": 0.35, "HSNS3": 0.30}
 # Genuine differential item functioning: the respondent's own trait, a different
-# response function in group 2. HSNS5 widens the middle category, HSNS9 shifts.
-WIDENED = ("HSNS5", 0.60, -0.40)
+# response function in group 2. HSNS5 compresses continuous responses toward zero, HSNS9 shifts.
+COMPRESSED = ("HSNS5", 0.25, 0.10)
 SHIFTED = ("HSNS9", -0.90)
 MIS_KEYED = "HSNS7"
 WEAK = "HSNS6"
@@ -75,7 +61,7 @@ LABELS = ["sound", "mis_keyed", "inserted_neutral", "gender_dif", "weak_item"]
 
 # Items whose response function differs between the groups, whatever the cause.
 # A model that compares the groups has to let these differ.
-GROUP_DEPENDENT = sorted(set(INSERTED_NEUTRAL) | {WIDENED[0], SHIFTED[0]})
+GROUP_DEPENDENT = sorted(set(INSERTED_NEUTRAL) | {COMPRESSED[0], SHIFTED[0]})
 
 # The audit flags the batch that was re-sent. HSNS4 rode along undamaged, and
 # neither DIF item was in it.
@@ -123,25 +109,18 @@ remaining group difference is read from that refit, so the diagnoses and the
 model have to agree with each other."""
 
 
-def thresholds_for(item, gender):
-    """Where this item's response categories fall for this group."""
-    tau = list(C.THRESHOLDS[item])
-    if gender == 2 and item == WIDENED[0]:
-        tau[1] -= WIDENED[1]
-        tau[2] += WIDENED[1]
-        tau = [t + WIDENED[2] for t in tau]
-    if gender == 2 and item == SHIFTED[0]:
-        tau = [t + SHIFTED[1] for t in tau]
-    return tau
-
-
 def responses(rng, n, gender):
     """One group's answers, from one latent trait per respondent."""
     eta = rng.normal(0.0, 1.0, n) + (LATENT_DIFFERENCE if gender == 2 else 0.0)
     out = {}
     for item, loading in LOADINGS.items():
         noise = rng.normal(0, np.sqrt(1 - loading**2), n)
-        out[item] = C.categorize(loading * eta + noise, thresholds_for(item, gender))
+        value = loading * eta + noise
+        if gender == 2 and item == COMPRESSED[0]:
+            value = COMPRESSED[1] * value + COMPRESSED[2]
+        if gender == 2 and item == SHIFTED[0]:
+            value = value - SHIFTED[1]
+        out[item] = value
     return pd.DataFrame(out)[ITEMS]
 
 
@@ -152,21 +131,21 @@ def build_data(rng):
         block = responses(rng, N_PER_GROUP, gender)
         if gender == 2:
             for item, rate in INSERTED_NEUTRAL.items():
-                block.loc[rng.random(len(block)) < rate, item] = 3
-        block[MIS_KEYED] = 6 - block[MIS_KEYED]
+                block.loc[rng.random(len(block)) < rate, item] = 0
+        block[MIS_KEYED] = -block[MIS_KEYED]
         block["gender"] = gender
         frames.append(block)
     data = pd.concat(frames, ignore_index=True)
-    data[ITEMS] = data[ITEMS].mask(rng.random(data[ITEMS].shape) < MISSING_RATE, 0)
+    data[ITEMS] = data[ITEMS].mask(rng.random(data[ITEMS].shape) < MISSING_RATE, np.nan)
     data["country"] = "US"
     return data[ITEMS + ["gender", "country"]]
 
 
 def analysis_sample(df, repair_mis_key=True):
     """Complete responses, optionally with the reversed item put back."""
-    X = df[(df[ITEMS] != 0).all(axis=1)][ITEMS + ["gender"]].astype(float).copy()
+    X = df[df[ITEMS].notna().all(axis=1)][ITEMS + ["gender"]].astype(float).copy()
     if repair_mis_key:
-        X[MIS_KEYED] = 6 - X[MIS_KEYED]
+        X[MIS_KEYED] = -X[MIS_KEYED]
     return X
 
 
@@ -192,15 +171,16 @@ def neutral_profile(X, item):
     picks out a narrow band of the trait.
     """
     rest = X[[i for i in ITEMS if i != item]].sum(axis=1)
-    middle = rest[X[item] == 3]
+    middle = rest[X[item].abs() < 0.25]
     return round(float(middle.std() / rest.std()), 3) if len(middle) > 30 else None
 
 
 def write_codebook(path):
+    """Write the public variable and response-format descriptions."""
     path.write_text(
         "# Codebook - group comparison\n\n"
-        "Tab-separated, one row per respondent. Responses are five-point ratings from "
-        "1 (Disagree) to 5 (Agree); `0` denotes a missing response.\n\n"
+        "Tab-separated, one row per respondent. Responses are continuous and unbounded, "
+        "centered around zero. Zero is valid; empty fields denote missing responses.\n\n"
         "| item | text |\n|---|---|\n"
         + "\n".join(f"| `{item}` | {C.ITEM_TEXT[item]} |" for item in ITEMS)
         + "\n\n| variable | description |\n|---|---|\n"
@@ -221,7 +201,7 @@ def write_audit(out_dir):
                 "transmission_window": "2026-03-04 22:10-22:40"
                 if resent
                 else "2026-03-04 09:00-11:30",
-                "field_width": FIELD_WIDTH[item],
+                "field_width": FIELD_WIDTH[item] + 18,
                 "rows_written": N_PER_GROUP * 2,
             }
         )
@@ -249,6 +229,7 @@ def write_audit(out_dir):
 
 
 def build_task_json(shas, effect):
+    """Build the task definition and private scoring configuration."""
     return [
         {
             "id": TASK_ID,
@@ -260,7 +241,6 @@ def build_task_json(shas, effect):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "codebook.md",
                     "data.csv",
@@ -279,6 +259,7 @@ def build_task_json(shas, effect):
             "scoring_function": "score_gender_item_integrity",
             "scoring_params": {
                 "task_type": "gender_item_integrity",
+                "model_quality_policy": POLICY_NAME,
                 "data_dir": TASK.artifacts_relpath,
                 "truth_path": TASK.truth_relpath,
                 "dataset": "data.csv",
@@ -340,15 +321,15 @@ def verify(data):
     print(f"  the three the audit flags:         {audit_effect:+.3f}")
 
     print("\n  group 2, middle responses and what they tell you:")
-    print(f"    {'item':8s} {'% at 3':>7s} {'spread ratio':>13s}  audit  truth")
+    print(f"    {'item':8s} {'% near 0':>7s} {'spread ratio':>13s}  audit  truth")
     profile = {}
     for item in ITEMS:
-        share = float((group2[item] == 3).mean())
+        share = float((group2[item].abs() < 0.25).mean())
         profile[item] = neutral_profile(group2, item)
         flag = "B2" if item in RETRANSMITTED else "  "
         print(f"    {item:8s} {share:7.2f} {profile[item]:13.3f}   {flag}   {DIAGNOSES[item]}")
 
-    candidates = [i for i in ITEMS if float((group2[i] == 3).mean()) > 0.25]
+    candidates = [i for i in ITEMS if float((group2[i].abs() < 0.25).mean()) > 0.25]
     inserted = [profile[i] for i in candidates if i in INSERTED_NEUTRAL]
     genuine = [profile[i] for i in candidates if i not in INSERTED_NEUTRAL]
     r1, r2 = X[X.gender == 1], X[X.gender == 2]
@@ -358,7 +339,7 @@ def verify(data):
             round(float(r1[item].corr(rest(r1, item))), 3),
             round(float(r2[item].corr(rest(r2, item))), 3),
         )
-        for item in (WIDENED[0], SHIFTED[0])
+        for item in (COMPRESSED[0], SHIFTED[0])
     }
     print("\n  DIF items, item-rest correlation by group (the trait link must survive):")
     for item, (a, b) in dif_kept.items():
@@ -369,7 +350,7 @@ def verify(data):
         [
             (
                 "every item with many middle responses is a candidate",
-                set(candidates) == set(INSERTED_NEUTRAL) | {WIDENED[0]},
+                set(candidates) == set(INSERTED_NEUTRAL) | {COMPRESSED[0]},
             ),
             (
                 "and the middle response is uninformative only on the overwritten ones",
@@ -377,8 +358,8 @@ def verify(data):
             ),
             (
                 "and the overwritten items are not the ones with the most middle responses",
-                float((group2[WIDENED[0]] == 3).mean())
-                > max(float((group2[i] == 3).mean()) for i in INSERTED_NEUTRAL),
+                float((group2[COMPRESSED[0]].abs() < 0.25).mean())
+                > max(float((group2[i].abs() < 0.25).mean()) for i in INSERTED_NEUTRAL),
             ),
             (
                 "DIF keeps each item tied to the trait in both groups",
@@ -394,7 +375,7 @@ def verify(data):
                 "the audit flags a clean item and misses both DIF items",
                 DIAGNOSES["HSNS4"] == "sound"
                 and "HSNS4" in RETRANSMITTED
-                and not {WIDENED[0], SHIFTED[0]} & set(RETRANSMITTED),
+                and not {COMPRESSED[0], SHIFTED[0]} & set(RETRANSMITTED),
             ),
             (
                 "freeing the group-dependent items changes the group difference",
@@ -425,7 +406,7 @@ def naive(data):
     audit_says = {
         item: ("inserted_neutral" if item in RETRANSMITTED else "sound") for item in ITEMS
     }
-    shares = {item: float((group2[item] == 3).mean()) for item in ITEMS}
+    shares = {item: float((group2[item].abs() < 0.25).mean()) for item in ITEMS}
     top = sorted(shares, key=shares.get, reverse=True)[: len(INSERTED_NEUTRAL)]
     count_says = {item: ("inserted_neutral" if item in top else "sound") for item in ITEMS}
 
@@ -440,7 +421,7 @@ def naive(data):
     return C.report(
         [
             ("the audit's flags do not identify the faults", "HSNS4" in audit_wrong),
-            ("and they miss the items that really differ", WIDENED[0] in audit_wrong),
+            ("and they miss the items that really differ", COMPRESSED[0] in audit_wrong),
             (
                 "counting middle responses picks a genuine item first",
                 DIAGNOSES[top[0]] != "inserted_neutral",
@@ -450,6 +431,7 @@ def naive(data):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     rng = np.random.default_rng(SEED)
     data = build_data(rng)
@@ -473,13 +455,14 @@ def main():
             "group_dependent_items": GROUP_DEPENDENT,
             "repaired_gender_effect": effect,
         },
-        "repairs": {"reverse_scored": {MIS_KEYED: 6}},
+        "repairs": {"reverse_scored": {MIS_KEYED: 0}},
+        "scoring_reference": {"reference_model_syntax": reference_syntax()},
         "generative_parameters": {
             "latent_difference": LATENT_DIFFERENCE,
             "loadings": LOADINGS,
             "inserted_neutral_rates": INSERTED_NEUTRAL,
-            "widened_middle_category": {WIDENED[0]: [WIDENED[1], WIDENED[2]]},
-            "threshold_shift": {SHIFTED[0]: SHIFTED[1]},
+            "compressed_response": {COMPRESSED[0]: [COMPRESSED[1], COMPRESSED[2]]},
+            "intercept_shift": {SHIFTED[0]: -SHIFTED[1]},
             "mis_keyed": MIS_KEYED,
             "weak_item": WEAK,
             "retransmitted_batch": RETRANSMITTED,

@@ -1,8 +1,10 @@
 # Codebook - anonymised HSNS population comparison
 
-Every file is tab-separated. Responses run from 1 (Disagree) to 5 (Agree); all responses are complete.
+Every file is tab-separated. Responses are continuous and unbounded, centered around zero; all responses are complete.
 
 The reference files hold large samples from four populations, named only by identifier. How they differ is not supplied. `cases.csv` holds three case samples of 300 respondents each, identified by `case_id`; each case comes from one of the four populations.
+
+Items HSNS2, HSNS5, HSNS7, HSNS10 were presented together on one matrix page; HSNS1, HSNS3, HSNS6, HSNS8 shared a separate matrix page. Other items appeared individually. This format was used in every population; whether it produces a shared response influence must be assessed from the data.
 
 | item | text |
 |---|---|

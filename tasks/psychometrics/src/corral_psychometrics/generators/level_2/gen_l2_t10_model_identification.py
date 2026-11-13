@@ -1,30 +1,16 @@
 #!/usr/bin/env python3
-"""Generate Level 2 Task 10 artifacts and scoring metadata.
-
-Six datasets of twelve items, each drawn from one of six candidate structures
-and then given one data-quality problem on top.
-
-    model_a   one general factor
-    model_b   two correlated factors, Q01-Q06 and Q07-Q12
-    model_c   bifactor - a general factor plus one narrow factor per subscale
-    model_d   three correlated factors, Q01-Q03, Q04-Q07 and Q08-Q12
-    model_e   two correlated factors, Q06 also loading on the second
-    model_f   one general factor plus a method effect shared by Q03 and Q10
-
-The complications - missingness, local dependence, a shifted subgroup, repeated
-rows, a weak item, a response style - are what make several structures fit a
-dataset equally well, so an answer is a list of candidates within the stated BIC
-margin rather than one name.
-"""
+"""Generate the candidate-model identification task and response datasets."""
 
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+from corral_psychometrics.scoring_policy import POLICY_NAME
 from corral_psychometrics import paths
 from corral_psychometrics.generators import common as C
 
@@ -39,8 +25,8 @@ MODELS = [f"model_{letter}" for letter in "abcdef"]
 MODEL_D_BLOCKS = [(0, 3), (3, 7), (7, 12)]
 N = 2_400
 
-# The same cut points every other task uses, borrowed for twelve items.
-THRESHOLDS = dict(zip(ITEMS, list(C.THRESHOLDS.values())[: len(ITEMS)]))
+# Baseline continuous responses are centered at zero.
+INTERCEPTS = dict(zip(ITEMS, list(C.INTERCEPTS.values())[: len(ITEMS)]))
 
 MODEL_DESCRIPTIONS = {
     "model_a": "one general factor; all items have comparable loadings",
@@ -48,21 +34,12 @@ MODEL_DESCRIPTIONS = {
     "model_c": "a bifactor model; every item loads on a general factor and one subscale",
     "model_d": "three correlated factors; Q01-Q03, Q04-Q07 and Q08-Q12 form the subscales",
     "model_e": "two correlated factors with Q06 also loading on the second factor",
-    "model_f": "one general factor with a response-method effect shared by Q03 and Q10",
+    "model_f": "one general factor with a response-method effect shared by Q03, Q05, Q07 and Q10",
 }
 
-# A candidate belongs in a dataset's answer when its BIC is within this of the
-# best-fitting candidate. Two is the conventional point below which a BIC
-# difference is not worth interpreting, and it is well under what one extra
-# free parameter costs here, log(2400) = 7.8. The agent is not told how to
-# compare candidates: every dataset has a single answer, and the two close
-# calls are settled by the estimates too (dataset_04's two-factor rival has
-# factors correlating 1.0, dataset_05's extra cross-loading is about zero).
+# Retain admissible candidates within two BIC units of the best model.
 TIE_MARGIN = 2.0
 
-# Inside one block of every candidate, so it cannot mimic a general factor.
-DEPENDENT_PAIR = ("Q02", "Q03")
-DEPENDENT_SHARE = 0.28
 WEAK_ITEM = "Q08"
 WEAK_LOADING = 0.26
 SHIFTED_ITEM = "Q11"
@@ -70,16 +47,16 @@ DUPLICATED_ROWS = 320
 
 COMPLICATIONS = {
     "dataset_01": "responses to Q01 go missing more often at the low end of the scale",
-    "dataset_02": f"{DEPENDENT_PAIR[0]} and {DEPENDENT_PAIR[1]} share residual variance",
-    "dataset_03": f"a subgroup answers {SHIFTED_ITEM} one threshold lower",
+    "dataset_02": "complete responses without an additional data-quality problem",
+    "dataset_03": f"a subgroup answers {SHIFTED_ITEM} 0.55 units higher at the same trait level",
     "dataset_04": f"{DUPLICATED_ROWS} rows are delivered twice",
     "dataset_05": f"{WEAK_ITEM} is weak but still measures the trait",
-    "dataset_06": "a quarter of respondents answer everything one category higher",
+    "dataset_06": "a quarter of respondents answer everything one unit higher",
 }
 
 
 def factor_syntax(model):
-    """The lavaan-style model a candidate stands for."""
+    """Return a candidate measurement model in semopy syntax."""
     join = "+".join
     if model == "model_a":
         return f"G =~ {join(ITEMS)}"
@@ -105,7 +82,7 @@ def factor_syntax(model):
         )
     if model == "model_e":
         return f"F1 =~ {join(ITEMS[:6])}\nF2 =~ {join(ITEMS[6:])}+Q06\nF1 ~~ F2"
-    return f"G =~ {join(ITEMS)}\nM =~ Q03+Q10\nG ~~ 0*M"
+    return f"G =~ {join(ITEMS)}\nM =~ Q03+Q05+Q07+Q10\nG ~~ 0*M"
 
 
 def latent_scores(model, rng, n):
@@ -136,7 +113,7 @@ def latent_scores(model, rng, n):
     else:
         eta = rng.normal(size=n)
         method = rng.normal(size=n)
-        columns = [0.68 * eta + (0.42 * method if i in (2, 9) else 0.0) for i in range(12)]
+        columns = [0.68 * eta + (0.42 * method if i in (2, 4, 6, 9) else 0.0) for i in range(12)]
     return np.column_stack(columns)
 
 
@@ -148,33 +125,29 @@ def responses(model, rng, n, complication=None):
         shared = signal[:, index]
         scale = WEAK_LOADING / max(float(np.std(shared)), 1e-9)
         signal[:, index] = shared * scale
-    if complication == "dependence":
-        shared = rng.normal(size=n)
-        for item in DEPENDENT_PAIR:
-            signal[:, ITEMS.index(item)] += np.sqrt(DEPENDENT_SHARE) * shared
 
     values = {}
     for index, item in enumerate(ITEMS):
         column = signal[:, index]
         residual = np.sqrt(max(1.0 - float(np.var(column)), 0.05))
-        values[item] = C.categorize(column + rng.normal(0, residual, n), THRESHOLDS[item])
+        values[item] = C.continuous_response(column + rng.normal(0, residual, n), INTERCEPTS[item])
     frame = pd.DataFrame(values)[ITEMS]
 
     if complication == "shift":
         subgroup = rng.random(n) < 0.42
-        cut = np.asarray(THRESHOLDS[SHIFTED_ITEM]) - 0.55
+        cut = INTERCEPTS[SHIFTED_ITEM] + 0.55
         column = signal[:, ITEMS.index(SHIFTED_ITEM)]
         residual = np.sqrt(max(1.0 - float(np.var(column)), 0.05))
-        shifted = C.categorize(column + rng.normal(0, residual, n), cut)
+        shifted = C.continuous_response(column + rng.normal(0, residual, n), cut)
         frame.loc[subgroup, SHIFTED_ITEM] = shifted[subgroup]
     if complication == "response_style":
         subgroup = rng.random(n) < 0.25
-        frame.loc[subgroup, ITEMS] = np.clip(frame.loc[subgroup, ITEMS] + 1, 1, 5)
+        frame.loc[subgroup, ITEMS] = frame.loc[subgroup, ITEMS] + 1
     if complication == "missing":
-        low = frame["Q01"] <= 2
+        low = frame["Q01"] <= -0.5
         drop = (rng.random(n) < 0.35) & low.to_numpy()
-        frame.loc[drop, "Q01"] = 0
-        frame[ITEMS] = frame[ITEMS].mask(rng.random((n, len(ITEMS))) < 0.012, 0)
+        frame.loc[drop, "Q01"] = np.nan
+        frame[ITEMS] = frame[ITEMS].mask(rng.random((n, len(ITEMS))) < 0.012, np.nan)
     if complication == "duplicates":
         picked = rng.choice(n, size=DUPLICATED_ROWS, replace=False)
         frame = pd.concat([frame, frame.iloc[picked]], ignore_index=True)
@@ -183,7 +156,7 @@ def responses(model, rng, n, complication=None):
 
 COMPLICATION_KIND = {
     "dataset_01": "missing",
-    "dataset_02": "dependence",
+    "dataset_02": "none",
     "dataset_03": "shift",
     "dataset_04": "duplicates",
     "dataset_05": "weak_item",
@@ -194,23 +167,23 @@ COMPLICATION_KIND = {
 def analysis_sample(frame):
     """Complete responses, with repeated rows collapsed."""
     clean = frame[ITEMS]
-    clean = clean[(clean != 0).all(axis=1)]
+    clean = clean[clean.notna().all(axis=1)]
     return clean[~clean.duplicated()].astype(float)
 
 
 def bic_by_model(frame):
-    """BIC of every candidate model on one sample. Lower is better."""
-    import semopy
+    """Compare admissible models on the same observed items and complete rows."""
+    from corral_psychometrics.score import check_constraints, evaluate_model
+    from corral_psychometrics.scoring_policy import validity_options
 
     X = analysis_sample(frame)
     out = {}
     for model in MODELS:
         try:
-            fitted = semopy.Model(factor_syntax(model))
-            fitted.fit(X)
-            chi2 = float(semopy.calc_stats(fitted)["chi2"].iloc[0])
-            out[model] = round(chi2 + len(fitted.param_vals) * np.log(len(X)), 2)
-        except Exception:  # noqa: BLE001
+            criteria, fitted = evaluate_model(factor_syntax(model), X, ITEMS)
+            validity, _ = check_constraints(fitted, criteria, validity_options())
+            out[model] = round(criteria["BIC"], 2) if all(validity.values()) else float("inf")
+        except Exception:  # An inadmissible candidate cannot win on BIC.
             out[model] = float("inf")
     return out
 
@@ -228,6 +201,7 @@ def assignment(rng):
 
 
 def build_frames(rng, mapping, with_complications=True):
+    """Generate each anonymized dataset from its assigned candidate model."""
     return {
         dataset: responses(
             mapping[dataset],
@@ -257,20 +231,24 @@ identifiers from `candidate_models.csv`. No working is submitted."""
 
 
 def write_codebook(path):
+    """Write the public variable and response-format descriptions."""
     path.write_text(
         "# Codebook - model identification\n\n"
         "Each `dataset_*.csv` is tab-separated and holds an independent anonymised "
-        "sample answering the same twelve items. Responses run from 1 (low) to 5 "
-        "(high); `0` denotes a missing response.\n\n"
+        "sample answering the same twelve items. Responses are continuous and unbounded, "
+        "centered around zero; empty fields denote missing responses.\n\n"
         "| variable | meaning |\n|---|---|\n"
         "| `respondent_id` | row identifier |\n"
-        + "\n".join(f"| `{item}` | ordered response, 1 to 5 |" for item in ITEMS)
+        "| response format | Q03, Q05, Q07 and Q10 used a shared matrix-page format; "
+        "the other items appeared individually; the format does not itself establish a method effect |\n"
+        + "\n".join(f"| `{item}` | continuous response; zero is valid |" for item in ITEMS)
         + "\n\n`candidate_models.csv` gives each model's description and lavaan-style "
         "syntax. The order of the catalogue carries no information.\n"
     )
 
 
 def build_task_json(data_sha):
+    """Build the task definition and private scoring configuration."""
     return [
         {
             "id": TASK_ID,
@@ -282,7 +260,6 @@ def build_task_json(data_sha):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "candidate_models.csv",
                     "codebook.md",
@@ -302,6 +279,7 @@ def build_task_json(data_sha):
             "scoring_function": "score_model_identification",
             "scoring_params": {
                 "task_type": "model_identification",
+                "model_quality_policy": POLICY_NAME,
                 "data_dir": TASK.artifacts_relpath,
                 "truth_path": TASK.truth_relpath,
                 "datasets": DATASETS,
@@ -313,6 +291,7 @@ def build_task_json(data_sha):
 
 
 def truth(data_sha, mapping, answers, measured):
+    """Build the private answers, model parameters, and provenance."""
     return {
         "task_id": TASK_ID,
         "scored": {"assignments": answers},
@@ -321,13 +300,19 @@ def truth(data_sha, mapping, answers, measured):
             "model_descriptions": MODEL_DESCRIPTIONS,
             "complications": COMPLICATIONS,
             "tie_margin": TIE_MARGIN,
-            "bic_by_dataset": measured,
+            "bic_by_dataset": {
+                dataset: {
+                    name: value if np.isfinite(value) else None for name, value in bic.items()
+                }
+                for dataset, bic in measured.items()
+            },
         },
         "provenance": C.provenance(Path(__file__).name, SEED, N * len(DATASETS), data_sha),
     }
 
 
 def candidate_submissions():
+    """Return the reference answer and competing analyses for scoring checks."""
     answers = json.loads(TASK.truth.read_text())["scored"]["assignments"]
     catalogue_order = {dataset: [model] for dataset, model in zip(DATASETS, MODELS)}
     single = {dataset: value[:1] for dataset, value in answers.items()}
@@ -462,6 +447,7 @@ def naive(mapping, frames, clean_frames):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     mapping = assignment(np.random.default_rng(SEED))
     frames = build_frames(np.random.default_rng(SEED + 1), mapping)
@@ -479,7 +465,9 @@ def main():
         answers[dataset], measured[dataset] = chosen, bic
         written = frames[dataset].copy()
         written.insert(0, "respondent_id", [f"{dataset}_{i:05d}" for i in range(len(written))])
-        written.to_csv(TASK.artifacts / f"{dataset}.csv", sep="\t", index=False)
+        written.to_csv(
+            TASK.artifacts / f"{dataset}.csv", sep="\t", index=False, quoting=csv.QUOTE_NONNUMERIC
+        )
     pd.DataFrame(
         [
             {"model_id": key, "description": value, "syntax": factor_syntax(key)}
