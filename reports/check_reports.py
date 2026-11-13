@@ -150,11 +150,15 @@ def check_indexes(env_dir: Path, reports: list[Path], problems: Problems) -> Non
     seen: set[str] = set()
     overrides = {}
     session_overrides = {}
+    trial_sessions: dict[str, str] = {}
     for report in reports:
         rel = report.relative_to(env_dir).as_posix()
         ids = {r["execution_id"] for r in trials if r["report_file"] == rel}
-        session_override, report_overrides = build_index.langfuse_overrides(report, ids)
+        session_override, report_overrides, report_sessions = (
+            build_index.langfuse_overrides(report, ids)
+        )
         session_overrides[rel] = session_override
+        trial_sessions.update(report_sessions)
         overrides.update(report_overrides)
     for row in trials:
         execution_id = row["execution_id"]
@@ -162,8 +166,10 @@ def check_indexes(env_dir: Path, reports: list[Path], problems: Problems) -> Non
         if execution_id in seen:
             problems.add(row_where, "duplicate execution_id")
         seen.add(execution_id)
-        session = session_overrides.get(row["report_file"]) or build_index.session_id(
-            execution_id, row["run_id"]
+        session = (
+            trial_sessions.get(execution_id)
+            or session_overrides.get(row["report_file"])
+            or build_index.session_id(execution_id, row["run_id"])
         )
         trace = overrides.get(
             execution_id,
