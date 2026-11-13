@@ -9,6 +9,7 @@ const PAIRS = [
 ];
 const ENV_NAMES = {
   All: 'All environments',
+  afm: 'AFM',
   corral_md: 'Corral MD',
   inference_opt: 'Inference optimization',
   psychometrics: 'Psychometrics',
@@ -19,6 +20,7 @@ const ENV_NAMES = {
   wetlab: 'Wetlab',
 };
 const ENV_SHORT = {
+  afm: 'AFM',
   corral_md: 'Corral MD',
   inference_opt: 'Inference opt.',
   psychometrics: 'Psychometrics',
