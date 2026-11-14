@@ -21,9 +21,13 @@ python scripts/push_october_reports_to_hf.py --dry_run
 # Push everything (the dataset repo is created private if it does not exist)
 python scripts/push_october_reports_to_hf.py
 
-# corral-mini runs go to their own repo, never to the October one
+# corral-mini runs go to one repo per mini version, never to the October one.
+# List every environment with runs of that version: `runs` is rebuilt from the
+# listed environments, so leaving one out would drop it.
 python scripts/push_october_reports_to_hf.py --env=psychometrics --only_env \
     --repo=jablonkagroup/corral-reports-mini-v1
+python scripts/push_october_reports_to_hf.py --env=wetlab --only_env \
+    --repo=jablonkagroup/corral-reports-mini-v2
 
 # Push only some configs (plus `runs`, which is always pushed)
 python scripts/push_october_reports_to_hf.py --env=psychometrics --level=2
@@ -35,6 +39,7 @@ import gzip
 import json
 import lzma
 import os
+import re
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
@@ -51,6 +56,9 @@ WORKSPACE = Path(__file__).resolve().parent.parent
 REPORTS_DIR = WORKSPACE / "reports"
 # Every folder under reports/ with a runs.csv is an environment.
 ENVIRONMENTS = tuple(sorted(p.parent.name for p in REPORTS_DIR.glob("*/runs.csv")))
+# corral-mini runs of version vN live in reports/<env>/mini-vN/ next to the
+# full-benchmark runs in reports/<env>/; set by use_repo() for a mini repo.
+MINI: dict[str, str | None] = {"dir": None}
 
 load_dotenv(dotenv_path=WORKSPACE / ".env")
 HF_TOKEN = os.getenv("HF_TOKEN")
@@ -110,7 +118,7 @@ def _json(value: Any) -> str | None:
 
 def _trial_rows(env: str, level: int) -> Iterator[dict[str, Any]]:
     """Yield one row per final trial of *env* at *level*, report by report."""
-    env_dir = REPORTS_DIR / env
+    env_dir = report_dir(env)
     index = {
         row["execution_id"]: row
         for row in _read_csv(env_dir / "trials.csv")
@@ -167,7 +175,7 @@ def _trial_rows(env: str, level: int) -> Iterator[dict[str, Any]]:
 
 def _levels(env: str) -> list[int]:
     """Levels with reports in *env*, e.g. [1, 2] or [2, 3]."""
-    return sorted({int(r["level"]) for r in _read_csv(REPORTS_DIR / env / "runs.csv")})
+    return sorted({int(r["level"]) for r in _read_csv(report_dir(env) / "runs.csv")})
 
 
 def _trial_dataset(env: str, level: int, cache_dir: str) -> Dataset:
@@ -180,6 +188,27 @@ def _trial_dataset(env: str, level: int, cache_dir: str) -> Dataset:
 
 
 MINI_RUN_PREFIX = "-mini-"
+MINI_VERSION = re.compile(r"mini-(v\d+)")
+
+
+def report_dir(env: str) -> Path:
+    """The folder with env's runs: reports/<env>/mini-vN/ for a mini repo, if present."""
+    mini_dir = MINI["dir"]
+    if mini_dir and (REPORTS_DIR / env / mini_dir / "runs.csv").exists():
+        return REPORTS_DIR / env / mini_dir
+    return REPORTS_DIR / env
+
+
+def use_repo(repo: str) -> None:
+    """Read corral-mini runs from reports/<env>/mini-vN/ when pushing to a vN repo."""
+    version = mini_version(repo) if "mini" in repo.rsplit("/", 1)[-1] else None
+    MINI["dir"] = f"mini-{version}" if version else None
+
+
+def mini_version(name: str) -> str | None:
+    """The corral-mini version in a repo name or run ID (`mini-v2` -> `v2`)."""
+    match = MINI_VERSION.search(name.rsplit("/", 1)[-1])
+    return match.group(1) if match else None
 
 
 def check_target(repo: str, envs: tuple[str, ...]) -> None:
@@ -190,19 +219,70 @@ def check_target(repo: str, envs: tuple[str, ...]) -> None:
     overwrite the October datasets with mini runs or the reverse.
     """
     mini_repo = "mini" in repo.rsplit("/", 1)[-1]
+    version = mini_version(repo)
     for env in envs:
-        for row in _read_csv(REPORTS_DIR / env / "runs.csv"):
+        for row in _read_csv(report_dir(env) / "runs.csv"):
             if (MINI_RUN_PREFIX in row["run_id"]) != mini_repo:
                 raise SystemExit(
                     f"ERROR: {env} run {row['run_id']!r} does not belong in {repo}; "
                     "corral-mini runs go only to a repo with 'mini' in its name"
                 )
+            if version and mini_version(row["run_id"]) != version:
+                raise SystemExit(
+                    f"ERROR: {env} run {row['run_id']!r} does not belong in {repo}; "
+                    f"a corral-mini {version} repo takes only {version} runs"
+                )
+
+
+def env_list(env: str | tuple[str, ...] | list[str] | None) -> tuple[str, ...] | None:
+    """Normalize --env: one name, a comma-separated list, or a tuple from fire."""
+    if env is None:
+        return None
+    names = env.split(",") if isinstance(env, str) else list(env)
+    names = tuple(dict.fromkeys(n.strip() for n in names if n.strip()))
+    for name in names:
+        if name not in ENVIRONMENTS:
+            raise SystemExit(
+                f"ERROR: Unknown environment '{name}', expected one of {ENVIRONMENTS}"
+            )
+    return names or None
+
+
+def mini_environments(version: str | None = None) -> tuple[str, ...]:
+    """Environments under reports/ with corral-mini runs (of `version`, if given)."""
+    return tuple(
+        env
+        for env in ENVIRONMENTS
+        if any(
+            MINI_RUN_PREFIX in r["run_id"]
+            and (version is None or mini_version(r["run_id"]) == version)
+            for r in _read_csv(report_dir(env) / "runs.csv")
+        )
+    )
+
+
+def check_shared_tables(repo: str, envs: tuple[str, ...]) -> None:
+    """Refuse a mini push whose shared tables would drop a mini environment.
+
+    Tables that span environments (`runs`, and the summary's tables) are
+    replaced as a whole on every push, so they must be built from every
+    environment with runs of the repo's corral-mini version.
+    """
+    if "mini" not in repo.rsplit("/", 1)[-1]:
+        return
+    expected = mini_environments(mini_version(repo))
+    missing = [e for e in expected if e not in envs]
+    if missing:
+        raise SystemExit(
+            f"ERROR: pushing to {repo} would drop {missing} from its shared tables; "
+            f"pass every mini environment, e.g. --env={','.join(expected)}"
+        )
 
 
 def _runs_dataset(envs: tuple[str, ...] = ENVIRONMENTS) -> Dataset:
     rows = []
     for env in envs:
-        for row in _read_csv(REPORTS_DIR / env / "runs.csv"):
+        for row in _read_csv(report_dir(env) / "runs.csv"):
             for key in (
                 "level",
                 "tasks",
@@ -221,7 +301,7 @@ def _runs_dataset(envs: tuple[str, ...] = ENVIRONMENTS) -> Dataset:
 
 
 def main(
-    env: str | None = None,
+    env: str | tuple[str, ...] | None = None,
     level: int | None = None,
     runs_only: bool = False,
     dry_run: bool = False,
@@ -232,9 +312,11 @@ def main(
     """Push the October reports as one config per environment and level.
 
     Args:
-        env: Push only this environment (a folder under reports/).
-        only_env: Restrict the `runs` config to `env` as well (for repos that
-            hold one environment, such as the corral-mini datasets).
+        env: Push only these environments (folders under reports/), e.g.
+            `wetlab` or `psychometrics,wetlab`.
+        only_env: Restrict the `runs` config to `env` as well (for the
+            corral-mini datasets). For a mini repo `env` must then list every
+            environment with runs of that mini version, or they would be dropped from `runs`.
         level: Push only this level.
         runs_only: Push only the `runs` config.
         dry_run: Build the configs and log their sizes without pushing.
@@ -242,14 +324,15 @@ def main(
             effect if the repo already exists.
         repo: Target dataset repo.
     """
-    if env is not None and env not in ENVIRONMENTS:
-        raise SystemExit(
-            f"ERROR: Unknown environment '{env}', expected one of {ENVIRONMENTS}"
-        )
-    if only_env and env is None:
+    use_repo(repo)
+    envs = env_list(env)
+    if only_env and envs is None:
         raise SystemExit("ERROR: --only_env needs --env")
-    runs_envs = (env,) if only_env else ENVIRONMENTS
-    check_target(repo, runs_envs if env is None else tuple(dict.fromkeys((env, *runs_envs))))
+    runs_envs = envs if only_env else ENVIRONMENTS
+    check_target(
+        repo, runs_envs if envs is None else tuple(dict.fromkeys((*envs, *runs_envs)))
+    )
+    check_shared_tables(repo, runs_envs)
     if not dry_run:
         if not HF_TOKEN:
             raise SystemExit("ERROR: HF_TOKEN is not set (add it to .env)")
@@ -263,7 +346,7 @@ def main(
     if not runs_only:
         configs = [
             (f"{env_name}-level_{level_number}", env_name, level_number)
-            for env_name in (ENVIRONMENTS if env is None else (env,))
+            for env_name in (ENVIRONMENTS if envs is None else envs)
             for level_number in _levels(env_name)
             if level is None or level_number == level
         ]

@@ -63,6 +63,10 @@ def environments() -> list[Path]:
     )
 
 
+def location(env_dir: Path) -> str:
+    return f"reports/{env_dir.relative_to(REPORTS_DIR).as_posix()}"
+
+
 def read_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
     with path.open(newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -84,12 +88,15 @@ def check_layout(env_dir: Path, problems: Problems, warnings: Problems) -> list[
     Only the reports and the two index files are required. Anything else, such
     as a README, notes or figures, is reported as a warning, not an error.
     """
-    where = f"reports/{env_dir.name}"
+    where = location(env_dir)
     names = {p.name for p in env_dir.iterdir()}
     for missing in sorted(ENV_FILES - names):
         problems.add(where, f"missing {missing}")
     for extra in sorted(names - ENV_FILES - {"README.md"}):
-        if not re.fullmatch(r"level_\d+", extra) or not (env_dir / extra).is_dir():
+        if (
+            not re.fullmatch(r"level_\d+|mini-v\d+", extra)
+            or not (env_dir / extra).is_dir()
+        ):
             warnings.add(where, f"'{extra}' is not part of the convention")
 
     reports = []
@@ -124,7 +131,7 @@ def check_layout(env_dir: Path, problems: Problems, warnings: Problems) -> list[
 
 def check_indexes(env_dir: Path, reports: list[Path], problems: Problems) -> None:
     """Check runs.csv and trials.csv against each other and the reports."""
-    where = f"reports/{env_dir.name}"
+    where = location(env_dir)
     run_fields, runs = read_csv(env_dir / "runs.csv")
     trial_fields, trials = read_csv(env_dir / "trials.csv")
     if run_fields != build_index.RUN_FIELDS:
@@ -212,7 +219,9 @@ def check_indexes(env_dir: Path, reports: list[Path], problems: Problems) -> Non
         if rel not in runs_by_file or is_lfs_pointer(report):
             continue
         try:
-            run, run_trials = build_index.index_run(env_dir, report, env_dir.name)
+            run, run_trials = build_index.index_run(
+                env_dir, report, build_index.environment_name(env_dir)
+            )
         except Exception as error:
             problems.add(f"{where}/{rel}", f"cannot be indexed: {error}")
             continue
@@ -350,14 +359,17 @@ def main() -> int:
     env_dirs = environments()
     if not env_dirs:
         problems.add("reports", "no environment folders found")
-    for env_dir in env_dirs:
+    # corral-mini runs in reports/<env>/mini-v<N>/ are checked like an environment.
+    folders = [d for e in env_dirs for d in (e, *sorted(e.glob("mini-v[0-9]*")))]
+    for env_dir in folders:
         reports = check_layout(env_dir, problems, warnings)
         if not (env_dir / "runs.csv").exists() or not (env_dir / "trials.csv").exists():
             continue
         check_indexes(env_dir, reports, problems)
         skipped = sum(is_lfs_pointer(r) for r in reports)
         sys.stdout.write(
-            f"{env_dir.name}: {len(reports)} reports checked"
+            f"{location(env_dir).removeprefix('reports/')}: "
+            f"{len(reports)} reports checked"
             + (f" ({skipped} Git LFS pointers not rebuilt)" if skipped else "")
             + "\n"
         )
