@@ -45,8 +45,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "reports"))
 from build_index import AGENTS, MODELS
 
 
-def load_trial(run_dir: Path) -> tuple[dict, TaskTrialResult, dict]:
-    """Return (report metadata, verbose trial, run metadata) for a 1-trial run."""
+def load_trial(
+    run_dir: Path, unscored_as_failure: bool = False
+) -> tuple[dict, TaskTrialResult, dict]:
+    """Return (report metadata, verbose trial, run metadata) for a 1-trial run.
+
+    With `unscored_as_failure`, a trial the scorer could not score (score None
+    with an `evaluation_error`) is scored 0; the error is kept.
+    """
     report = json.loads((run_dir / "report.json").read_text())
     ((task_id, task),) = report["task_results"].items()
     (trial,) = task["trials"]
@@ -65,10 +71,16 @@ def load_trial(run_dir: Path) -> tuple[dict, TaskTrialResult, dict]:
     if sum(statistics["by_tool"].values()) != sum(trial.get("by_tool", {}).values()):
         raise ValueError(f"{run_dir}: rebuilt tool calls do not match the report")
     evaluation = trial.get("evaluation")
+    unscored = trial["score"] is None and bool(trial.get("evaluation_error"))
+    if unscored and not unscored_as_failure:
+        raise ValueError(
+            f"{run_dir}: trial is unscored ({trial['evaluation_error']}); "
+            "pass --unscored-as-failure to score it 0"
+        )
     rebuilt = TaskTrialResult(
         task_id=task_id,
         trial_id=trial["trial_id"],
-        score=trial["score"],
+        score=0.0 if unscored else trial["score"],
         state={},
         tool_statistics=statistics,
         output=trial.get("output"),
@@ -82,7 +94,7 @@ def load_trial(run_dir: Path) -> tuple[dict, TaskTrialResult, dict]:
         error_message=trial.get("error_message"),
         surrendered=bool(trial.get("surrendered")),
     )
-    if rebuilt.success != trial["success"]:
+    if not unscored and rebuilt.success != trial["success"]:
         raise ValueError(f"{run_dir}: success differs after rebuilding")
     run_metadata = json.loads((run_dir / "run-metadata.json").read_text())
     return report["metadata"], rebuilt, run_metadata
@@ -115,6 +127,11 @@ def main() -> None:
     parser.add_argument("out_dir", type=Path)
     parser.add_argument("--run-prefix", required=True)
     parser.add_argument("--trials-per-task", type=int, default=5)
+    parser.add_argument(
+        "--unscored-as-failure",
+        action="store_true",
+        help="Score trials the scorer could not score (evaluation_error) as 0.",
+    )
     args = parser.parse_args()
 
     groups: dict[tuple[int, str, str], list[Path]] = defaultdict(list)
@@ -131,7 +148,12 @@ def main() -> None:
         groups[(level, agent, model)].append(run_dir)
 
     for (level, agent, model), run_dirs in sorted(groups.items()):
-        loaded = [load_trial(d) for d in run_dirs]
+        loaded = [load_trial(d, args.unscored_as_failure) for d in run_dirs]
+        unscored = sorted(
+            r["benchmark_run_id"]
+            for _, t, r in loaded
+            if t.evaluation_error and t.evaluation is None
+        )
         tasks: dict[str, TaskTrialResults] = {}
         for _, trial, _ in sorted(loaded, key=lambda x: x[1].trial_id):
             tasks.setdefault(
@@ -173,6 +195,11 @@ def main() -> None:
                     "started_at": started.isoformat(),
                     "completed_at": finished.isoformat(),
                     "source_runs": sorted(r["benchmark_run_id"] for _, _, r in loaded),
+                    **(
+                        {"unscored_scored_as_failure": unscored}
+                        if unscored
+                        else {}
+                    ),
                 },
                 indent=2,
             )
