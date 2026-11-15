@@ -1,8 +1,7 @@
 # Resistor network reports: corral-mini v2
 
-28 of 36 runs (18 agent/model pairs × levels 1 and 2), 3 tasks per level ×
-k = 5, 420 trials. Claude and OpenAI are complete; 8 Kimi runs wait for
-OpenRouter credit and will be added.
+36 runs (18 agent/model pairs × levels 1 and 2), 3 tasks per level × k = 5,
+540 trials.
 These replace the corral-mini v1 batch-1 reports. Layout, names and index
 columns follow [`../../README.md`](../../README.md). The full-benchmark v4
 runs (October) are in [`../`](../).
@@ -24,38 +23,40 @@ trials come from the v1 runs (same task, settings and code; 48 trials).
 | Batch | Agent | Model | L1 passes | L1 pass@5 | L1 pass^5 | L2 passes | L2 pass@5 | L2 pass^5 |
 |---|---|---|---:|---:|---:|---:|---:|---:|
 | 1 | openhands | kimi-k3.1-pro | 7 | 0.86 | 0.11 | 0 | 0.00 | 0.00 |
-| 1 | react | kimi-k3.1-pro | 7 | 0.94 | 0.03 | pending |  |  |
+| 1 | react | kimi-k3.1-pro | 7 | 0.94 | 0.03 | 5 | 0.56 | 0.11 |
 | 1 | claude-code | claude-opus-5-5 | 15 | 1.00 | 1.00 | 14 | 1.00 | 0.78 |
 | 1 | react | claude-opus-5-5 | 11 | 0.99 | 0.39 | 9 | 0.97 | 0.14 |
 | 1 | codex | gpt-6.1-sol | 15 | 1.00 | 1.00 | 13 | 1.00 | 0.55 |
 | 1 | react | gpt-6.1-sol | 15 | 1.00 | 1.00 | 14 | 1.00 | 0.78 |
-| 2 | openhands | kimi-k2.5 | 0 | 0.00 | 0.00 | pending |  |  |
-| 2 | react | kimi-k2.5 | pending |  |  | pending |  |  |
+| 2 | openhands | kimi-k2.5 | 0 | 0.00 | 0.00 | 0 | 0.00 | 0.00 |
+| 2 | react | kimi-k2.5 | 0 | 0.00 | 0.00 | 0 | 0.00 | 0.00 |
 | 2 | claude-code | claude-opus-4-7 | 7 | 0.94 | 0.03 | 3 | 0.67 | 0.00 |
 | 2 | react | claude-opus-4-7 | 7 | 0.94 | 0.03 | 5 | 0.56 | 0.11 |
 | 2 | codex | gpt-5.6-sol | 13 | 1.00 | 0.69 | 4 | 0.55 | 0.03 |
 | 2 | react | gpt-5.6-sol | 15 | 1.00 | 1.00 | 13 | 1.00 | 0.69 |
-| 3 | openhands | kimi-k2-0905 | pending |  |  | pending |  |  |
-| 3 | react | kimi-k2-0905 | pending |  |  | pending |  |  |
+| 3 | openhands | kimi-k2-0905 | 0 | 0.00 | 0.00 | 0 | 0.00 | 0.00 |
+| 3 | react | kimi-k2-0905 | 0 | 0.00 | 0.00 | 0 | 0.00 | 0.00 |
 | 3 | claude-code | claude-opus-4-5-20251101 | 0 | 0.00 | 0.00 | 0 | 0.00 | 0.00 |
 | 3 | react | claude-opus-4-5-20251101 | 1 | 0.22 | 0.00 | 0 | 0.00 | 0.00 |
 | 3 | codex | gpt-5-2025-08-07 | 0 | 0.00 | 0.00 | 0 | 0.00 | 0.00 |
 | 3 | react | gpt-5-2025-08-07 | 0 | 0.00 | 0.00 | 0 | 0.00 | 0.00 |
 
-188 of 420 trials pass. Per task (merged runs only):
+193 of 540 trials pass (Claude and OpenAI 174 of 360, Kimi 19 of 180, all
+kimi-k3.1-pro). Per task:
 
 | Level | Task | Passes |
 |---|---|---:|
-| 1 | `task_3` | 38/75 |
-| 1 | `task_5` | 33/75 |
-| 1 | `task_7` | 42/75 |
-| 2 | `task_0` | 32/65 |
-| 2 | `task_3` | 25/65 |
-| 2 | `task_5` | 18/65 |
+| 1 | `task_3` | 38/90 |
+| 1 | `task_5` | 33/90 |
+| 1 | `task_7` | 42/90 |
+| 2 | `task_0` | 36/90 |
+| 2 | `task_3` | 26/90 |
+| 2 | `task_5` | 18/90 |
 
-141 trials end with an error, kept as failures (score 0). 138 are an agent
-using its 50-step budget without submitting (Claude Code 45, ReAct 41,
-OpenHands 37, Codex 15). One ReAct claude-opus-5-5 trial overflowed the context (3.4M tokens),
+247 trials end with an error, kept as failures (score 0). 244 are an agent
+using its 50-step budget without submitting (ReAct 102, OpenHands 82, Claude
+Code 45, Codex 15); 150 of them are Kimi trials, including 110 of the 120
+kimi-k2.5 and kimi-k2-0905 trials. One ReAct claude-opus-5-5 trial overflowed the context (3.4M tokens),
 and OpenAI flagged one ReAct gpt-5.6-sol prompt as a possible policy
 violation. One ReAct gpt-5 trial was scored 0 by hand (see Caveats).
 
@@ -81,14 +82,18 @@ tool calls rebuilt from each trial's final state, source runs in
 **Langfuse.** Each run's v2 trials share one session named after the merged
 run ID (`resistor_network-mini-v2-l<L>-<agent>-<model>`); the reused v1 trials
 stay in their v1 sessions (`resistor_network-mini-v1-...`), recorded per trial
-in `run-metadata.json` (`langfuse_session_ids`). All 420 traces were found in
+in `run-metadata.json` (`langfuse_session_ids`). All 540 traces were found in
 their sessions (`build_index.py --verify`).
 
 ## Caveats
 
-- **Reruns.** 45 v2 trials were rerun: 44 after the provider accounts ran
-  out of credit (26 Kimi, 18 OpenAI) and 1 Codex gpt-6.1-sol trial whose
-  run hung. The reports hold the reruns only. 20 of the reused v1 trials are
+- **Reruns.** 138 v2 trials have at least one earlier attempt set aside, all
+  first hit by the provider accounts running out of credit (Kimi 106, OpenAI
+  32). Some needed another rerun: 4 kimi-k3.1-pro trials after an OpenRouter
+  provider error, 1 Codex gpt-6.1-sol trial whose run hung, 1 after a
+  container name conflict, and 4 Kimi trials stopped about 2 minutes in when
+  the number of parallel trials was lowered. The reports hold the last
+  attempt only. 20 of the reused v1 trials are
   themselves reruns from the v1 credit outages. Rerun traces share the trace
   of their failed attempt (see "Known issue: some traces mix attempts" in
   `../README.md`).
@@ -109,7 +114,7 @@ their sessions (`build_index.py --verify`).
   themselves. `terminal` took 232 of 345 trial-hours in the first 374
   finished trials; the task's own tools took under 2 hours. Trials ran from
   a few minutes to over 8 hours.
-- **Machine load.** Runs shared the machine with the spectra, retro and
-  wetlab pools; wall-clock durations are not comparable with other runs.
+- **Machine load.** Runs shared the machine with the spectra, retro,
+  wetlab and stargazer pools; wall-clock durations are not comparable with other runs.
 - **Comparison with the October full runs.** The full v4 runs cover all 10
   tasks per level; compare per task only.
