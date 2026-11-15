@@ -104,9 +104,8 @@ Give one diagnosis for every HSNS item. The model must cover every item and give
 `gender` a path to the latent factor. An item that does not behave the same way
 in both groups is declared by giving it its own path from `gender`.
 
-Items diagnosed `mis_keyed` are reversed before the model is refitted, and the
-remaining group difference is read from that refit, so the diagnoses and the
-model have to agree with each other."""
+Correct any mis-keyed items before fitting the model and interpreting group
+differences."""
 
 
 def responses(rng, n, gender):

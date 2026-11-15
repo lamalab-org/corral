@@ -64,9 +64,8 @@ A single JSON object:
 }
 
 `duplicate_key` is the set of columns that, taken together, mark two rows as the
-same respondent. One row is kept per distinct combination of those columns, the
-submitted model is refitted on what remains, and the trait correlation is read
-from that refit.
+same respondent. Use these columns to retain one record per respondent, then fit
+your model to the resulting data.
 """
 
 

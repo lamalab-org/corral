@@ -89,7 +89,7 @@ SUBMISSION_FORMAT = """A single JSON object:
 `removed_items` lists the items you take out of the vendor's bank; leave it empty
 to keep the full bank. `vendor_flags` gives your verdict on every item the vendor
 flagged. `ready_for_adaptive_testing` says whether the bank you end up with can
-be used as it is. No model syntax or working is required."""
+be used as it is."""
 
 
 def _probability(discrimination, difficulty, theta):

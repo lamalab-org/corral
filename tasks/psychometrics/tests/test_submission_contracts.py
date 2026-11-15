@@ -2,6 +2,7 @@
 
 import importlib
 import json
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -11,6 +12,16 @@ from corral_psychometrics import paths
 from corral_psychometrics.env import _task_prompt
 from corral_psychometrics.generators.level_1 import gen_l1_t01_hsns_structure as structure
 from corral_psychometrics.score import check_claims, evaluate_model, score_model_criteria
+from corral_psychometrics.tools import workspace_tools
+
+
+EVALUATION_CUES = re.compile(
+    r"\b(?:benchmarks?|graders?|grading|scorers?|ground[ -]?truth|synthetic|simulated)\b"
+    r"|\b(?:evaluation|eval) (?:run|harness|task|score|criteria)\b"
+    r"|\bhidden (?:answers?|tests?|checks?|criteria)\b"
+    r"|\b(?:submitted model|as submitted|recomputed|public-data-only|task workspace)\b",
+    re.IGNORECASE,
+)
 
 
 def definition(level, number):
@@ -84,6 +95,26 @@ def test_agent_prompts_do_not_render_private_task_fields(level, number):
     assert marker not in original
     assert "scoring_params" not in original
     assert "truth/" not in original
+
+
+@pytest.mark.parametrize("level,number", [(level, n) for level in (1, 2) for n in range(1, 11)])
+def test_public_instructions_do_not_describe_an_evaluation_run(level, number):
+    task = definition(level, number)
+    public = SimpleNamespace(
+        description=task["description"],
+        submission_format=task["submission_format"],
+        initial_input=task["initial_input"],
+    )
+    surfaces = {"prompt": _task_prompt(SimpleNamespace(current_task=public), None)}
+    for name in task["initial_input"]["public_inputs"]:
+        surfaces[name] = (paths.find(level, number).artifacts / name).read_text()
+    for name, text in surfaces.items():
+        assert not EVALUATION_CUES.search(text), name
+
+
+def test_tool_descriptions_do_not_describe_an_evaluation_run(tmp_path):
+    for name, tool in workspace_tools(str(tmp_path)).items():
+        assert not EVALUATION_CUES.search(tool.description), name
 
 
 def test_structure_discovery_schema_does_not_assume_its_answer():

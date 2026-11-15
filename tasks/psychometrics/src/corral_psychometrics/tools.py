@@ -29,8 +29,8 @@ DEFAULT_REPL_TIMEOUT_MINUTES = 15.0
 def repl_description(timeout_minutes: float | None) -> str:
     """The REPL's tool description, which states its time limit, if any."""
     text = (
-        "Execute Python code in the task's persistent public-data-only session. "
-        "The working directory is the task workspace (/workspace), so open files "
+        "Execute Python code in a persistent Python session. "
+        "The working directory is /workspace, so open files "
         "by relative path, e.g. 'data.csv'."
     )
     if timeout_minutes is None:
@@ -109,7 +109,7 @@ class _CellExecutor:
 
 @tool
 def validate_model_syntax(syntax: str) -> dict[str, Any]:
-    """Check semopy model syntax without fitting a model or reading task data."""
+    """Check semopy syntax without fitting a model or reading data."""
     if not isinstance(syntax, str) or not syntax.strip():
         return {"valid": False, "error": "syntax must be a non-empty string"}
     try:

@@ -78,8 +78,8 @@ The model must include every HSNS item and `gender`. Use semopy syntax
 behave the same way in both groups is declared by giving it its own path from
 `gender`, and listed in `affected_items`.
 
-The remaining group difference is read from the model you submit, so it must be
-the model your recommendation rests on.
+Base your recommendation on the estimated group difference after accounting for
+item-level differences.
 """
 
 

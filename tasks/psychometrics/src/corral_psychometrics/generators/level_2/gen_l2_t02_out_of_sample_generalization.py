@@ -77,9 +77,9 @@ A single JSON object:
   }
 }
 
-The model must include every HSNS item. It is refitted in each holdout exactly
-as submitted, and the loadings and factor correlation it produces there are read
-from that refit, so the decisions must match what your own model does.
+Include every HSNS item. Fit the model in the training sample, then re-estimate
+its parameters in each holdout without changing the structure. Base each
+classification on the resulting standardised loadings and factor correlation.
 """
 
 

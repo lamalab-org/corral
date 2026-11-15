@@ -227,7 +227,7 @@ SUBMISSION_FORMAT = """A single JSON object:
 }
 
 Include every dataset exactly once, with one model each, and use only
-identifiers from `candidate_models.csv`. No working is submitted."""
+identifiers from `candidate_models.csv`."""
 
 
 def write_codebook(path):

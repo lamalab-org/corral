@@ -172,11 +172,6 @@ class PsychometricsEnvironment(Environment):
         )
 
 
-#: Closes every task prompt, identically.
-CLOSING_INSTRUCTION = (
-    "Before you answer, make sure nothing in the data would change your conclusions."
-)
-
 #: Added to every task that asks for a model. semopy and lavaan read the same
 #: syntax differently here, and the scorer fits with semopy.
 SEMOPY_NOTE = (
@@ -197,10 +192,7 @@ def _task_prompt(env: Environment, state: ExecutionState) -> str:
         "Please return your answer in this format so I can use it directly:\n"
         f"{task.submission_format}\n\n"
         f"{note}"
-        "I've put the files in your workspace: "
-        + ", ".join(f"`{name}`" for name in files)
-        + "."
-        + f"\n\n{CLOSING_INSTRUCTION}"
+        "I've put the files in your workspace: " + ", ".join(f"`{name}`" for name in files) + "."
     )
     return prompt
 

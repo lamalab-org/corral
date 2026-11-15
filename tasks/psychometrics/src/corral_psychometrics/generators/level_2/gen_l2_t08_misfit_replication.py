@@ -100,18 +100,16 @@ SUBMISSION_FORMAT = """A single JSON object:
 The model may include orthogonal method factors, cross-loadings and item paths from
 `gender`. Give `gender` a path to each personality factor. Method factors must be
 orthogonal to the personality factors and each other. Use an identified
-parameterization for every factor. An item reported as a
-poor item may be left out of the measurement model; no other item may be.
+parameterization for every factor. Retain all items except any you classify as
+poor.
 
-Each replication verdict is recomputed by removing that modification from your
-model and refitting in the replication sample, so the verdicts have to match what
-your own model does there. A kind of finding `replicates` when removing each of its
-modifications lowers CFI in the replication sample by at least 0.01. Poor items
-replicate when every one still has a standardised loading below 0.30 there. A
-rejected modification is written as the items that would share an additional
-method factor; it must raise CFI by at least 0.01 in the development sample and by
-less than 0.01 in the replication sample. The final model must reach CFI >= 0.95
-and RMSEA <= 0.08 in the replication sample."""
+Assess replication by comparing models with and without each modification.
+Treat an effect as replicated when removing it lowers replication-sample CFI by
+at least 0.01. Classify an item as persistently weak when its standardised
+loading remains below 0.30. For a rejected method effect, list the affected
+items and establish that it improves development-sample CFI by at least 0.01
+but replication-sample CFI by less than 0.01. The final model should describe
+the replication data adequately: CFI >= 0.95 and RMSEA <= 0.08."""
 
 
 def baseline_syntax():
