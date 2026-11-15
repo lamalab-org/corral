@@ -54,7 +54,7 @@ async def run(args, config) -> int:
     from .cli import create_backend
 
     entries = resolve_inputs(args.input, args.input_list, args.source)
-    output = Path(args.output).expanduser().resolve()
+    output = await asyncio.to_thread(lambda: Path(args.output).expanduser().resolve())
     if args.dry_run:
         logger.info(
             "Dry run: reads remote Langfuse data for URL inputs; no annotation requests or output writes."
@@ -113,6 +113,11 @@ async def run(args, config) -> int:
         else:
             unique[key] = trace
     traces = list(unique.values())
+    if not args.download_only:
+        from .annotation_transcript import initial_instructions
+
+        for trace in traces:
+            initial_instructions(trace.messages, required=True)
     versions = {}
     for trace in traces:
         version = (trace.source.content_hash, trace.source.normalization_version)

@@ -1,15 +1,12 @@
-"""Decisions wire contract and independent motif reporting; no live API calls."""
+"""Graph feedback and compatibility with archived reports; no live API calls."""
 
 import ast
 from pathlib import Path
 
 import pytest
 
-from corral.epistemic_analysis.motifs import (
-    MOTIFS,
-    STATUS_DESCRIPTIONS,
-)
-from corral.epistemic_analysis.reports import (
+from corral.epistemic_analysis.patterns import MOTIFS
+from corral.epistemic_analysis.schema import (
     EpistemicReport,
     MotifAssessment,
 )
@@ -33,7 +30,9 @@ def test_motif_registry_preserves_original_pattern_names_and_kinds():
     assert len(MOTIFS) == 18
 
 
-@pytest.mark.parametrize("status", STATUS_DESCRIPTIONS)
+@pytest.mark.parametrize(
+    "status", ["absent", "emerging", "active", "resolved", "uncertain"]
+)
 @pytest.mark.parametrize("selected", [False, True])
 @pytest.mark.parametrize("evidence_ids", [(), (1, 2)])
 def test_historical_selection_does_not_override_current_status(

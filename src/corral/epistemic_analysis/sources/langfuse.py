@@ -106,6 +106,13 @@ def _units(message: dict[str, Any]) -> list[tuple[str, str]]:
 
 def _render(message: dict[str, Any]) -> dict[str, str]:
     role = message["role"]
+    if role in {"system", "developer", "user"}:
+        # Templates, whitespace and content-block boundaries are evidence.
+        content = message.get("content")
+        return {
+            "role": role,
+            "content": content if isinstance(content, str) else _json(content),
+        }
     if role == "tool":
         content = _tool_text(message.get("content"))
         content = (
@@ -272,6 +279,8 @@ def reconstruct_trace(
                 {"observation_id": row["id"], "field": "output", "index": index}
             )
     for message, source in zip(messages, sources, strict=False):
+        if isinstance(message.get("content"), list):
+            source["original_content"] = message["content"]
         if message["role"] == "tool":
             source.update(
                 {
@@ -503,6 +512,7 @@ def traces_from_observations(entry, observations):
     from collections import defaultdict
 
     from corral.epistemic_analysis.schema import (
+        NORMALIZATION_VERSION,
         GroupingMetadata,
         SourceReference,
         content_hash,
@@ -578,7 +588,7 @@ def traces_from_observations(entry, observations):
             locator=entry.locator,
             provider="langfuse",
             content_hash=content_hash(ordered_rows),
-            normalization_version="corral-langfuse-v1+corral-messages-v1",
+            normalization_version=f"corral-langfuse-v2+{NORMALIZATION_VERSION}",
             list_path=entry.list_path,
             line_number=entry.line_number,
             **identity,

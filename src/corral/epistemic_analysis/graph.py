@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import Any
 
-from corral.epistemic_analysis._utils import (
-    iter_windows,
-    normalize_whitespace,
-    sha1_hex,
-)
 from corral.epistemic_analysis.ontology import (
     EDGE_RELATIONS,
     EDGE_RELATIONS_SET,
@@ -23,6 +19,31 @@ from .context import (
     task_message_indices,
 )
 from .ontology import relation_allowed
+
+
+def sha1_hex(s: str) -> str:
+    return hashlib.sha1(s.encode("utf-8")).hexdigest()
+
+
+def normalize_whitespace(s: str) -> str:
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def iter_windows(n: int, window: int, overlap: int) -> list[tuple[int, int]]:
+    if n <= 0:
+        return []
+    if window <= 0:
+        return [(0, n)]
+    step = max(1, window - overlap)
+    out: list[tuple[int, int]] = []
+    start = 0
+    while start < n:
+        end = min(n, start + window)
+        out.append((start, end))
+        if end == n:
+            break
+        start += step
+    return out
 
 
 def edge_pair_coverage(nodes, window, overlap):

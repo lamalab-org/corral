@@ -277,6 +277,7 @@ async def run_checks(args):
         _read_check_json(args.input),
         _read_check_json(args.context) if args.context else {},
     )
+    inputs.require_prompt_context()
     policy = (
         ValidationPolicy(**_read_check_json(args.policy))
         if args.policy

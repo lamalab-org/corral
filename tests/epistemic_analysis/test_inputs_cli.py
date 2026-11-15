@@ -20,6 +20,7 @@ from corral.epistemic_analysis.sources.langfuse import (
 
 URL = "https://cloud.langfuse.com/project/project/sessions/session#observation=one"
 MESSAGES = [
+    {"role": "system", "content": "Solve the supplied task."},
     {"role": "user", "content": "Find X"},
     {"role": "assistant", "content": "I think X."},
 ]
@@ -48,8 +49,8 @@ def rows():
             "parentObservationId": "root",
             "type": "GENERATION",
             "model": "agent-model",
-            "input": MESSAGES[:1],
-            "output": MESSAGES[1:],
+            "input": MESSAGES[:2],
+            "output": MESSAGES[2:],
         },
     ]
 
@@ -81,7 +82,7 @@ def test_relative_mixed_lists_comments_spaces_fragments_and_diagnostics(
     normalized = load_path(entries[0])[0]
     assert normalized.source.line_number == 3
     assert normalized.source.locator == "a trace.json"
-    assert normalized.message_sources == [{"index": 0}, {"index": 1}]
+    assert normalized.message_sources == [{"index": i} for i in range(3)]
     listing.write_text(
         "a trace.json\nmissing.json\nhttps://example.org/not-supported\n"
     )
@@ -240,7 +241,7 @@ def test_downloaded_traces_preserve_origin_and_mapping_when_loaded_locally(
 
 
 def test_resolved_versions_are_preserved(tmp_path, monkeypatch):
-    from corral.epistemic_analysis.annotators.base import record_model
+    from corral.epistemic_analysis.annotators.graph import record_model
 
     local = write_trace(tmp_path / "trace.json")
     version = "provider-v1"

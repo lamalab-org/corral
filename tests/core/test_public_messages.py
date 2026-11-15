@@ -6,10 +6,8 @@ import pytest
 
 from corral.agents.base_agent import provider_messages
 from corral.core.messages import EMPTY_RESPONSE_REMINDER
-from corral.epistemic_analysis.reports import (
-    SUBMISSION_REVIEW_MESSAGE_NAME,
-    scientific_messages,
-)
+from corral.epistemic_analysis.annotation_transcript import scientific_messages
+from corral.epistemic_analysis.schema import SUBMISSION_REVIEW_MESSAGE_NAME
 
 
 @pytest.mark.parametrize("project", [provider_messages, scientific_messages])

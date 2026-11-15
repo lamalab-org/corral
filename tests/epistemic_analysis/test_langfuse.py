@@ -216,6 +216,14 @@ def test_render_preserves_recorded_reasoning_and_rejects_images():
         source._render(message)
 
 
+@pytest.mark.parametrize("role", ["system", "developer", "user"])
+def test_render_preserves_exact_instruction_whitespace_and_content_blocks(role):
+    message = {"role": role, "content": "\n\nExact αβ instructions.\n "}
+    assert source._render(message) == message
+    message["content"] = [{"type": "text", "text": "\nExact αβ\n"}]
+    assert json.loads(source._render(message)["content"]) == message["content"]
+
+
 class Pages:
     def __init__(self, pages):
         self.pages = iter(pages)

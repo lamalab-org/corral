@@ -10,6 +10,11 @@ from urllib.request import urlopen
 
 import pytest
 
+pytest.importorskip(
+    "corral.epistemic_analysis.viewer",
+    reason="Local annotation viewer is not installed",
+)
+
 from corral.epistemic_analysis.viewer.graph_run import (
     PATTERN_VERSION,
     GraphRunStore,

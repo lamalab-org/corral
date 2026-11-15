@@ -5,10 +5,16 @@ from __future__ import annotations
 import copy
 import json
 import re
+from typing import TYPE_CHECKING, Any
 
-from .schema import content_hash
+from corral.core.messages import EMPTY_RESPONSE_REMINDER, public_message
 
-TRANSCRIPT_VERSION = "initial-instructions-and-react-batches-v4"
+from .schema import REPORT_MESSAGE_NAME, SUBMISSION_REVIEW_MESSAGE_NAME, content_hash
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+TRANSCRIPT_VERSION = "exact-agent-instructions-v5"
 TASK_PROMPT_ORIGIN = "reconstructed_task_prompt"
 SAVED_FIELDS = "\n[saved message fields]\n"
 ACTION = re.compile(
@@ -16,23 +22,63 @@ ACTION = re.compile(
 )
 
 
+def initial_instructions(messages, *, required=False):
+    """Read the actual instruction prefix, preserving message order and roles."""
+    prefix = []
+    for message in messages:
+        if message.get("role") not in {"system", "developer", "user"}:
+            break
+        prefix.append(copy.deepcopy(message))
+    roles = {message["role"] for message in prefix if message.get("content")}
+    if required and ("user" not in roles or not roles & {"system", "developer"}):
+        raise ValueError(
+            "Annotation requires the agent's exact initial system/developer and user "
+            "messages. Supply recorded prompts or reconstruct them from the original "
+            "agent configuration and source revision; a task name alone is insufficient."
+        )
+    return prefix
+
+
+def scientific_messages(messages: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Detach observable messages, excluding scaffolding and prior reports."""
+    return [
+        public
+        for message in messages
+        if message.get("role") in {"user", "assistant", "tool", "function"}
+        and message.get("name")
+        not in {
+            REPORT_MESSAGE_NAME,
+            SUBMISSION_REVIEW_MESSAGE_NAME,
+            EMPTY_RESPONSE_REMINDER,
+        }
+        and (public := public_message(message)) is not None
+    ]
+
+
 def live_annotation_trace(messages, task):
     """Convert public agent messages using the same normalizer as saved traces."""
-    from .reports import scientific_messages
     from .sources.inputs import CheckInput
 
-    context = [{"role": "user", "content": task}] if isinstance(task, str) else task
-    public = [*copy.deepcopy(context), *scientific_messages(messages)]
+    recorded = initial_instructions(messages)
+    # Captured context is authoritative. A caller may also supply the exact
+    # current actor prefix (including ReAct's separate tool-catalog message).
+    roles = {message["role"] for message in recorded}
+    complete = "user" in roles and bool(roles & {"system", "developer"})
+    # Preserve the existing online agent interface (trajectory + task string).
+    # Offline preparation below requires complete recorded or recovered prompts.
+    context = (
+        recorded
+        if complete
+        else task
+        if isinstance(task, list)
+        else [{"role": "user", "content": task}]
+    )
+    public = [
+        *copy.deepcopy(context),
+        *scientific_messages(messages[len(recorded) if complete else 0 :]),
+    ]
     for message in public:
         content = message.get("content")
-        if isinstance(content, list):
-            content = "\n".join(
-                block["text"]
-                for block in content
-                if isinstance(block, dict)
-                and block.get("type") in {"text", "output_text"}
-                and isinstance(block.get("text"), str)
-            )
         message["content"] = content or ""
         if message.get("name") == "submission_proposal":
             marker = "Proposed final answer (not yet submitted):\n"
@@ -98,14 +144,15 @@ def _explicit_actions(text):
 def annotation_transcript(
     document,
     agent,
-    prompt,
-    prompt_sources,
+    prompt=None,
+    prompt_sources=(),
     *,
     fold_react_dispatches=True,
     initial_messages=None,
     initial_sources=None,
+    reconstruction=None,
 ):
-    """Prepend task instructions and fold only proven ReAct dispatch duplicates.
+    """Retain exact instructions and fold only proven ReAct dispatch duplicates.
 
     All tool results and real assistant prose survive. The original model text
     already contains every proposed XML action; the merged metadata separately
@@ -114,23 +161,34 @@ def annotation_transcript(
     """
     if document.get("annotation_preprocessing"):
         raise ValueError("Prepare from the original transcript, not an annotated view")
-    if not isinstance(prompt, str) or not prompt.strip():
-        raise ValueError("A rendered task prompt is required")
     result = copy.deepcopy(document)
-    messages = [{"role": "user", "content": prompt}]
-    sources = [
-        {
-            "index": None,
-            "origin": TASK_PROMPT_ORIGIN,
-            "source_evidence": copy.deepcopy(prompt_sources),
-            "description": (
-                "Task instructions reconstructed from the task definition and prompt "
-                "renderer for annotation. This is not an observed agent action. "
-                "Use recorded runtime instructions if they differ."
-            ),
-        }
-    ]
-    if initial_messages is not None or initial_sources is not None:
+    captured = initial_instructions(document["messages"])
+    captured_roles = {message["role"] for message in captured}
+    captured_complete = "user" in captured_roles and bool(
+        captured_roles & {"system", "developer"}
+    )
+    messages, sources = [], []
+    recovered = False
+    if not captured_complete and reconstruction is not None:
+        from .task_prompt_context import agent_prompt_context
+
+        initial_messages, initial_sources = agent_prompt_context(
+            agent, prompt, prompt_sources, reconstruction
+        )
+        recovered = True
+        # SDK adapters already save the user request. Preserve it, including any
+        # resume history; reconstruct only their missing public instruction part.
+        if agent in {"codex", "claude-code"} and captured:
+            initial_messages = [initial_messages[0], *copy.deepcopy(captured)]
+            initial_sources = [
+                initial_sources[0],
+                *copy.deepcopy(document["message_sources"][: len(captured)]),
+            ]
+    if not captured_complete and (
+        initial_messages is not None or initial_sources is not None
+    ):
+        if not recovered and (not isinstance(prompt, str) or not prompt.strip()):
+            raise ValueError("A rendered task prompt is required for reconstruction")
         if (
             not initial_messages
             or not initial_sources
@@ -146,17 +204,36 @@ def annotation_transcript(
             raise ValueError(
                 "Initial instructions must be nonempty instruction messages"
             )
-        if not any(prompt in m["content"] for m in initial_messages):
+        if not recovered and not any(prompt in m["content"] for m in initial_messages):
             raise ValueError(
                 "Initial instructions must include the rendered task prompt"
             )
         messages = copy.deepcopy(initial_messages)
         sources = copy.deepcopy(initial_sources)
+        for source in sources:
+            source.setdefault("source_evidence", copy.deepcopy(prompt_sources))
+    if captured_complete:
+        # Never replace recorded instructions with a newly rendered default.
+        messages = copy.deepcopy(captured)
+        sources = copy.deepcopy(document["message_sources"][: len(captured)])
+    initial_instructions(messages, required=True)
     initial_count = len(messages)
     old_to_new, folded, batch = {}, [], None
+    if captured and not captured_complete:
+        start = len(messages) - len(captured)
+        if start < 0 or messages[start:] != captured:
+            raise ValueError(
+                "Recorded initial messages disagree with reconstructed prompts"
+            )
+        for index in range(len(captured)):
+            sources[start + index] = copy.deepcopy(document["message_sources"][index])
+            old_to_new[str(index)] = start + index
     for index, (message, source) in enumerate(
         zip(document["messages"], document["message_sources"], strict=True)
     ):
+        if index < len(captured):
+            old_to_new.setdefault(str(index), index)
+            continue
         text, fields = _parts(message, source)
         actor = source.get("agent_run_id")
         calls = fields.get("tool_calls", []) if fields else []
@@ -240,8 +317,24 @@ def annotation_transcript(
         "original_to_annotation_indices": old_to_new,
         "folded_react_dispatches": folded,
         "task_prompt_index": next(
-            i for i, m in enumerate(messages[:initial_count]) if prompt in m["content"]
+            i for i, m in enumerate(messages[:initial_count]) if m["role"] == "user"
         ),
         "initial_instruction_indices": list(range(initial_count)),
     }
     return result
+
+
+def reconstruct_trace(trace, configuration):
+    """Apply recovery to an annotation copy, retaining original source indices."""
+    from dataclasses import replace
+
+    prepared = annotation_transcript(
+        {"messages": trace.messages, "message_sources": trace.message_sources},
+        configuration["agent"],
+        reconstruction=configuration,
+    )
+    return replace(
+        trace,
+        messages=prepared["messages"],
+        message_sources=prepared["message_sources"],
+    )

@@ -13,6 +13,11 @@ from urllib.request import Request, urlopen
 
 import pytest
 
+pytest.importorskip(
+    "corral.epistemic_analysis.viewer",
+    reason="Local annotation viewer is not installed",
+)
+
 SPEC = importlib.util.spec_from_file_location(
     "benchmark_viewer",
     Path(__file__).parents[2] / "src/corral/epistemic_analysis/viewer/benchmark.py",

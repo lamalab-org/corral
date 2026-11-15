@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from collections import deque
+from dataclasses import dataclass
 from typing import Any
 
 from corral.epistemic_analysis.epistemic_prompts import (
     ANTIPATTERN_DESCRIPTIONS,
+    MOTIF_GRAPH_DESCRIPTIONS,
     PROVENANCE_PATTERNS,
     SUBGRAPH_DESCRIPTIONS,
 )
@@ -86,6 +88,35 @@ SUBGRAPH_FAMILIES: dict[str, list[str]] = {
         SG_EVIDENCE_GUIDED_TEST_REDESIGN,
     ],
 }
+
+
+# Stable beliefs are a descriptive measurement, not a submission blocker.
+DESCRIPTIVE_ANTIPATTERNS = frozenset({"fixed_belief_trace"})
+
+
+@dataclass(frozen=True)
+class Motif:
+    name: str
+    kind: str
+    family: str
+    description: str
+    graph_description: str
+
+
+MOTIFS = tuple(
+    Motif(
+        name=name,
+        kind=kind,
+        family=next(family for family, members in families.items() if name in members),
+        description=description,
+        graph_description=MOTIF_GRAPH_DESCRIPTIONS[name],
+    )
+    for kind, descriptions, families in (
+        ("productive", SUBGRAPH_DESCRIPTIONS, SUBGRAPH_FAMILIES),
+        ("antipattern", ANTIPATTERN_DESCRIPTIONS, ANTIPATTERN_FAMILIES),
+    )
+    for name, description in descriptions.items()
+)
 
 
 def _nodes_of_type(ntype: str, node_type_map: dict[str, str]) -> list[str]:

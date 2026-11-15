@@ -20,11 +20,9 @@ def __getattr__(name):
     from importlib import import_module
 
     modules = {
-        "AnnotationBackend": "annotators.base",
+        "AnnotationBackend": "annotators.graph",
         "annotate_trace": "pipeline",
         "GraphAnnotator": "annotators.local",
-        "EpistemicReport": "reports",
-        "MotifAssessment": "reports",
     }
     if name in __all__:
         value = getattr(

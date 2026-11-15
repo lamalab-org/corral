@@ -1,6 +1,6 @@
 """In-memory annotation stages and configuration-aware reuse.
 
-No source loading or report writing occurs here. Both backends receive the
+No source loading or report writing occurs here. The extractor receives the
 corrected observation nodes before extracting any edges.
 """
 
@@ -12,8 +12,7 @@ from time import perf_counter
 from typing import Any
 
 from . import ontology
-from .annotators.base import AnnotationBackend, reset_models
-from .annotators.graph import MAX_WINDOW
+from .annotators.graph import MAX_WINDOW, AnnotationBackend, reset_models
 from .budget import RequestBudgetExceeded, estimator_configuration
 from .context import (
     SUBMISSION_SCOPE_VERSION,
@@ -93,9 +92,7 @@ def annotation_configuration(
         "graph_schema_version": GRAPH_SCHEMA_VERSION,
         "annotation_view_policy_version": VIEW_VERSION,
         "annotation_view_instructions_hash": content_hash(VIEW_INSTRUCTIONS),
-        "request_counter": estimator_configuration(
-            annotator.provenance.get("annotator", "")
-        ),
+        "request_counter": estimator_configuration(),
     }
 
 

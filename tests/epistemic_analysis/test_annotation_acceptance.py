@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from corral.epistemic_analysis.acceptance import accepted_annotation
+from corral.epistemic_analysis.storage import accepted_annotation
 
 
 @pytest.mark.parametrize("status", ["present", "absent", "uncertain"])

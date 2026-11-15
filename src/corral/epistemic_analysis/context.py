@@ -13,7 +13,7 @@ from corral.epistemic_analysis.epistemic_prompts import VIEW_INSTRUCTIONS
 
 from .schema import AnnotationConfig, Message, NormalizedTrace, content_hash
 
-VIEW_VERSION = "head-tail-structured-submit-answer-v3"
+VIEW_VERSION = "head-tail-exact-instructions-v4"
 SUBMISSION_SCOPE_VERSION = "through-first-submit-answer-v1"
 SUBMIT_ANSWER_ACTION = re.compile(r"<action>\s*submit_answer\s*</action>")
 SUBMIT_ANSWER_NATIVE = re.compile(
@@ -191,10 +191,13 @@ def build_annotation_view(
     *,
     stop_at_submission: bool = True,
 ) -> AnnotationView:
+    from .annotation_transcript import initial_instructions
+
     cap = config.tool_output_max_chars if effective_cap is None else effective_cap
     if cap not in cap_sequence(config.tool_output_max_chars):
         raise ValueError("Effective cap is outside the configured fallback sequence")
     messages, mappings = [], []
+    initial_count = len(initial_instructions(trace.messages))
     for idx, (message, source) in enumerate(
         zip(trace.messages, trace.message_sources, strict=False)
     ):
@@ -202,7 +205,10 @@ def build_annotation_view(
         tool = is_tool_result(message, source)
         ranges = [RetainedRange(0, len(original), 0, len(original))]
         content, omitted = original, 0
-        if tool and cap and len(original) > cap:
+        instruction = idx < initial_count and not is_tool_result(
+            {"role": message["role"], "content": ""}, source
+        )
+        if tool and not instruction and cap and len(original) > cap:
             head = cap - cap // 4
             tail = cap // 4
             omitted = len(original) - cap

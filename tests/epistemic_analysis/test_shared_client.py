@@ -19,7 +19,7 @@ from corral.epistemic_analysis.annotators.local import (
     provider_config,
 )
 from corral.epistemic_analysis.explanations import explain_patterns
-from corral.epistemic_analysis.motifs import MOTIFS
+from corral.epistemic_analysis.patterns import MOTIFS
 from corral.epistemic_analysis.pipeline import annotate_trace
 from corral.epistemic_analysis.schema import (
     AnnotationConfig,

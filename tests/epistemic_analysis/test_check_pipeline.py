@@ -18,19 +18,13 @@ from corral.epistemic_analysis.decision_applicability import (
     extract_facts,
 )
 from corral.epistemic_analysis.decision_units import (
-    full_fragments,
     native_windows,
     verify_coverage,
 )
+from corral.epistemic_analysis.explanations import read_explanation
 from corral.epistemic_analysis.schema import NormalizedTrace, SourceReference
 from corral.epistemic_analysis.sources.inputs import CheckInput
 from corral.epistemic_analysis.storage import export_review, read_record
-from corral.epistemic_analysis.trace_check_explanations import (
-    EVIDENCE_SCHEMA,
-    read_explanation,
-    validate_evidence,
-    verify_quotes,
-)
 from corral.epistemic_analysis.trace_checks import CheckPipeline, check_definitions
 
 CHECK = "insufficient_validation"
@@ -616,49 +610,6 @@ def test_partial_spectra_and_crashes_are_separate_from_behavioral_labels():
     assert not facts["final_accepted_submission"]
 
 
-def test_quote_conversion_requires_exact_original_span_and_preserves_raw_text():
-    trace = NormalizedTrace(
-        [{"role": "assistant", "content": "First.\nSecond."}],
-        SourceReference("t", "t", "hash"),
-    )
-    quotes, errors = verify_quotes(
-        [{"message_id": "m0", "start": 0, "end": 14, "quote": "First.\\nSecond."}],
-        trace.messages,
-        full_fragments(trace),
-    )
-    assert not errors
-    assert quotes[0]["conversion"] == "json_unescaped"
-    assert quotes[0]["model_quote"] == "First.\\nSecond."
-    # The real endpoint supplies text, while code computes exact source offsets.
-    assert (
-        "start" not in EVIDENCE_SCHEMA["properties"]["evidence"]["items"]["properties"]
-    )
-    located, errors = verify_quotes(
-        [{"message_id": "m0", "quote": "Second."}],
-        trace.messages,
-        full_fragments(trace),
-    )
-    assert not errors
-    assert (located[0]["start"], located[0]["end"]) == (7, 14)
-    for invalid in ("First,\nSecond.", "First. Second."):
-        assert verify_quotes(
-            [{"message_id": "m0", "quote": invalid}],
-            trace.messages,
-            full_fragments(trace),
-        )[1]
-    assert verify_quotes(
-        [{"message_id": "m0", "start": 1, "end": 6, "quote": "First"}],
-        trace.messages,
-        full_fragments(trace),
-    )[1]
-    assert (
-        validate_evidence(
-            chat_answer("not_applicable"), trace.messages, full_fragments(trace)
-        )["state"]
-        != "complete"
-    )
-
-
 def test_native_windows_keep_every_unicode_character_and_overlap():
     trace = NormalizedTrace(
         [{"role": "tool", "content": "αβ🌍\n" * 100}], SourceReference("t", "t", "hash")
@@ -738,6 +689,10 @@ def test_cancellation_persists_label_and_resumes_evidence_without_rescoring(tmp_
 
 
 def test_review_export_separates_facts_labels_evidence_and_preserves_history(tmp_path):
+    pytest.importorskip(
+        "corral.epistemic_analysis.viewer",
+        reason="Local annotation viewer is not installed",
+    )
     from corral.epistemic_analysis.viewer.benchmark import ReviewStore
 
     async def exercise():

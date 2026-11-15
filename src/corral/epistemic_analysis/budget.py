@@ -41,20 +41,12 @@ def _package_version(package: str) -> str:
         return "unavailable"
 
 
-def estimator_configuration(backend: str) -> dict[str, Any]:
+def estimator_configuration() -> dict[str, Any]:
     return {
         "version": BUDGET_VERSION,
         "estimator": "cl100k_base-bpe-1.25-plus-256-v1",
         "tiktoken_version": _package_version("tiktoken"),
         "fallback": "utf8-bytes-plus-256-v1",
-        **(
-            {
-                "chat_counter": "litellm.token_counter",
-                "litellm_version": _package_version("litellm"),
-            }
-            if backend == "llm"
-            else {}
-        ),
     }
 
 
@@ -84,46 +76,3 @@ def record_request(diagnostic: dict[str, Any]) -> None:
         context.diagnostics.append(
             {"effective_cap": context.view.effective_cap, **diagnostic}
         )
-
-
-def numeric_usage(value: Any) -> dict[str, Any]:
-    """Never save arbitrary provider text alongside size diagnostics."""
-    if not isinstance(value, dict):
-        return {}
-    keys = {
-        "prompt_tokens",
-        "completion_tokens",
-        "total_tokens",
-        "input_tokens",
-        "output_tokens",
-        "state_tokens",
-        "question_tokens",
-        "questions_tokens",
-        "cached_tokens",
-    }
-    return {
-        k: v
-        for k, v in value.items()
-        if k in keys
-        and isinstance(v, int | float)
-        and not isinstance(v, bool)
-        and math.isfinite(v)
-    }
-
-
-def is_context_error(value: Any) -> bool:
-    """Recognize size errors, including an OpenRouter-wrapped provider error."""
-    if isinstance(value, dict):
-        return any(is_context_error(v) for v in value.values())
-    if isinstance(value, list):
-        return any(is_context_error(v) for v in value)
-    if isinstance(value, str):
-        return any(
-            code in value.lower()
-            for code in (
-                "max_tokens_exceeded",
-                "context_length_exceeded",
-                "maximum context length",
-            )
-        )
-    return False

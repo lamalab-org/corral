@@ -12,12 +12,19 @@ def normalize_document(document, source, grouping=None):
     if not isinstance(document, dict) or not isinstance(document.get("messages"), list):
         raise ValueError("Trace requires a messages list")
     messages, references = [], []
-    original_sources = document.get("source", {}).get("message_sources", [])
+    original_sources = document.get(
+        "message_sources", document.get("source", {}).get("message_sources", [])
+    )
     for index, message in enumerate(document["messages"]):
         if not isinstance(message, dict):
             continue
         content = message.get("content", "")
-        content = "" if content is None else str(content)
+        if isinstance(content, list):
+            import json
+
+            content = json.dumps(content, ensure_ascii=False)
+        else:
+            content = "" if content is None else str(content)
         if (
             content.strip()
             == "Error: Maximum iterations reached without finding a final answer."
@@ -27,6 +34,16 @@ def normalize_document(document, source, grouping=None):
         references.append(
             {
                 "index": index,
+                **(
+                    {"prompt_context": message["metadata"]["prompt_context"]}
+                    if (message.get("metadata") or {}).get("prompt_context")
+                    else {}
+                ),
+                **(
+                    {"original_content": message["content"]}
+                    if isinstance(message.get("content"), list)
+                    else {}
+                ),
                 **{
                     k: message[k]
                     for k in ("tool_call_id", "tool_name", "name")
@@ -43,7 +60,7 @@ def normalize_document(document, source, grouping=None):
             if k in GroupingMetadata.__dataclass_fields__ and v is not None
         }
     )
-    return NormalizedTrace(
+    trace = NormalizedTrace(
         messages,
         source,
         references,
@@ -52,6 +69,11 @@ def normalize_document(document, source, grouping=None):
         reconstruction_status=document.get("reconstruction_status", "complete"),
         snapshot=document,
     )
+    if "prompt_reconstruction" in document:
+        from corral.epistemic_analysis.annotation_transcript import reconstruct_trace
+
+        trace = reconstruct_trace(trace, document["prompt_reconstruction"])
+    return trace
 
 
 def load_path(entry):
@@ -110,7 +132,8 @@ def load_path(entry):
                     },
                 )
                 trace = normalize_document(document, reference)
-                trace.message_sources = document["message_sources"]
+                if "prompt_reconstruction" not in document:
+                    trace.message_sources = document["message_sources"]
                 trace.__post_init__()
                 # Preserve the saved source, not a snapshot of a snapshot.
                 if reference.snapshots and Path(reference.snapshots[0]).is_file():

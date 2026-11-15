@@ -6,12 +6,12 @@ from typing import TYPE_CHECKING, Any
 
 from corral.agents.base_agent import BaseAgent
 from corral.core.action import with_submit_answer_tool
+from corral.epistemic_analysis.annotation_transcript import scientific_messages
 from corral.epistemic_analysis.annotators.local import GraphAnnotator, provider_config
-from corral.epistemic_analysis.reports import (
+from corral.epistemic_analysis.schema import (
     REPORT_MESSAGE_NAME,
     SUBMISSION_REVIEW_MESSAGE_NAME,
     EpistemicReport,
-    scientific_messages,
 )
 
 if TYPE_CHECKING:

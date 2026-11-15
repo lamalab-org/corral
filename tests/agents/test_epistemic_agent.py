@@ -15,7 +15,7 @@ from corral.epistemic_analysis.annotators.local import (
     DEFAULT_CHAT_MODEL,
     GraphAnnotator,
 )
-from corral.epistemic_analysis.reports import (
+from corral.epistemic_analysis.schema import (
     REPORT_MESSAGE_NAME,
     EpistemicReport,
     MotifAssessment,

@@ -174,3 +174,84 @@ def task_prompt(source, row, tasks_root, core_environment):
         raise ValueError("Task renderer returned an empty or non-text prompt")
     provenance.append(renderer_ref)
     return prompt, provenance
+
+
+def agent_prompt_context(agent, prompt, provenance, configuration):
+    """Recover missing annotation prompts from an explicitly selected source tree.
+
+    ``configuration`` is preparation metadata, never model-visible context. The
+    caller supplies the original revision, runtime options and surrender setting;
+    these cannot be determined from a task name alone. Existing recorded messages
+    remain authoritative. No agent or task environment is instantiated.
+    """
+    from .react_prompt_context import PinnedAgentContext
+
+    required = {
+        "source_root",
+        "revision",
+        "environment",
+        "level",
+        "task_id",
+        "runtime_options",
+        "enable_surrender",
+    }
+    if missing := required - configuration.keys():
+        raise ValueError(
+            f"Prompt reconstruction is missing original run metadata: {sorted(missing)}"
+        )
+    if not isinstance(configuration["runtime_options"], dict) or not isinstance(
+        configuration["enable_surrender"], bool
+    ):
+        raise ValueError(
+            "Prompt reconstruction requires an options object and boolean enable_surrender"
+        )
+    root = Path(configuration["source_root"])
+    revision = configuration["revision"]
+    if not revision:
+        raise ValueError("Prompt reconstruction requires the original source revision")
+    origin = {key: configuration[key] for key in ("environment", "level", "task_id")}
+    if prompt is None:
+        prompt, provenance = task_prompt(
+            root, origin, root / "tasks", root / "src/corral/core/environment.py"
+        )
+    directory = (
+        root
+        / "tasks"
+        / origin["environment"]
+        / "environments"
+        / f"level_{origin['level']}"
+        / "tasks_json"
+    )
+    matches = []
+    refs = list(provenance)
+    for path in sorted(directory.glob("*.json")):
+        text, reference = _read_source(path)
+        selected = [
+            task for task in json.loads(text) if task["id"] == origin["task_id"]
+        ]
+        if selected:
+            matches.extend(selected)
+            refs.append(reference)
+    if len(matches) != 1:
+        raise ValueError(f"Expected one source task {origin['task_id']}")
+    messages, sources, _ = PinnedAgentContext(
+        root, revision, origin["environment"]
+    ).recover(
+        matches[0],
+        prompt,
+        refs,
+        configuration["runtime_options"],
+        agent_name=agent,
+        enable_surrender=configuration["enable_surrender"],
+        max_iterations=configuration.get("max_iterations"),
+        native_workspace=configuration.get("native_workspace"),
+    )
+    expected = configuration.get("system_prompt_sha256")
+    if (
+        expected
+        and hashlib.sha256(messages[0]["content"].encode()).hexdigest() != expected
+    ):
+        raise ValueError(
+            "Reconstructed system/developer prompt differs from its recorded hash"
+        )
+    return messages, sources

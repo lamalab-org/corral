@@ -28,13 +28,12 @@ from corral.epistemic_analysis.budget import (
     record_request,
 )
 from corral.epistemic_analysis.context import current_context
+from corral.epistemic_analysis.explanations import EXPLANATION_PROMPT
 from corral.epistemic_analysis.scheduling import rolling_map
 from corral.epistemic_analysis.schema import content_hash
 from corral.epistemic_analysis.storage import atomic_save, read_record, save_record
-from corral.epistemic_analysis.trace_check_explanations import EXPLANATION_PROMPT
 
-from .base import record_model
-from .graph import AnnotationError, GraphExtractor, validate_answers
+from .graph import AnnotationError, GraphExtractor, record_model, validate_answers
 
 GRAPH_CLIENT_VERSION = "graph-questions-2"
 DEFAULT_PROFILE = Path("reports/trace_checks/infrastructure/profile.json")
@@ -895,23 +894,26 @@ class GraphAnnotator:
 
     async def annotate(self, messages, *, task=""):
         from corral.epistemic_analysis.annotation_transcript import (
+            initial_instructions,
             live_annotation_trace,
+            scientific_messages,
         )
-        from corral.epistemic_analysis.motifs import DESCRIPTIVE_ANTIPATTERNS, MOTIFS
         from corral.epistemic_analysis.patterns import (
+            DESCRIPTIVE_ANTIPATTERNS,
+            MOTIFS,
             detect_antipatterns_local,
             detect_subgraphs_local,
         )
         from corral.epistemic_analysis.pipeline import annotate_trace
-        from corral.epistemic_analysis.reports import (
-            EpistemicReport,
-            MotifAssessment,
-            scientific_messages,
-        )
+        from corral.epistemic_analysis.schema import EpistemicReport, MotifAssessment
 
         started = perf_counter()
-        trajectory = scientific_messages(messages)
-        trace = live_annotation_trace(trajectory, task)
+        prefix = initial_instructions(messages)
+        if not any(m["role"] in {"system", "developer"} for m in prefix):
+            prefix = []
+        trajectory = scientific_messages(messages[len(prefix) :])
+        trace = live_annotation_trace(messages, task)
+        task = initial_instructions(trace.messages)
         provider = create_provider(self.provider_config)
         try:
             await provider.preflight()

@@ -8,10 +8,10 @@ import pytest
 
 from corral.epistemic_analysis.annotation_transcript import SAVED_FIELDS
 from corral.epistemic_analysis.graph import _filter_invalid_edges, edge_pair_coverage
-from corral.epistemic_analysis.motifs import MOTIFS
 from corral.epistemic_analysis.ontology import relation_allowed
 from corral.epistemic_analysis.pattern_review import analyze_patterns
 from corral.epistemic_analysis.patterns import (
+    MOTIFS,
     analyze_answer_provenance,
     detect_antipatterns_local,
     detect_subgraphs_local,
@@ -21,7 +21,6 @@ from corral.epistemic_analysis.schema import (
     NormalizedTrace,
     SourceReference,
 )
-from corral.epistemic_analysis.viewer.graph_run import aggregate_pattern_reports
 
 
 def graph_fixture():
@@ -191,6 +190,12 @@ def test_empty_graph_patterns_remain_unassessed():
 
 
 def test_parent_patterns_or_units_without_inventing_cross_unit_patterns():
+    pytest.importorskip(
+        "corral.epistemic_analysis.viewer",
+        reason="Local annotation viewer is not installed",
+    )
+    from corral.epistemic_analysis.viewer.graph_run import aggregate_pattern_reports
+
     analysis = analyze_patterns(graph_fixture(), "signature")
     pattern = analysis["patterns"][0]
     pattern["status"], pattern["count"] = "matched", 1

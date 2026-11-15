@@ -13,13 +13,12 @@ from corral.agents.base_agent import provider_messages
 from corral.agents.epistemic import EpistemicAgent
 from corral.agents.react import ReActAgent
 from corral.agents.tool_calling import ToolCallingAgent
-from corral.epistemic_analysis.annotators.base import AnnotationBackend
-from corral.epistemic_analysis.annotators.graph import GraphExtractor
+from corral.epistemic_analysis.annotators.graph import AnnotationBackend, GraphExtractor
 from corral.epistemic_analysis.annotators.local import (
     GraphAnnotator,
     KnowLineClient,
 )
-from corral.epistemic_analysis.reports import REPORT_MESSAGE_NAME
+from corral.epistemic_analysis.schema import REPORT_MESSAGE_NAME
 
 
 @pytest.fixture

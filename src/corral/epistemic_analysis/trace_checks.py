@@ -889,17 +889,17 @@ class CheckPipeline:
         return record
 
     async def _evidence(self, inputs, facts, definition, label, *, force=False):
+        from .explanations import (
+            EXPLANATION_FORMAT,
+            EXPLANATION_PROMPT,
+            read_explanation,
+        )
         from .overflow import (
             OVERFLOW_RULES,
             OVERFLOW_SCOPE,
             WINDOW_SCOPE,
             overflow_definition,
             retained_initial_instructions,
-        )
-        from .trace_check_explanations import (
-            EXPLANATION_FORMAT,
-            EXPLANATION_PROMPT,
-            read_explanation,
         )
 
         reconciled = (

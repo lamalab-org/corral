@@ -13,11 +13,11 @@ import re
 from dataclasses import asdict, replace
 from itertools import pairwise
 
-from .context import AnnotationView, RetainedRange, is_tool_result
+from .context import AnnotationView, RetainedRange, is_tool_result, task_message_indices
 from .decision_units import fragment, full_fragments
 from .schema import content_hash
 
-OVERFLOW_VERSION = "overflow-tools-long-messages-native-window-or-v2"
+OVERFLOW_VERSION = "overflow-exact-instructions-v3"
 OVERFLOW_SCOPE = "whole_conversation_with_preprocessed_tool_outputs"
 WINDOW_SCOPE = "preprocessed_windows_with_code_or"
 OVERFLOW_RULES = """Source excerpts preserve chronological order. Tool outputs and,
@@ -181,6 +181,7 @@ def tool_excerpt_view(trace, cap=16000, catalog_keep=3):
             "Positive tool cap and two or three catalog reactions required"
         )
     messages, mappings = [], []
+    instructions = task_message_indices(trace.messages)
     for index, (message, source) in enumerate(
         zip(trace.messages, trace.message_sources, strict=True)
     ):
@@ -196,7 +197,11 @@ def tool_excerpt_view(trace, cap=16000, catalog_keep=3):
         embedded_catalogs, embedded_chars = [], 0
         if tool:
             spans, catalog = output_spans(text, cap, catalog_keep)
-        elif source.get("scientist_unit") and message["role"] == "user":
+        elif (
+            source.get("scientist_unit")
+            and message["role"] == "user"
+            and index not in instructions
+        ):
             omitted_spans = []
             for decoded, offsets in embedded_tool_results(text):
                 embedded_chars += offsets[-1] - offsets[0]
@@ -329,6 +334,8 @@ def long_message_view(trace, tool_view, *, cap=None):
     view.policy = "tool-excerpts-then-repetition-and-long-message-excerpts"
     for index, mapping in enumerate(view.mappings):
         text = trace.messages[index]["content"]
+        if trace.messages[index]["role"] in {"system", "developer", "user"}:
+            continue  # Never shorten the instructions used to assess behavior.
         if mapping["is_tool_result"] and "tool_original_chars" not in mapping:
             continue
         spans = [
@@ -410,13 +417,8 @@ def long_message_view(trace, tool_view, *, cap=None):
 
 
 def retained_initial_instructions(state):
-    """Use the same retained spans in the duplicated instruction context."""
-    return [
-        {**instruction, **{key: part[key] for key in ("content", "start", "end")}}
-        for instruction in state.get("initial_instructions", [])
-        for part in state["messages"]
-        if part["msg_idx"] == instruction["msg_idx"]
-    ]
+    """Retain exact instructions even when the current window starts later."""
+    return copy.deepcopy(state.get("initial_instructions", []))
 
 
 def excerpt_state(state, view):

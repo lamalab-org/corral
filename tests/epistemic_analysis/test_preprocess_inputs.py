@@ -30,6 +30,8 @@ def test_retro_import_preserves_execution_provenance_and_source(
         "error_message": error,
         "score": "HIDDEN_SCORE",
         "messages": [
+            {"role": "developer", "content": "Exact agent instructions.\n"},
+            {"role": "user", "content": "Public task instructions."},
             {
                 "role": "assistant",
                 "content": "Inspect αβ.",
@@ -73,11 +75,11 @@ def test_retro_import_preserves_execution_provenance_and_source(
     assert trace["completion_status"] == ("failed" if error else "complete")
     assert trace["reconstruction_status"] == "complete"
     assert trace["grouping"]["agent_model"] == "codex__test"
-    assert trace["messages"][0]["content"] == "Public task instructions."
-    assert "Inspect αβ." in trace["messages"][1]["content"]
-    assert '"id": "call-1"' in trace["messages"][1]["content"]
-    assert trace["message_sources"][2]["tool_call_id"] == "call-1"
-    assert trace["message_sources"][2]["branch_id"] == "branch"
-    assert trace["message_sources"][2]["agent_run_id"] == "actor"
+    assert trace["messages"][:2] == trial["messages"][:2]
+    assert "Inspect αβ." in trace["messages"][2]["content"]
+    assert '"id": "call-1"' in trace["messages"][2]["content"]
+    assert trace["message_sources"][3]["tool_call_id"] == "call-1"
+    assert trace["message_sources"][3]["branch_id"] == "branch"
+    assert trace["message_sources"][3]["agent_run_id"] == "actor"
     assert "HIDDEN_SCORE" not in json.dumps(document)
     assert report_path.read_bytes() == original

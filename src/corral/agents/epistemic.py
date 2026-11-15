@@ -8,10 +8,8 @@ from corral.agents.schema import SURRENDER_SENTINEL, AgentOutcome, BudgetExhaust
 from corral.agents.tool_calling import ToolCallingAgent
 from corral.core.action import SUBMIT_ANSWER_TOOL_NAME, Action
 from corral.core.errors import concise_error_message
-from corral.epistemic_analysis.reports import (
-    SUBMISSION_REVIEW_MESSAGE_NAME,
-    scientific_messages,
-)
+from corral.epistemic_analysis.annotation_transcript import scientific_messages
+from corral.epistemic_analysis.schema import SUBMISSION_REVIEW_MESSAGE_NAME
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

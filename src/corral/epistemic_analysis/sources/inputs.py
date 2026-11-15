@@ -127,7 +127,19 @@ class CheckInput:
 
     @classmethod
     def from_document(cls, document, context=None):
-        """Accept a normalized snapshot or a saved trial; never copy scores/targets."""
+        """Accept a snapshot or saved trial; never copy scores/targets.
+
+        For missing startup messages, ``prompt_reconstruction`` in the document
+        or context selects the original ``agent``, ``source_root`` (a source tree
+        matching ``revision``), ``environment``, ``level``, ``task_id``,
+        ``runtime_options`` and ``enable_surrender``. Planner runs additionally
+        need ``max_iterations``; SDK workspace additions need ``native_workspace``.
+        This preparation configuration is removed before building model context.
+        """
+        context = copy.deepcopy(context or {})
+        reconstruction = context.pop(
+            "prompt_reconstruction", document.get("prompt_reconstruction")
+        )
         if "message_sources" in document:
             trace = NormalizedTrace(
                 copy.deepcopy(document["messages"]),
@@ -160,7 +172,13 @@ class CheckInput:
                     )
                     if k in message
                 }
-                if fields:
+                # Instruction text must remain byte-for-byte identical. Worker
+                # names, run IDs and capture metadata belong in source mappings.
+                if fields and message.get("role") not in {
+                    "system",
+                    "developer",
+                    "user",
+                }:
                     text += SAVED_FIELDS + json.dumps(fields, ensure_ascii=False)
                 messages.append(
                     {"role": str(message.get("role", "unknown")), "content": text}
@@ -168,6 +186,20 @@ class CheckInput:
                 sources.append(
                     {
                         "index": i,
+                        **(
+                            {
+                                "prompt_context": copy.deepcopy(
+                                    message["metadata"]["prompt_context"]
+                                )
+                            }
+                            if (message.get("metadata") or {}).get("prompt_context")
+                            else {}
+                        ),
+                        **(
+                            {"original_content": copy.deepcopy(value)}
+                            if isinstance(value, list)
+                            else {}
+                        ),
                         **{
                             k: v
                             for k, v in fields.items()
@@ -189,7 +221,13 @@ class CheckInput:
                     "reconstruction_status", "unspecified"
                 ),
             )
-        return cls(trace, context or {})
+        if reconstruction is not None:
+            from corral.epistemic_analysis.annotation_transcript import (
+                reconstruct_trace,
+            )
+
+            trace = reconstruct_trace(trace, reconstruction)
+        return cls(trace, context)
 
     def public_state(self):
         initial = []
@@ -215,7 +253,19 @@ class CheckInput:
             "capture": {
                 "completion_status": self.trace.completion_status,
                 "reconstruction_status": self.trace.reconstruction_status,
-                "limitations": self.context.get("capture_limitations", []),
+                "limitations": [
+                    *self.context.get("capture_limitations", []),
+                    *(
+                        [
+                            "SDK-private system instructions are unavailable; the exact public instruction additions are retained."
+                        ]
+                        if any(
+                            s.get("prompt_context", {}).get("sdk_hidden_system")
+                            for s in self.trace.message_sources
+                        )
+                        else []
+                    ),
+                ],
             },
             "source_hashes": {
                 "saved_source": self.trace.source.content_hash,
@@ -224,6 +274,11 @@ class CheckInput:
                 "context": content_hash(self.context),
             },
         }
+
+    def require_prompt_context(self):
+        from corral.epistemic_analysis.annotation_transcript import initial_instructions
+
+        initial_instructions(self.trace.messages, required=True)
 
     def snapshot(self):
         return {

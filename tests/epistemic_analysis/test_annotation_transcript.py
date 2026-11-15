@@ -9,6 +9,73 @@ from corral.epistemic_analysis.annotation_transcript import (
     SAVED_FIELDS,
     annotation_transcript,
 )
+from corral.epistemic_analysis.sources.inputs import CheckInput
+
+
+def test_recorded_instructions_win_over_reconstruction_without_changing_text():
+    prefix = [
+        {"role": "developer", "content": "\nExact αβ instructions.\n\n"},
+        {"role": "user", "content": "Task as actually rendered.\n"},
+        {"role": "user", "content": "Separate tools message.\n"},
+    ]
+    recorded = [
+        {
+            **m,
+            "name": "worker",
+            "agent_run_id": "run",
+            "metadata": {"prompt_context": {"sdk_hidden_system": True}},
+        }
+        for m in prefix
+    ]
+    inputs = CheckInput.from_document(
+        {"messages": [*recorded, {"role": "assistant", "content": "Working."}]}
+    )
+    prepared = prepare(inputs.snapshot(), agent="codex")
+    assert prepared["messages"][:3] == prefix
+    assert len(prepared["messages"]) == 4
+    assert prepared["message_sources"][0]["name"] == "worker"
+    assert prepared["message_sources"][0]["agent_run_id"] == "run"
+    restored = CheckInput.from_document(prepared)
+    restored.require_prompt_context()
+    assert "SDK-private" in restored.public_state()["capture"]["limitations"][0]
+
+
+@pytest.mark.parametrize(
+    "messages",
+    [
+        [{"role": "assistant", "content": "Working."}],
+        [
+            {"role": "user", "content": "Task."},
+            {"role": "assistant", "content": "Working."},
+        ],
+        [{"role": "system", "content": "Instructions."}],
+    ],
+)
+def test_incomplete_prompt_context_requires_verified_reconstruction(messages):
+    inputs = CheckInput.from_document({"messages": messages})
+    with pytest.raises(ValueError, match="exact initial"):
+        inputs.require_prompt_context()
+    with pytest.raises(ValueError, match="exact initial"):
+        annotation_transcript(inputs.snapshot(), "react", "Task.", [])
+
+
+def test_multimodal_instruction_blocks_round_trip_through_annotation():
+    blocks = [
+        {"type": "text", "text": "\nInspect αβ.\n"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+    ]
+    inputs = CheckInput.from_document(
+        {
+            "messages": [
+                {"role": "system", "content": "Analyze the image."},
+                {"role": "user", "content": blocks},
+                {"role": "assistant", "content": "Working."},
+            ]
+        }
+    )
+    prepared = annotation_transcript(inputs.snapshot(), "tool-calling")
+    assert json.loads(prepared["messages"][1]["content"]) == blocks
+    assert prepared["message_sources"][1]["original_content"] == blocks
 
 
 def batch_document():
@@ -47,12 +114,18 @@ def batch_document():
     }
 
 
-def prepare(document, agent="react"):
+def prepare(document, agent="react", **kwargs):
     return annotation_transcript(
         document,
         agent,
         "The supplied holdout.csv is public.",
         [{"path": "task.json", "sha256": "abc"}],
+        initial_messages=[
+            {"role": "system", "content": "Scientific assistant"},
+            {"role": "user", "content": "The supplied holdout.csv is public."},
+        ],
+        initial_sources=[{"origin": "recorded"}, {"origin": "recorded"}],
+        **kwargs,
     )
 
 
@@ -62,24 +135,25 @@ def test_react_batch_keeps_real_prose_calls_results_and_source_mapping():
     result = prepare(document)
     assert document == original
     assert [m["role"] for m in result["messages"]] == [
+        "system",
         "user",
         "assistant",
         "tool",
         "tool",
     ]
     assert (
-        result["messages"][1]["content"].split(SAVED_FIELDS)[0]
+        result["messages"][2]["content"].split(SAVED_FIELDS)[0]
         == document["messages"][0]["content"].split(SAVED_FIELDS)[0]
     )
-    fields = json.loads(result["messages"][1]["content"].split(SAVED_FIELDS)[1])
+    fields = json.loads(result["messages"][2]["content"].split(SAVED_FIELDS)[1])
     assert [c["id"] for c in fields["tool_calls"]] == ["call0", "call1"]
-    assert result["messages"][2:] == [document["messages"][1], document["messages"][3]]
-    assert result["message_sources"][1]["merged_dispatch_indices"] == [2]
+    assert result["messages"][3:] == [document["messages"][1], document["messages"][3]]
+    assert result["message_sources"][2]["merged_dispatch_indices"] == [2]
     assert result["annotation_preprocessing"]["original_to_annotation_indices"] == {
-        "0": 1,
-        "1": 2,
-        "2": 1,
-        "3": 3,
+        "0": 2,
+        "1": 3,
+        "2": 2,
+        "3": 4,
     }
     assert result["completion_status"] == "failed"
     with pytest.raises(ValueError, match="original transcript"):
@@ -173,27 +247,25 @@ def test_ambiguous_or_independent_messages_are_preserved(change):
     if change in {"different_arguments", "actor", "duplicate_id", "error"}:
         message["content"] = "null" + SAVED_FIELDS + json.dumps(fields)
     result = prepare(document)
-    assert result["messages"][1:] == document["messages"]
+    assert result["messages"][2:] == document["messages"]
     assert not result["annotation_preprocessing"]["folded_react_dispatches"]
 
 
 def test_other_agents_and_unexecuted_proposals_are_unchanged():
     document = batch_document()
-    assert prepare(document, "codex")["messages"][1:] == document["messages"]
+    assert prepare(document, "codex")["messages"][2:] == document["messages"]
     document["messages"] = document["messages"][:2]
     document["message_sources"] = document["message_sources"][:2]
-    assert prepare(document)["messages"][1:] == document["messages"]
+    assert prepare(document)["messages"][2:] == document["messages"]
 
 
 def test_unfolded_fallback_retains_every_original_dispatch_and_result():
     document = batch_document()
-    prepared = annotation_transcript(
-        document, "react", "Task instructions", [], fold_react_dispatches=False
-    )
-    assert prepared["messages"][1:] == document["messages"]
+    prepared = prepare(document, fold_react_dispatches=False)
+    assert prepared["messages"][2:] == document["messages"]
     assert not prepared["annotation_preprocessing"]["folded_react_dispatches"]
     assert prepared["annotation_preprocessing"]["original_to_annotation_indices"] == {
-        str(i): i + 1 for i in range(len(document["messages"]))
+        str(i): i + 2 for i in range(len(document["messages"]))
     }
 
 
@@ -202,7 +274,7 @@ def test_repeated_identical_explicit_calls_remain_two_executed_calls():
     for message in document["messages"]:
         message["content"] = message["content"].replace("holdout.csv", "data.csv")
     result = prepare(document)
-    fields = json.loads(result["messages"][1]["content"].split(SAVED_FIELDS)[1])
+    fields = json.loads(result["messages"][2]["content"].split(SAVED_FIELDS)[1])
     assert [c["id"] for c in fields["tool_calls"]] == ["call0", "call1"]
     assert len([m for m in result["messages"] if m["role"] == "tool"]) == 2
 
@@ -222,12 +294,12 @@ def test_submission_batch_preserves_dispatch_chronology_and_prior_results():
     fields["tool_calls"][0]["function"]["name"] = "submit_answer"
     document["messages"][2]["content"] = "null" + SAVED_FIELDS + json.dumps(fields)
     prepared = prepare(document)
-    assert prepared["messages"][1:] == document["messages"]
+    assert prepared["messages"][2:] == document["messages"]
     assert not prepared["annotation_preprocessing"]["folded_react_dispatches"]
     normalized = CheckInput.from_document({"messages": document["messages"]}).snapshot()
     prepared.update(source=normalized["source"])
     trace = CheckInput.from_document(prepared).trace
     end = submission_end(trace)
-    assert end == 4
+    assert end == 5
     assert trace.messages[end - 2]["content"] == "Result 0: αβ"
     assert trace.messages[end]["content"] == "Result 1: αβ"

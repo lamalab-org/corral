@@ -9,6 +9,11 @@ from urllib.request import urlopen
 
 import pytest
 
+pytest.importorskip(
+    "corral.epistemic_analysis.viewer",
+    reason="Local annotation viewer is not installed",
+)
+
 from corral.epistemic_analysis.viewer.server import RunStore, handler_for
 
 

@@ -169,15 +169,19 @@ def test_embedded_results_trim_complete_catalogs_with_exact_json_source_offsets(
         assert json.loads('"' + text[offsets[0] : offsets[-1]] + '"') == original
     inputs = source([("a", "experiment_node_1_step_0", "user", text)])
     unit = scientist_units(inputs)[0]["inputs"]
+    # A worker's startup prompt is preserved even when it embeds a catalog.
+    assert tool_excerpt_view(unit.trace, cap=100).messages[1]["content"] == text
+    unit.trace.messages.insert(1, {"role": "assistant", "content": "Consult catalog."})
+    unit.trace.message_sources.insert(1, {"index": 99})
     view = tool_excerpt_view(unit.trace, cap=100)
-    mapping = view.mappings[1]
+    mapping = view.mappings[2]
     assert mapping["embedded_catalog_reactions"] == [{"available": 8, "retained": 3}]
     assert mapping["omitted_chars"] > 0
-    assert "KEEP INSTRUCTIONS" in view.messages[1]["content"]
-    assert "KEEP REASONING" in view.messages[1]["content"]
-    assert "KEEP ARGUMENT" in view.messages[1]["content"]
-    assert "'reaction_id': 2" in view.messages[1]["content"]
-    assert "'reaction_id': 3" not in view.messages[1]["content"]
+    assert "KEEP INSTRUCTIONS" in view.messages[2]["content"]
+    assert "KEEP REASONING" in view.messages[2]["content"]
+    assert "KEEP ARGUMENT" in view.messages[2]["content"]
+    assert "'reaction_id': 2" in view.messages[2]["content"]
+    assert "'reaction_id': 3" not in view.messages[2]["content"]
     for part in view_fragments(unit.trace, view):
         assert (
             part["content"]
@@ -186,8 +190,8 @@ def test_embedded_results_trim_complete_catalogs_with_exact_json_source_offsets(
             ]
         )
     # An assistant quoting an observation remains reasoning, not a tool result.
-    unit.trace.messages[1]["role"] = "assistant"
-    assert tool_excerpt_view(unit.trace, cap=100).messages[1]["content"] == text
+    unit.trace.messages[2]["role"] = "assistant"
+    assert tool_excerpt_view(unit.trace, cap=100).messages[2]["content"] == text
 
 
 @pytest.mark.parametrize(
@@ -343,13 +347,14 @@ def test_only_oversized_unit_is_trimmed_before_independent_label(tmp_path):
     asyncio.run(exercise())
 
 
-def test_omitted_initial_tool_payload_is_not_sent_to_explainer(tmp_path):
+def test_omitted_followup_tool_payload_is_not_sent_to_explainer(tmp_path):
     async def exercise():
         reactions = catalog()
         omitted = "OMITTED_ONLY_EVIDENCE"
         reactions[4]["details"] = omitted
         inputs = source(
             [
+                ("a", "experiment_node_1_step_0", "assistant", "Consult the catalog."),
                 (
                     "a",
                     "experiment_node_1_step_0",
@@ -376,7 +381,7 @@ def test_omitted_initial_tool_payload_is_not_sent_to_explainer(tmp_path):
                 return httpx.Response(200, json=native_answer(CHECK))
             evidence_requests.append(body)
             return httpx.Response(
-                200, json=chat_answer(evidence=[{"message_id": "m1", "quote": omitted}])
+                200, json=chat_answer(evidence=[{"message_id": "m2", "quote": omitted}])
             )
 
         await decision.client.aclose()

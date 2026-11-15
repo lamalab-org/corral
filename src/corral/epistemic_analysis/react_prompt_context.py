@@ -1,4 +1,4 @@
-"""Recover public ReAct startup context from a pinned repository source tree.
+"""Recover public agent startup context from a pinned repository source tree.
 
 Only schema declarations, prompt templates and pure rendering/selection functions
 are evaluated. Tool bodies are replaced with raising stubs: reconstruction never
@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
 
-from jinja2 import StrictUndefined, Template
+from promptstore import Prompt
 
 from .task_prompt_context import ENVIRONMENT_FILES
 
@@ -83,16 +83,8 @@ def _schema_declarations(tree, namespace, filename):
     _execute(nodes, namespace, filename)
 
 
-class _Template:
-    def __init__(self, text):
-        self.template = Template(text, undefined=StrictUndefined)
-
-    def fill(self, values):
-        return self.template.render(**values)
-
-
-class PinnedReActContext:
-    """Reconstruct default ReAct prompts; reject unhandled runtime overrides."""
+class PinnedAgentContext:
+    """Render annotation context without constructing or modifying an agent."""
 
     def __init__(self, root, revision, environment):
         self.root, self.revision, self.environment = Path(root), revision, environment
@@ -242,7 +234,7 @@ class PinnedReActContext:
         text = self._read(f"src/corral/agents/prompts/{name}/prompt.md")
         if not text.startswith("---\n"):
             raise ValueError("Missing prompt template metadata")
-        return _Template(text.split("---", 2)[2].strip())
+        return Prompt.from_markdown(text)
 
     def recover(
         self,
@@ -252,15 +244,14 @@ class PinnedReActContext:
         runtime_options,
         *,
         enable_surrender=False,
+        agent_name="react",
+        max_iterations=None,
+        native_workspace=None,
     ):
         forbidden = {
-            "system_prompt",
-            "user_prompt",
-            "surrender_prompt",
             "session_capabilities",
-            "examples",
         } & runtime_options.keys()
-        if forbidden or enable_surrender:
+        if forbidden:
             raise ValueError(
                 f"Reconstruction requires explicit support for runtime prompt overrides: {sorted(forbidden)}"
             )
@@ -276,34 +267,215 @@ class PinnedReActContext:
         schemas = [t.get_openai_tool_format() for t in tools.values()]
         session = SimpleNamespace(
             prompt=task_prompt,
-            examples=(),
-            surrender_allowed=False,
+            examples=runtime_options.get("examples", ()),
+            surrender_allowed=enable_surrender,
             messages=(),
-            tools=schemas,
+            tools=self.namespace["with_submit_answer_tool"](schemas),
         )
         agent = SimpleNamespace(
-            system_prompt=self.system.fill({}),
+            system_prompt=(
+                Prompt(content=runtime_options["system_prompt"], version=1).fill({})
+                if runtime_options.get("system_prompt") is not None
+                else self.system.fill({})
+            ),
             user_prompt=self.user,
-            surrender_prompt=None,
+            surrender_prompt=(
+                Prompt(content=runtime_options["surrender_prompt"], version=1)
+                if runtime_options.get("surrender_prompt") is not None
+                else None
+            ),
         )
         agent._tools = lambda s: self.namespace["_tools"](agent, s)
-        messages = self.namespace["_initial_messages"](agent, session)
         catalog = agent._tools(session)
-        if [m["role"] for m in messages] != ["system", "user", "user"]:
-            raise ValueError("Unexpected pinned ReAct startup message layout")
+        messages = self._render_agent(
+            agent_name,
+            agent,
+            session,
+            runtime_options,
+            max_iterations,
+            native_workspace,
+        )
         refs = [*task_sources, *self.sources]
         sources = [
             {
                 "index": None,
-                "origin": "reconstructed_react_initial_instructions",
-                "instruction_kind": kind,
+                "origin": f"reconstructed_{agent_name}_initial_instructions",
+                "instruction_kind": message["role"],
                 "source_evidence": refs,
-                "description": "Reconstructed from the report's pinned PR task, public tool schemas and ReAct prompt renderer. The saved report omits startup messages; this is recovered context, not a recorded model request.",
+                "prompt_context": {
+                    "source": "reconstructed",
+                    "sdk_hidden_system": agent_name in {"codex", "claude-code"},
+                },
+                "description": "Recovered from the original task, run configuration and pinned agent prompt renderer; not a recorded model request.",
             }
-            for kind in (
-                "system_prompt",
-                "task_and_react_instructions",
-                "available_tool_schemas",
-            )
+            for message in messages
         ]
         return messages, sources, catalog
+
+    def _load(self, relative, *names):
+        tree = ast.parse(self._read(relative))
+        _execute([_definition(tree, name) for name in names], self.namespace, relative)
+        return tree
+
+    def _render_agent(self, name, agent, session, options, max_iterations, workspace):
+        ns = self.namespace
+        templates = {
+            "react": "react/user_prompt",
+            "tool-calling": "tool_calling/user_prompt",
+            "epistemic": "epistemic/user_prompt",
+            "llm-planner": "planner_prompt/user_prompt",
+        }
+        if name in templates:
+            template = options.get("user_prompt") or templates[name]
+            relative = Path("src/corral/agents/prompts") / template / "prompt.md"
+            agent.user_prompt = (
+                self._template(template)
+                if len(template) < 200
+                and "\n" not in template
+                and relative.is_relative_to("src/corral/agents/prompts")
+                and ".." not in relative.parts
+                and (self.root / relative).is_file()
+                else Prompt(content=template, version=1)
+            )
+        if name == "epistemic":
+            tree = ast.parse(self._read("src/corral/agents/epistemic.py"))
+            constants = {
+                node.targets[0].id: ast.literal_eval(node.value)
+                for node in tree.body
+                if isinstance(node, ast.Assign)
+                and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id
+                in {"EPISTEMIC_SYSTEM_PROMPT", "EPISTEMIC_PROMPT"}
+            }
+            if options.get("system_prompt") is None:
+                agent.system_prompt = Prompt(
+                    content=constants["EPISTEMIC_SYSTEM_PROMPT"], version=1
+                ).fill({})
+            agent.system_prompt += "\n\n" + constants["EPISTEMIC_PROMPT"]
+        if name in {"react", "tool-calling", "epistemic"}:
+            module = "react" if name == "react" else "tool_calling"
+            self._load(f"src/corral/agents/{module}.py", "_initial_messages")
+            return ns["_initial_messages"](agent, session)
+        if name == "llm-planner":
+            if max_iterations is None:
+                raise ValueError(
+                    "Planner prompt reconstruction requires max_iterations"
+                )
+            tree = ast.parse(self._read("src/corral/agents/llm_planner.py"))
+            initial = next(
+                node
+                for node in _definition(tree, "run_session").body
+                if isinstance(node, ast.Assign)
+                and any(
+                    isinstance(t, ast.Name) and t.id == "initial" for t in node.targets
+                )
+            )
+            scope = {
+                **ns,
+                "self": agent,
+                "session": session,
+                "iteration_limit": max_iterations,
+            }
+            _execute([initial], scope, "llm_planner.py")
+            return scope["initial"]
+        if name == "terminus":
+            from typing import Annotated, Any
+
+            import pydantic
+
+            ns.update(
+                {
+                    key: getattr(pydantic, key)
+                    for key in (
+                        "BaseModel",
+                        "ConfigDict",
+                        "Field",
+                        "WithJsonSchema",
+                        "field_validator",
+                        "model_validator",
+                    )
+                },
+                Annotated=Annotated,
+                Any=Any,
+            )
+            self._load(
+                "src/corral/agents/terminus.py",
+                "TerminusToolCall",
+                "TerminusResponse",
+                "_initial_prompt",
+            )
+            agent.max_actions_per_turn = options.get("max_actions_per_turn", 1)
+            return [
+                {"role": "system", "content": agent.system_prompt},
+                {
+                    "role": "user",
+                    "content": ns["_initial_prompt"](
+                        agent,
+                        session.prompt,
+                        ns["with_submit_answer_tool"](session.tools),
+                        session.surrender_allowed,
+                        session.examples,
+                    ),
+                },
+            ]
+        if name in {"codex", "claude-code"}:
+            timeout = self._read("src/corral/agents/_mcp_timeout.py")
+            exec(compile(timeout, "_mcp_timeout.py", "exec"), ns)
+            agent.tool_timeout_s = options.get(
+                "tool_timeout_s", ns["DEFAULT_TOOL_TIMEOUT_S"]
+            )
+            module = name.replace("-", "_")
+            method = (
+                "_developer_instructions" if name == "codex" else "_build_system_prompt"
+            )
+            tree = self._load(f"src/corral/agents/{module}.py", method)
+            constants = [
+                node
+                for node in tree.body
+                if isinstance(node, ast.Assign)
+                and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id in {"_MCP_SERVER_NAME", "_FILE_WRITING_TOOLS"}
+            ]
+            _execute(constants, ns, module)
+            ns["SURRENDER_SENTINEL"] = "SURRENDER"
+            if name == "codex":
+                text = ns[method](
+                    agent,
+                    session.surrender_allowed,
+                    [t["function"]["name"] for t in session.tools],
+                )
+            else:
+                if agent.surrender_prompt is not None:
+                    agent.surrender_prompt = agent.surrender_prompt.fill({})
+                text = ns[method](agent, session.surrender_allowed)["append"]
+            if workspace:
+                target = (
+                    "developer_instructions"
+                    if name == "codex"
+                    else "options.system_prompt['append']"
+                )
+                suffixes = [
+                    n.value
+                    for n in ast.walk(tree)
+                    if isinstance(n, ast.AugAssign) and ast.unparse(n.target) == target
+                ]
+                if len(suffixes) != 1:
+                    raise ValueError("Cannot reconstruct SDK workspace instructions")
+                text += eval(
+                    compile(ast.Expression(suffixes[0]), module, "eval"),
+                    {
+                        "run": SimpleNamespace(native_workspace=workspace),
+                        "cwd": workspace,
+                    },
+                )
+            return [
+                {"role": "developer" if name == "codex" else "system", "content": text},
+                {"role": "user", "content": session.prompt},
+            ]
+        raise ValueError(
+            f"{name} requires recorded worker/SDK prompts; they cannot be inferred from a task name"
+        )
+
+
+# Keep the existing ReAct recovery API used by viewer exports.
+PinnedReActContext = PinnedAgentContext

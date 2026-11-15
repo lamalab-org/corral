@@ -29,6 +29,48 @@ from corral.epistemic_analysis.storage import read_record
 from corral.epistemic_analysis.trace_checks import CheckPipeline, check_definitions
 
 
+def test_long_initial_instructions_survive_all_views_and_later_windows():
+    from corral.epistemic_analysis.annotators.graph import window_state as graph_state
+    from corral.epistemic_analysis.context import build_annotation_view
+    from corral.epistemic_analysis.overflow_windows import window_state
+    from corral.epistemic_analysis.schema import AnnotationConfig
+
+    prefix = [
+        {"role": "system", "content": "\nSystem αβ " + "x" * 20000},
+        {
+            "role": "user",
+            "content": "Observation: supplied initial data\n" + "y" * 20000,
+        },
+        {"role": "user", "content": "Tools\n" + "\n" * 20000},
+    ]
+    inputs = CheckInput.from_document(
+        {
+            "messages": [
+                *prefix,
+                {"role": "assistant", "content": "Inspect data."},
+                {"role": "tool", "content": "Results " * 2000},
+                {"role": "assistant", "content": "Conclude."},
+            ]
+        }
+    )
+    graph_view = build_annotation_view(
+        inputs.trace, AnnotationConfig(model="test", tool_output_max_chars=100)
+    )
+    assert graph_view.messages[:3] == prefix
+    assert graph_state(graph_view.messages, 5, 6)["initial_instructions"] == prefix
+    view = long_message_view(
+        inputs.trace, tool_excerpt_view(inputs.trace, cap=100), cap=100
+    )
+    assert view.messages[:3] == prefix
+    state = inputs.public_state()
+    state["messages"] = view_fragments(inputs.trace, view)[-1:]
+    window = window_state(state, view)
+    assert [
+        {"role": m["role"], "content": m["content"]}
+        for m in window["initial_instructions"]
+    ] == prefix
+
+
 def test_repetition_samples_counts_and_original_offsets_survive_late_trim():
     text = "A real response ends here." + "\n" * 62413 + "END OF RESPONSE"
     source = inputs(assistant=text)

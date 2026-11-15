@@ -6,8 +6,10 @@ import json
 
 import pytest
 
-from corral.epistemic_analysis.annotators.base import AnnotationBackend
-from corral.epistemic_analysis.annotators.graph import candidate_spans
+from corral.epistemic_analysis.annotators.graph import (
+    AnnotationBackend,
+    candidate_spans,
+)
 from corral.epistemic_analysis.context import annotation_context, through_submission
 from corral.epistemic_analysis.overflow import long_message_view, tool_excerpt_view
 from corral.epistemic_analysis.pipeline import annotate_trace, can_reuse

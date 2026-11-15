@@ -7,15 +7,10 @@ import copy
 import json
 import math
 import re
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from corral.epistemic_analysis._utils import (
-    iter_windows,
-    normalize_whitespace,
-    sha1_hex,
-)
-from corral.epistemic_analysis.annotators.base import AnnotationBackend
 from corral.epistemic_analysis.context import (
     SUBMIT_ANSWER_ACTION,
     current_context,
@@ -40,6 +35,9 @@ from corral.epistemic_analysis.graph import (
     coerce_node,
     edge_pair_coverage,
     is_runtime_notice,
+    iter_windows,
+    normalize_whitespace,
+    sha1_hex,
 )
 from corral.epistemic_analysis.graph_semantics import (
     GRAPH_SEMANTICS_VERSION,
@@ -55,6 +53,10 @@ from corral.epistemic_analysis.ontology import (
     relation_allowed,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
+
 MAX_CHOICES = 255
 # Edge-support decisions offer each message plus a final "none" choice.
 MAX_WINDOW = MAX_CHOICES - 1
@@ -63,6 +65,34 @@ TAGGED_UNIT = re.compile(
     r"|<final_answer>.*?</final_answer>",
     re.DOTALL,
 )
+
+
+@dataclass(frozen=True)
+class AnnotationBackend:
+    """Node and edge passes with reproducibility metadata."""
+
+    extract_nodes: Callable[..., Awaitable[tuple[list[dict[str, Any]], list[str]]]]
+    extract_edges: Callable[..., Awaitable[tuple[list[dict[str, Any]], list[str]]]]
+    provenance: dict[str, Any]
+    prepare: Callable[[], Awaitable[Any]] | None = None
+    close: Callable[[], Awaitable[None]] | None = None
+
+    def resolved_models(self) -> set[str]:
+        return _resolved_models.get() or set()
+
+
+_resolved_models: ContextVar[set[str] | None] = ContextVar(
+    "annotation_models", default=None
+)
+
+
+def record_model(model: str | None) -> None:
+    if model:
+        _resolved_models.set((_resolved_models.get() or set()) | {model})
+
+
+def reset_models() -> None:
+    _resolved_models.set(set())
 
 
 class AnnotationError(RuntimeError):
@@ -361,10 +391,13 @@ def candidate_spans(messages, max_chars):
 def window_state(
     messages: list[dict[str, Any]], start: int, end: int
 ) -> dict[str, Any]:
+    from corral.epistemic_analysis.annotation_transcript import initial_instructions
+
     state = {
         "messages": {f"m{i}": {"msg_idx": i, **messages[i]} for i in range(start, end)},
         "window": {"start": start, "end": end},
         "node_ontology": NODE_ONTOLOGY,
+        "initial_instructions": initial_instructions(messages),
     }
     if view_instructions():
         state["annotation_view_instructions"] = view_instructions()

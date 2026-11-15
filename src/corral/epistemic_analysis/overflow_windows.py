@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from .annotation_transcript import TASK_PROMPT_ORIGIN
 from .decision_units import fragment
 from .overflow import WINDOW_SCOPE, excerpt_state, overflow_definition
 
@@ -29,36 +28,9 @@ def restore_parts(trace, refs):
 def window_state(state, view):
     """Keep task anchors but scope bulky facts and omission metadata to this window."""
     parts = state["messages"]
-    initial = []
-    instructions = state.get("initial_instructions", [])
-    has_task_anchor = any(
-        i.get("source", {}).get("origin") == TASK_PROMPT_ORIGIN for i in instructions
-    )
-    for item in instructions:
-        if (
-            has_task_anchor
-            and item["role"] == "user"
-            and item.get("source", {}).get("origin") != TASK_PROMPT_ORIGIN
-        ):
-            continue
-        mapping = view.mappings[item["msg_idx"]]
-        remaining = 8192
-        for span in mapping["retained_ranges"]:
-            low, high = span["original_start"], span["original_end"]
-            high = min(high, low + remaining)
-            if high > low:
-                initial.append(
-                    {
-                        **item,
-                        "content": item["content"][low:high],
-                        "start": low,
-                        "end": high,
-                        "context_only": True,
-                    }
-                )
-                remaining -= high - low
-            if not remaining:
-                break
+    initial = [
+        {**item, "context_only": True} for item in state.get("initial_instructions", [])
+    ]
     visible = {p["msg_idx"] for p in [*parts, *initial]}
     state = excerpt_state(state, view)
     state["initial_instructions"] = initial
@@ -84,7 +56,7 @@ def window_state(state, view):
         "Each check is assessed independently in every window. Code assigns present if any window is present; without a positive, uncertainty or failure remains uncertain. Do not infer missing actions from a partial window."
     )
     state["window_anchor_policy"] = (
-        "Repeated instruction anchors are bounded context excerpts. Their complete retained source is covered by the chronological windows."
+        "Initial instruction messages are repeated verbatim as context in every window, with their original roles and boundaries."
     )
     return state
 
