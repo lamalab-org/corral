@@ -299,7 +299,9 @@ class SpectraAPI:
     """Class for handling spectral predictions from the NMR and IR APIs
 
     Attributes:
-        IR_BASE_URL: str - Base URL for the IR prediction API
+        IR_BASE_URL: str - Base URL for the IR prediction API; the
+            SPECTRA_IR_URL environment variable overrides it (e.g. a local
+            xtbservice, https://github.com/cheminfo-py/xtbservice)
         NMR_BASE_URL: str - Base URL for the NMR prediction API
     """
 
@@ -469,7 +471,7 @@ class SpectraAPI:
             url = f"{SpectraAPI.NMR_BASE_URL}/{spectrum_type}"
             payload = {"smiles": smiles}
         elif prediction_type == "ir":
-            url = SpectraAPI.IR_BASE_URL
+            url = os.environ.get("SPECTRA_IR_URL") or SpectraAPI.IR_BASE_URL
             payload = {"smiles": smiles, "method": method}
         else:
             raise ValueError("prediction_type must be 'nmr' or 'ir'")

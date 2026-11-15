@@ -1130,7 +1130,10 @@ def return_possible_fragments(h_smiles: str) -> list[str]:
     return final_fragments
 
 
-@tool
+# Trusted like ir_spectra: restricted tool workers drop SPECTRA_IR_URL (#496),
+# so an untrusted tool would always query the public IR service. It only takes a
+# SMILES string and calls the prediction APIs; it runs no model-supplied code.
+@tool(trusted=True)
 def simulate_spectra(smiles: str) -> dict[str, str]:
     """[BRIEF] Simulate 1H NMR, 13C NMR, and IR spectra for a given molecule using its SMILES string, that allows validation of a proposed candidate. [/BRIEF]
 

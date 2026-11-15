@@ -60,7 +60,8 @@ uv run --no-project --with "lama-aesthetics @ git+https://github.com/lamalab-org
 ## Corrections (2026-11-13)
 
 The first v2 manifest selected two environments from October scores that were
-later corrected. Both were reselected with the same method; all other
+later corrected, and one inference optimization task whose student model is no
+longer served. These levels were reselected with the same method; all other
 environments keep their v2 tasks. The manifest records the corrected reports
 under `local_sources`.
 
@@ -90,12 +91,35 @@ predates that change, so the first v2 manifest used the old scores.
 | 1 | `task_6`, `task_7`, `task_8` | `task_3`, `task_7`, `task_9` |
 | 2 | `task_5`, `task_9`, `task_10` | `task_1`, `task_2`, `task_7` |
 
+### Inference optimization
+
+The student of `math_number_theory_a`, `qwen/qwen-2.5-7b-instruct@phala`, is no
+longer served by any OpenRouter provider ("404 … no provider serves this model
+anymore"). It still worked for the v1 runs (2026-11-07/08); in the first v2
+runs, most dry runs and final evaluations of this task failed with the 404.
+The four tasks with this student (`math_number_theory_a`,
+`math_counting_probability_a`, `math_geometry_a` and `gsm_p2_a`) are left out of
+selection with `--exclude-task` (recorded under `excluded_tasks`), and the
+levels were reselected with the same method. Level 2 is unchanged.
+
+| Level | Before | After |
+|---|---|---|
+| 1 | `math_counting_probability_b`, `math_geometry_d`, `math_number_theory_a` | `math_counting_probability_b`, `math_geometry_d`, `math_number_theory_b` |
+
+Against the level without these tasks, the new set has Spearman 1.00 and costs
+$605 for the seven agents × 5 trials ($619 for the old set). The full scores in
+the tables and figures below still include the excluded tasks.
+
 Reproduce the manifest with:
 
 ```bash
 python scripts/build_corral_mini.py --version 2 --output PATH \
   --revision 6d8dc71d6bcc3a3c6c76a28609f4f4a510ea2dd8 \
-  --local-reports retrosynthesis --local-reports corral_md
+  --local-reports retrosynthesis --local-reports corral_md \
+  --exclude-task inference_opt/math_number_theory_a \
+  --exclude-task inference_opt/math_counting_probability_a \
+  --exclude-task inference_opt/math_geometry_a \
+  --exclude-task inference_opt/gsm_p2_a
 ```
 
 ## Methods
