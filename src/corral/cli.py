@@ -879,7 +879,8 @@ def build_parser() -> argparse.ArgumentParser:
     from corral.epistemic_analysis.cli import add_check_arguments
 
     checks = commands.add_parser(
-        "annotate-checks", help="Run independent KnowLine labels and Gemma evidence."
+        "annotate-checks",
+        help="Run separate behavioral checks with local model defaults.",
     )
     add_check_arguments(checks)
     run = commands.add_parser(

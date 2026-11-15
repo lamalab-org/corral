@@ -9,8 +9,8 @@ import httpx
 import pytest
 
 from corral.epistemic_analysis.annotators.local import (
-    GemmaClient,
     KnowLineClient,
+    OpenAIClient,
     ProviderConfig,
 )
 from corral.epistemic_analysis.decision_applicability import (
@@ -259,7 +259,7 @@ class Services:
     def clients(self):
         return (
             KnowLineClient(provider_config("knowline"), transport=self.transport),
-            GemmaClient(provider_config("gemma"), transport=self.transport),
+            OpenAIClient(provider_config("gemma"), transport=self.transport),
         )
 
 
@@ -1292,7 +1292,7 @@ def test_whole_conversation_pass_reuses_windows_and_keeps_reduced_coverage(
             replace(provider_config("knowline"), context_tokens=12000),
             transport=transport,
         )
-        evidence = GemmaClient(provider_config("gemma"), transport=transport)
+        evidence = OpenAIClient(provider_config("gemma"), transport=transport)
         try:
             original = await CheckPipeline(tmp_path, decision, windowed=True).run(
                 inputs, checks=[name]

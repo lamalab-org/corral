@@ -1,20 +1,14 @@
-"""Jev's shared span-classification workflow and Decisions API client."""
+"""One span-classification workflow for node and edge annotation."""
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import copy
 import json
 import math
-import os
 import re
 from dataclasses import dataclass, replace
 from typing import Any
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
-
-from loguru import logger
 
 from corral.epistemic_analysis._utils import (
     iter_windows,
@@ -22,13 +16,6 @@ from corral.epistemic_analysis._utils import (
     sha1_hex,
 )
 from corral.epistemic_analysis.annotators.base import AnnotationBackend
-from corral.epistemic_analysis.budget import (
-    RequestBudgetExceeded,
-    estimate_request,
-    is_context_error,
-    numeric_usage,
-    record_request,
-)
 from corral.epistemic_analysis.context import (
     SUBMIT_ANSWER_ACTION,
     current_context,
@@ -42,15 +29,22 @@ from corral.epistemic_analysis.epistemic_prompts import (
     EDGE_ONTOLOGY,
     NODE_ONTOLOGY,
     NODE_RULES,
-    jev_duplicate_question,
-    jev_edge_question,
-    jev_edge_support_question,
-    jev_node_question,
+    graph_duplicate_question,
+    graph_edge_question,
+    graph_edge_support_question,
+    graph_final_claim_question,
+    graph_node_question,
 )
-from corral.epistemic_analysis.graph import coerce_edge, coerce_node, is_runtime_notice
+from corral.epistemic_analysis.graph import (
+    coerce_edge,
+    coerce_node,
+    edge_pair_coverage,
+    is_runtime_notice,
+)
 from corral.epistemic_analysis.graph_semantics import (
     GRAPH_SEMANTICS_VERSION,
     claim_ranges,
+    submission_claim_ranges,
 )
 from corral.epistemic_analysis.ontology import (
     EDGE_RELATIONS,
@@ -61,10 +55,6 @@ from corral.epistemic_analysis.ontology import (
     relation_allowed,
 )
 
-from .base import record_model
-
-DEFAULT_ENDPOINT = "https://api.openai.com/v1/decisions"
-MAX_QUESTIONS = 200
 MAX_CHOICES = 255
 # Edge-support decisions offer each message plus a final "none" choice.
 MAX_WINDOW = MAX_CHOICES - 1
@@ -75,7 +65,7 @@ TAGGED_UNIT = re.compile(
 )
 
 
-class JevError(RuntimeError):
+class AnnotationError(RuntimeError):
     """A failed request or an invalid structured decision."""
 
 
@@ -94,14 +84,14 @@ def validate_answers(
     """Reject incomplete responses instead of silently dropping annotations."""
     answers = payload.get("answers") if isinstance(payload, dict) else None
     if not isinstance(answers, dict):
-        raise JevError("Jev response is missing the answers map")
+        raise AnnotationError("Annotation response is missing the answers map")
     for key, question in questions.items():
         answer = answers.get(key)
         if not isinstance(answer, dict) or answer.get("type") != question["type"]:
-            raise JevError(f"Missing or mistyped Jev answer: {key}")
+            raise AnnotationError(f"Missing or mistyped annotation answer: {key}")
         if question["type"] == "noul":
             if not _probability(answer.get("noul")):
-                raise JevError(f"Invalid Noul probability: {key}")
+                raise AnnotationError(f"Invalid Noul probability: {key}")
         else:
             probabilities = answer.get("probabilities")
             choice = answer.get("choice")
@@ -109,235 +99,20 @@ def validate_answers(
                 not isinstance(choice, str)
                 or choice not in question["criteria"]
                 or not _probability(answer.get("confidence"))
-                or not isinstance(probabilities, dict)
-                or set(probabilities) != set(question["criteria"])
-                or not all(_probability(p) for p in probabilities.values())
-                or not math.isclose(sum(probabilities.values()), 1, abs_tol=0.01)
-            ):
-                raise JevError(f"Invalid Choice answer: {key}")
-    return {key: answers[key] for key in questions}
-
-
-def _decisions_request(model, state, questions):
-    """Translate the wire format without changing any prompts or criteria."""
-    converted = []
-    for name, question in questions.items():
-        item = {
-            "name": name,
-            "instructions": question.get("instructions", ""),
-            "type": "predicate" if question["type"] == "noul" else question["type"],
-        }
-        if question["type"] == "choice":
-            item["choices"] = [
-                {"value": value, "description": description}
-                for value, description in question["criteria"].items()
-            ]
-            if not 2 <= len(item["choices"]) <= MAX_CHOICES:
-                raise JevError(f"Decisions requires 2-{MAX_CHOICES} choices: {name}")
-        converted.append(item)
-    return {
-        "model": model,
-        "input": json.dumps(state, ensure_ascii=False),
-        "questions": converted,
-    }
-
-
-def _decisions_answers(payload, questions):
-    """Validate Decisions responses, then restore the extraction loop's format."""
-    answers = payload.get("answers") if isinstance(payload, dict) else None
-    if not isinstance(answers, list) or len(answers) != len(questions):
-        raise JevError("Expected exactly one Decisions answer per question")
-    converted = {}
-    for (name, question), answer in zip(questions.items(), answers, strict=True):
-        expected_type = "predicate" if question["type"] == "noul" else question["type"]
-        if (
-            not isinstance(answer, dict)
-            or answer.get("name") != name
-            or answer.get("type") != expected_type
-        ):
-            raise JevError(f"Missing, refused, or mistyped Decisions answer: {name}")
-        if expected_type == "predicate":
-            converted[name] = {"type": "noul", "noul": answer.get("probability")}
-            continue
-        probabilities = answer.get("probabilities")
-        if not isinstance(probabilities, list):
-            raise JevError(f"Invalid Decisions probabilities: {name}")
-        distribution = {}
-        for entry in probabilities:
-            if (
-                not isinstance(entry, dict)
-                or not isinstance(entry.get("value"), str)
-                or entry["value"] not in question["criteria"]
-                or entry["value"] in distribution
-            ):
-                raise JevError(f"Invalid Decisions probabilities: {name}")
-            distribution[entry["value"]] = entry.get("probability")
-        converted[name] = {
-            "type": "choice",
-            "choice": answer.get("choice"),
-            "confidence": answer.get("confidence"),
-            "probabilities": distribution,
-        }
-    return validate_answers({"answers": converted}, questions)
-
-
-class JevClient:
-    """Decisions transport retaining Jev's batching, retries, and graph workflow."""
-
-    def __init__(
-        self,
-        api_key: str | None = None,
-        endpoint: str = DEFAULT_ENDPOINT,
-        batch_size: int = 32,
-        timeout_s: float = 120,
-        max_retries: int = 5,
-        max_request_tokens: int = 0,
-    ):
-        if batch_size < 1 or max_retries < 1:
-            raise ValueError("batch_size and max_retries must be positive")
-        self.api_key = (
-            api_key if api_key is not None else os.getenv("OPENAI_API_KEY", "")
-        )
-        self.endpoint = endpoint
-        self.batch_size = batch_size
-        self.timeout_s = timeout_s
-        self.max_retries = max_retries
-        self.max_request_tokens = max_request_tokens
-
-    def _post(self, body: dict[str, Any]) -> Any:
-        if not self.api_key:
-            raise JevError("Set OPENAI_API_KEY to run the Jev workflow with Decisions")
-        request = Request(
-            self.endpoint,
-            data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
-        with urlopen(request, timeout=self.timeout_s) as response:
-            return json.load(response)
-
-    async def evaluate(
-        self,
-        model: str,
-        state: dict[str, Any],
-        questions: dict[str, dict[str, Any]],
-    ) -> dict[str, dict[str, Any]]:
-        if questions and not self.api_key:
-            raise JevError("Set OPENAI_API_KEY to run the Jev workflow with Decisions")
-        answers: dict[str, dict[str, Any]] = {}
-        items = list(questions.items())
-        context = current_context()
-        budget = (
-            context.config.max_request_tokens if context else self.max_request_tokens
-        )
-
-        async def evaluate_batch(batch):
-            body = _decisions_request(model, state, batch)
-
-            def record_exchange(**result):
-                if context is not None:
-                    context.requests.append(
-                        copy.deepcopy(
-                            {
-                                "request": body,
-                                "effective_tool_output_max_chars": context.view.effective_cap,
-                                **result,
-                            }
+                or (
+                    probabilities is not None
+                    and (
+                        not isinstance(probabilities, dict)
+                        or set(probabilities) != set(question["criteria"])
+                        or not all(_probability(p) for p in probabilities.values())
+                        or not math.isclose(
+                            sum(probabilities.values()), 1, abs_tol=0.01
                         )
                     )
-
-            estimated, estimator = estimate_request(body)
-            limit = budget
-            diagnostic = {
-                "backend": "jev",
-                "api": "openai-decisions",
-                "estimated_tokens": estimated,
-                "is_estimate": True,
-                "estimator": estimator,
-                "budget_tokens": limit,
-                "state_chars": len(json.dumps(state, ensure_ascii=False)),
-                "request_chars": len(json.dumps(body, ensure_ascii=False)),
-                "question_count": len(batch),
-            }
-
-            async def split_or_raise(reason):
-                record_request(
-                    {
-                        **diagnostic,
-                        "outcome": "split" if len(batch) > 1 else "oversized",
-                        "reason": reason,
-                    }
                 )
-                if len(batch) == 1:
-                    raise RequestBudgetExceeded({**diagnostic, "reason": reason})
-                entries = list(batch.items())
-                middle = len(entries) // 2
-                await evaluate_batch(dict(entries[:middle]))
-                await evaluate_batch(dict(entries[middle:]))
-
-            if limit and estimated > limit:
-                await split_or_raise("request_budget")
-                return
-            for attempt in range(self.max_retries):
-                try:
-                    payload = await asyncio.to_thread(self._post, body)
-                    record_exchange(attempt=attempt + 1, response=payload)
-                    checked = _decisions_answers(payload, batch)
-                    record_model(payload.get("model"))
-                    for answer in checked.values():
-                        answer["model"] = payload.get("model", model)
-                    answers.update(checked)
-                    record_request(
-                        {
-                            **diagnostic,
-                            "outcome": "complete",
-                            "attempt": attempt + 1,
-                            "usage": numeric_usage(payload.get("usage")),
-                        }
-                    )
-                    return
-                except HTTPError as exc:
-                    status = exc.code
-                    record_exchange(attempt=attempt + 1, http_status=status)
-                    try:
-                        error_body = exc.read(65536).decode("utf-8", errors="replace")
-                    finally:
-                        exc.close()
-                    if status in {400, 413, 422} and is_context_error(error_body):
-                        await split_or_raise("max_tokens_exceeded")
-                        return
-                    record_request(
-                        {
-                            **diagnostic,
-                            "outcome": "http_error",
-                            "http_status": status,
-                            "attempt": attempt + 1,
-                        }
-                    )
-                    if status != 429 and status < 500:
-                        raise JevError(
-                            f"Decisions request failed (HTTP {status})"
-                        ) from exc
-                    error = f"HTTP {status}"
-                except (URLError, TimeoutError, OSError) as exc:
-                    error = type(exc).__name__
-                    record_exchange(attempt=attempt + 1, error=error)
-                except (ValueError, JevError) as exc:
-                    error = str(exc)
-                if attempt + 1 == self.max_retries:
-                    raise JevError(
-                        f"Decisions request failed after {self.max_retries} attempts: {error}"
-                    )
-                logger.warning(f"Decisions request retry {attempt + 1}: {error}")
-                await asyncio.sleep(min(2 ** (attempt + 1), 30))
-
-        batch_size = min(self.batch_size, MAX_QUESTIONS)
-        for offset in range(0, len(items), batch_size):
-            await evaluate_batch(dict(items[offset : offset + batch_size]))
-        return answers
+            ):
+                raise AnnotationError(f"Invalid Choice answer: {key}")
+    return {key: answers[key] for key in questions}
 
 
 @dataclass(frozen=True)
@@ -536,6 +311,27 @@ def candidate_spans(messages, max_chars):
         ],
         key=lambda s: (s.msg_idx, s.offset),
     )
+    expanded = []
+    for span in spans:
+        ranges = (
+            submission_claim_ranges(span.quote)
+            if GraphExtractor.submission_span(span)
+            else []
+        )
+        if ranges:
+            expanded.extend(
+                Span(
+                    span.msg_idx,
+                    span.offset + low,
+                    span.quote[low:high],
+                    "final",
+                    "submit_answer",
+                )
+                for low, high in ranges
+            )
+        else:
+            expanded.append(span)
+    spans = expanded
     context = current_context()
     if context is None or messages is not context.view.messages:
         return spans
@@ -575,7 +371,7 @@ def window_state(
     return state
 
 
-class JevAnnotator:
+class GraphExtractor:
     @staticmethod
     def submission_span(span):
         return span.tool_name == "submit_answer" or (
@@ -585,7 +381,7 @@ class JevAnnotator:
     def __init__(
         self,
         client,
-        min_confidence: float = 0.5,
+        min_confidence: float = 0.6,
         max_span_chars: int = 1200,
     ):
         self.client = client
@@ -597,18 +393,20 @@ class JevAnnotator:
             extract_nodes=self.extract_nodes,
             extract_edges=self.extract_edges,
             provenance={
-                "annotator": "jev",
-                "api": "openai-decisions",
+                "annotator": "graph",
                 "candidate_extractor": GRAPH_SEMANTICS_VERSION,
                 "edge_coverage": "source-aware-eligible-pairs-in-windows-v2",
                 "stop_at_submission": stop_at_submission,
                 "node_postprocessing": "test_precedence_neutral_fallback_v1",
                 "node_decisions": "independent_choices_v1",
                 "judgment_consolidation": "same_assessment_complete_link_v1",
+                "final_claim_scope_sha1": sha1_hex(
+                    json.dumps(graph_final_claim_question("final"), sort_keys=True)
+                ),
                 "duplicate_prompt_sha1": sha1_hex(
                     json.dumps(
                         {
-                            t: jev_duplicate_question("first", "second", t)
+                            t: graph_duplicate_question("first", "second", t)
                             for t in NODE_TYPES
                         },
                         sort_keys=True,
@@ -616,7 +414,7 @@ class JevAnnotator:
                 ),
                 "min_confidence": self.min_confidence,
                 "max_span_chars": self.max_span_chars,
-                "endpoint": getattr(self.client, "endpoint", DEFAULT_ENDPOINT),
+                "endpoint": getattr(self.client, "endpoint", None),
                 "batch_size": getattr(self.client, "batch_size", 32),
                 "timeout_s": getattr(self.client, "timeout_s", 120),
                 "max_retries": getattr(self.client, "max_retries", 5),
@@ -627,7 +425,7 @@ class JevAnnotator:
             },
         )
         # Client metadata identifies the wire protocol independently of the
-        # shared Jev extraction algorithm. Workflow options belong to this call.
+        # shared extraction algorithm. Workflow options belong to this call.
         backend.provenance.update(getattr(self.client, "provenance", {}))
         return backend
 
@@ -641,7 +439,7 @@ class JevAnnotator:
     ) -> tuple[list[dict[str, Any]], list[str]]:
         spans = candidate_spans(messages, self.max_span_chars)
         if self.client is None:
-            raise JevError("Jev client is required for annotation")
+            raise AnnotationError("Annotation client is required for annotation")
         nodes: list[dict[str, Any]] = []
         warnings: list[str] = []
         seen: set[str] = set()
@@ -670,7 +468,7 @@ class JevAnnotator:
                 for node_type in (
                     ("E",) if span.kind in {"task", "observation"} else NODE_TYPES
                 ):
-                    questions[f"{span.key}_{node_type}"] = jev_node_question(
+                    questions[f"{span.key}_{node_type}"] = graph_node_question(
                         span.key, node_type
                     )
             answers = await self.client.evaluate(model, state, questions)
@@ -693,6 +491,14 @@ class JevAnnotator:
                         continue
                     if answer["choice"] != "present":
                         continue
+                    if (
+                        node_type == "N"
+                        and submission
+                        and answers.get(f"{span.key}_F", {}).get("choice") == "present"
+                        and answers[f"{span.key}_F"]["confidence"]
+                        >= self.min_confidence
+                    ):
+                        continue  # F satisfies submission coverage; N is only a fallback.
                     if answer["confidence"] < self.min_confidence and not (
                         test_over_neutral and node_type == "T"
                     ):
@@ -752,6 +558,29 @@ class JevAnnotator:
                         extracted.append(coerced)
             extracted, qc = await self._merge_duplicates(model, state, extracted)
             warnings.extend(qc)
+            finals = [n for n in extracted if n["type"] == "F"]
+            if finals:
+                scopes = await self.client.evaluate(
+                    model,
+                    {
+                        **state,
+                        "nodes": {n["node_id"]: copy.deepcopy(n) for n in finals},
+                    },
+                    {
+                        f"claim_{n['node_id']}": graph_final_claim_question(
+                            n["node_id"]
+                        )
+                        for n in finals
+                    },
+                )
+                for node in finals:
+                    answer = scopes[f"claim_{node['node_id']}"]
+                    node["claim_scope"] = (
+                        answer["choice"]
+                        if answer["confidence"] >= self.min_confidence
+                        else "unknown"
+                    )
+                    node["claim_scope_decision"] = answer
             if len(extracted) > max_nodes_per_window:
                 review(
                     f"PassA[{start}-{end}] Node cap reached; omitted {len(extracted) - max_nodes_per_window} nodes."
@@ -775,27 +604,22 @@ class JevAnnotator:
                     continue
                 key = f"same_{first['node_id']}_{second['node_id']}"
                 pairs[key] = (first, second)
-                if first["type"] == "F":
-                    continue  # One submission, with potentially several support spans.
-                questions[key] = jev_duplicate_question(
+                questions[key] = graph_duplicate_question(
                     first["node_id"], second["node_id"], first["type"]
                 )
-        state = {**state, "nodes": {n["node_id"]: n for n in nodes}}
+        state = {**state, "nodes": {n["node_id"]: copy.deepcopy(n) for n in nodes}}
         answers = (
             await self.client.evaluate(model, state, questions) if questions else {}
         )
         representatives = {n["node_id"]: n for n in nodes}
         warnings = []
         for key, (first, second) in pairs.items():
-            if first["type"] != "F":
-                answer = answers[key]
-                if answer["choice"] != "same":
-                    continue
-                if answer["confidence"] < self.min_confidence:
-                    warnings.append(
-                        f"Uncertain duplicate {key}; retained both instances."
-                    )
-                    continue
+            answer = answers[key]
+            if answer["choice"] != "same":
+                continue
+            if answer["confidence"] < self.min_confidence:
+                warnings.append(f"Uncertain duplicate {key}; retained both instances.")
+                continue
             kept, removed = (
                 representatives[first["node_id"]],
                 representatives[second["node_id"]],
@@ -871,7 +695,7 @@ class JevAnnotator:
         overlap: int,
     ) -> tuple[list[dict[str, Any]], list[str]]:
         if self.client is None:
-            raise JevError("Jev client is required for annotation")
+            raise AnnotationError("Annotation client is required for annotation")
         edges = []
         warnings = []
         seen = set()
@@ -891,6 +715,7 @@ class JevAnnotator:
                         "evidence_source_id",
                         "shared_support_id",
                         "epistemic_role",
+                        "claim_scope",
                     )
                     if k in n
                 }
@@ -918,7 +743,7 @@ class JevAnnotator:
                     seen.add(pair)
                     key = f"edge_{src['node_id']}_{dst['node_id']}"
                     pairs[key] = pair
-                    questions[key] = jev_edge_question(pair[0], pair[1], relations)
+                    questions[key] = graph_edge_question(pair[0], pair[1], relations)
             answers = await self.client.evaluate(model, state, questions)
             selected = {
                 key: answer
@@ -931,7 +756,7 @@ class JevAnnotator:
             support_questions = {}
             for key, answer in selected.items():
                 src_id, dst_id = pairs[key]
-                support_questions[key] = jev_edge_support_question(
+                support_questions[key] = graph_edge_support_question(
                     src_id,
                     dst_id,
                     answer["choice"],
@@ -965,37 +790,12 @@ class JevAnnotator:
                     edges.append(coerced)
         # Record candidate-pair coverage. Local windows never imply that distant
         # nodes are unrelated, and their omissions remain reviewable.
-        windows = iter_windows(len(messages), window, overlap)
-        allowed = considered = 0
-        for i, first in enumerate(nodes):
-            for j, second in enumerate(nodes):
-                if i == j or (first["type"] == second["type"] and i > j):
-                    continue
-                if not any(
-                    relation_allowed(rel, first, second)
-                    and not (rel == "tests" and first["type"] == "T")
-                    for rel in EDGE_RELATIONS
-                ):
-                    continue
-                allowed += 1
-                considered += any(
-                    start <= first["time"] < end and start <= second["time"] < end
-                    for start, end in windows
-                )
+        coverage = edge_pair_coverage(nodes, window, overlap)
         context = current_context()
         if context is not None:
-            context.diagnostics.append(
-                {
-                    "stage": "edges",
-                    "allowed_node_pairs": allowed,
-                    "considered_node_pairs": considered,
-                    "unexamined_node_pairs": allowed - considered,
-                    "window_messages": window,
-                    "overlap_messages": overlap,
-                }
-            )
-        if allowed > considered:
-            issue = f"{allowed - considered} eligible node pairs cross graph windows and were not examined."
+            context.diagnostics.append(coverage)
+        if coverage["unexamined_node_pairs"]:
+            issue = f"{coverage['unexamined_node_pairs']} eligible node pairs cross graph windows and were not examined."
             warnings.append(issue)
             if context is not None:
                 context.review_issues.append(issue)

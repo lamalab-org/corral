@@ -6,13 +6,10 @@ from typing import TYPE_CHECKING, Any
 
 from corral.agents.base_agent import BaseAgent
 from corral.core.action import with_submit_answer_tool
-from corral.epistemic_analysis.decision_thresholds import CALIBRATED_THRESHOLD_POLICY
-from corral.epistemic_analysis.decisions import (
-    DEFAULT_DECISIONS_MODEL,
-    DEFAULT_EXPLANATION_CONCURRENCY,
+from corral.epistemic_analysis.annotators.local import GraphAnnotator, provider_config
+from corral.epistemic_analysis.reports import (
     REPORT_MESSAGE_NAME,
     SUBMISSION_REVIEW_MESSAGE_NAME,
-    DecisionsAnnotator,
     EpistemicReport,
     scientific_messages,
 )
@@ -32,19 +29,18 @@ class EpistemicSupport(BaseAgent):
         self,
         *,
         epistemic: bool = False,
-        annotator: DecisionsAnnotator | None = None,
+        annotator: GraphAnnotator | None = None,
         actor_refusal_max_retries: int = 1,
-        epistemic_model: str = DEFAULT_DECISIONS_MODEL,
-        epistemic_explanation_model: str | None = None,
-        epistemic_api_key: str | None = None,
+        epistemic_provider_config: Mapping[str, Any] | None = None,
+        epistemic_explanation_config: Mapping[str, Any] | None = None,
+        epistemic_graph_config: Mapping[str, Any] | None = None,
+        epistemic_profile: str | None = None,
+        epistemic_model: str | None = None,
         epistemic_base_url: str | None = None,
-        epistemic_timeout_s: float = 120,
-        epistemic_max_retries: int = 2,
-        epistemic_stream_explanations: bool = False,
-        epistemic_explanation_concurrency: int = DEFAULT_EXPLANATION_CONCURRENCY,
-        epistemic_pattern_thresholds: str | Mapping[str, float] | None = (
-            CALIBRATED_THRESHOLD_POLICY
-        ),
+        epistemic_explanation_model: str | None = None,
+        epistemic_explanation_base_url: str | None = None,
+        epistemic_timeout_s: float | None = None,
+        epistemic_max_retries: int | None = None,
         **kwargs: Any,
     ) -> None:
         if (
@@ -55,25 +51,63 @@ class EpistemicSupport(BaseAgent):
             raise ValueError("actor_refusal_max_retries must be a non-negative integer")
         if not isinstance(epistemic, bool):
             raise TypeError("epistemic must be a boolean")
+        obsolete = [key for key in kwargs if key.startswith("epistemic_")]
+        if obsolete:
+            raise TypeError(
+                f"Unsupported epistemic options: {', '.join(obsolete)}. "
+                "Annotation uses nodes and edges; configure epistemic_provider_config "
+                "and epistemic_explanation_config. Direct pattern annotation was removed."
+            )
+        if kwargs.get("model") is None:
+            if epistemic:
+                import os
+
+                config = provider_config("actor", profile=epistemic_profile)
+                if config.provider != "openai":
+                    raise ValueError(
+                        "The actor requires an OpenAI-compatible chat model"
+                    )
+                kwargs["model"] = "openai/" + config.model
+                kwargs["api_endpoint"] = kwargs.get(
+                    "api_endpoint"
+                ) or config.endpoint.removesuffix("/chat/completions")
+                if "api_key" not in kwargs:
+                    if config.api_key_env and not os.environ.get(config.api_key_env):
+                        raise ValueError(
+                            f"Set {config.api_key_env} for the configured actor"
+                        )
+                    kwargs["api_key"] = (
+                        os.environ[config.api_key_env]
+                        if config.api_key_env
+                        else "local"
+                    )
+            else:
+                kwargs["model"] = "openai/gpt-4o"
         super().__init__(**kwargs)
         self.epistemic = epistemic
         self.annotator = None
         if not epistemic:
             return
         self.actor_refusal_max_retries = actor_refusal_max_retries
+        options = dict(epistemic_provider_config or {})
+        explanations = dict(epistemic_explanation_config or {})
+        if epistemic_base_url is not None:
+            options["base_url"] = epistemic_base_url
+        if epistemic_explanation_model is not None:
+            explanations["model"] = epistemic_explanation_model
+        if epistemic_explanation_base_url is not None:
+            explanations["base_url"] = epistemic_explanation_base_url
         self.annotator = (
             annotator
             if annotator is not None
-            else DecisionsAnnotator(
+            else GraphAnnotator(
+                provider_config=options,
+                explanation_config=explanations,
+                graph_config=epistemic_graph_config,
+                profile=epistemic_profile,
                 model=epistemic_model,
-                explanation_model=epistemic_explanation_model,
-                api_key=epistemic_api_key,
-                base_url=epistemic_base_url,
                 timeout_s=epistemic_timeout_s,
                 max_retries=epistemic_max_retries,
-                stream_explanations=epistemic_stream_explanations,
-                explanation_concurrency=epistemic_explanation_concurrency,
-                pattern_thresholds=epistemic_pattern_thresholds,
             )
         )
 
@@ -126,12 +160,20 @@ class EpistemicSupport(BaseAgent):
             "name": REPORT_MESSAGE_NAME,
             "content": report.format_for_agent(),
         }
+        visible = report.graph is None or bool(report.present_antipatterns)
         await session.record_message(
-            {**feedback, "metadata": {"epistemic_report": report.to_dict()}},
+            {
+                **feedback,
+                "metadata": {
+                    "epistemic_report": report.to_dict(),
+                    "agent_visible": visible,
+                },
+            },
             usage=report.usage,
             llm_calls=model_calls,
         )
-        messages.append(feedback)
+        if visible:
+            messages.append(feedback)
         return report
 
     async def _review_submission(

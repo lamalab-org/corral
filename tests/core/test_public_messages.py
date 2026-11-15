@@ -6,7 +6,7 @@ import pytest
 
 from corral.agents.base_agent import provider_messages
 from corral.core.messages import EMPTY_RESPONSE_REMINDER
-from corral.epistemic_analysis.decisions import (
+from corral.epistemic_analysis.reports import (
     SUBMISSION_REVIEW_MESSAGE_NAME,
     scientific_messages,
 )

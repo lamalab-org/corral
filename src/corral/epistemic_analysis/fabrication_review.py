@@ -14,7 +14,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .annotators.local import GemmaClient
+from .annotators.local import OpenAIClient
 from .decision_applicability import ValidationPolicy, _saved_fields, extract_facts
 from .schema import content_hash
 from .storage import archive_record, atomic_save, read_record, save_record
@@ -510,7 +510,7 @@ def _outside_call_text(support, packet, *, source_texts=None):
     return bool(PLANNED_SENTENCE.sub("", prose).strip())
 
 
-class FabricationReviewer(GemmaClient):
+class FabricationReviewer(OpenAIClient):
     def body(self, packet, *, repair=None, previous=None):
         instructions = PROMPT
         if repair:

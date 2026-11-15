@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+from collections import deque
 from typing import Any
 
 from corral.epistemic_analysis.epistemic_prompts import (
     ANTIPATTERN_DESCRIPTIONS,
+    PROVENANCE_PATTERNS,
     SUBGRAPH_DESCRIPTIONS,
 )
 from corral.epistemic_analysis.graph import (
     build_index,
     node_time,
+    validate_support_quotes,
 )
+from corral.epistemic_analysis.ontology import relation_allowed
+from corral.epistemic_analysis.schema import ANSWER_PROVENANCE_VERSION
 
 SUBGRAPH_NAMES = list(SUBGRAPH_DESCRIPTIONS.keys())
 
@@ -527,4 +532,168 @@ def detect_antipatterns_local(nodes: list, edges: list) -> dict[str, int]:
     return {
         name: matcher(node_type_map, node_by_id, out_edges, in_edges)
         for name, matcher in _ANTIPATTERN_MATCHERS.items()
+    }
+
+
+def _answer_provenance_absence_limits(graph):
+    reasons = []
+    if (
+        graph.get("provenance", {}).get("answer_provenance_policy")
+        != ANSWER_PROVENANCE_VERSION
+    ):
+        reasons.append(
+            "The graph predates or does not declare the answer provenance policy."
+        )
+    if graph.get("annotation_status") != "complete":
+        reasons.append("Annotation is not complete.")
+    if graph.get("reconstruction_status") != "complete":
+        reasons.append("Source reconstruction is not complete.")
+    qc = graph.get("qc", {})
+    coverage = qc.get("context_coverage", {})
+    if coverage.get("reduced_context", True):
+        reasons.append("Full annotation context is not established.")
+    if qc.get("review_issues"):
+        reasons.append("Annotation has unresolved review issues.")
+    pairs = [d for d in qc.get("request_diagnostics", []) if d.get("stage") == "edges"]
+    if not pairs or any(
+        d.get("unexamined_node_pairs") != 0
+        or d.get("allowed_node_pairs") != d.get("considered_node_pairs")
+        for d in pairs
+    ):
+        reasons.append(
+            "Some candidate relations were unexamined or coverage is unknown."
+        )
+    if any(
+        any(
+            marker in warning.lower()
+            for marker in (
+                "omitted",
+                "removed",
+                "low node confidence",
+                "quote not found",
+                "node cap",
+            )
+        )
+        for warning in qc.get("warnings", [])
+    ):
+        reasons.append("Annotation omitted or rejected potentially relevant material.")
+    return reasons
+
+
+def analyze_answer_provenance(graph):
+    """Return two pattern results and inspectable paths for individual F claims."""
+    messages = graph.get("messages", [])
+    nodes = {n["node_id"]: n for n in graph.get("nodes", [])}
+
+    def grounded(item):
+        return (
+            bool(item.get("support"))
+            and validate_support_quotes(messages, item["support"])[0]
+        )
+
+    incoming = {}
+    for edge in graph.get("edges", []):
+        src, dst = nodes.get(edge.get("src")), nodes.get(edge.get("dst"))
+        if (
+            src is None
+            or dst is None
+            or edge.get("relation") not in {"informs", "submitted_as"}
+            or src["type"] not in {"E", "J", "H"}
+            or dst["type"] not in {"J", "H", "F"}
+            or not relation_allowed(edge["relation"], src, dst)
+            or not all(grounded(item) for item in (edge, src, dst))
+        ):
+            continue
+        incoming.setdefault(dst["node_id"], []).append(edge)
+
+    def evidence_paths(final):
+        queue = deque([(final["node_id"], [])])
+        seen, paths = set(), []
+        while queue:
+            identity, path = queue.popleft()
+            if identity in seen:
+                continue
+            seen.add(identity)
+            node = nodes[identity]
+            if node["time"] > final["time"] or any(
+                s["msg_idx"] > final["time"] for s in node.get("support", [])
+            ):
+                continue
+            if node["type"] == "E":
+                if node.get("evidence_origin") in {"task_given", "tool_observation"}:
+                    paths.append({"evidence_id": identity, "edges": path})
+                continue
+            for edge in incoming.get(identity, []):
+                if any(s["msg_idx"] > final["time"] for s in edge["support"]):
+                    continue
+                queue.append((edge["src"], [edge, *path]))
+        return paths
+
+    limits = _answer_provenance_absence_limits(graph)
+    if not all(grounded(item) for item in [*nodes.values(), *graph.get("edges", [])]):
+        limits.append("Some graph annotations lack valid exact source support.")
+    if any(
+        node["type"] == "E"
+        and node.get("evidence_origin") not in {"task_given", "tool_observation"}
+        for node in nodes.values()
+    ):
+        limits.append("Some evidence sources have unknown provenance.")
+    claims = []
+    for final in nodes.values():
+        if final["type"] != "F":
+            continue
+        scope = final.get("claim_scope", "unknown")
+        paths = []
+        reasons = []
+        if scope == "nonclaim":
+            status = "not_applicable"
+        elif scope != "single" or not grounded(final):
+            status = "unassessed"
+            reasons = [
+                "The final claim is compound, unscoped, or lacks exact source support."
+            ]
+        else:
+            paths = evidence_paths(final)
+            if paths:
+                status = "traceable"
+            elif limits:
+                status, reasons = "unassessed", limits
+            else:
+                status = "untraced"
+        claims.append(
+            {
+                "node_id": final["node_id"],
+                "text": final.get("text", ""),
+                "support": final.get("support", []),
+                "status": status,
+                "evidence_paths": paths,
+                "reasons": reasons,
+            }
+        )
+    uncertain = not claims or any(c["status"] == "unassessed" for c in claims)
+    patterns = []
+    for name, claim_status in (
+        ("traceable_conclusion", "traceable"),
+        ("conclusion_without_evidence_provenance", "untraced"),
+    ):
+        category, description = PROVENANCE_PATTERNS[name]
+        count = sum(c["status"] == claim_status for c in claims)
+        patterns.append(
+            {
+                "name": name,
+                "category": category,
+                "description": description,
+                "count": count,
+                "status": "matched"
+                if count
+                else "unassessed"
+                if uncertain
+                else "not_found",
+            }
+        )
+    return {
+        "version": ANSWER_PROVENANCE_VERSION,
+        "claims": claims,
+        "absence_limits": limits,
+        "patterns": patterns,
     }

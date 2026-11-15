@@ -250,6 +250,7 @@ def test_independent_labels_code_or_and_evidence_parent_offsets(
         await evidence.client.aclose()
         decision.client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
         evidence.client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
+        evidence.api = evidence.api.with_options(http_client=evidence.client)
         try:
             pipeline = CheckPipeline(
                 tmp_path, decision, evidence, overflow_tool_output_max_chars=100
@@ -265,15 +266,15 @@ def test_independent_labels_code_or_and_evidence_parent_offsets(
                 key = run["evidence"][CHECK]
                 support = read_record(tmp_path / "evidence" / f"{key}.json", key)
                 assert support["state"] == "complete"
-                assert support["evidence"]
-                for q in support["evidence"]:
-                    assert q["message_id"] == f"m{q['msg_idx']}"
-                    assert (
-                        inputs.trace.messages[q["msg_idx"]]["content"][
-                            q["start"] : q["end"]
-                        ]
-                        == q["quote"]
+                assert support["evidence"] == []
+                for unit in support["unit_evidence"]:
+                    record = next(
+                        (tmp_path / "scientist-units").glob(
+                            f"*/{unit['unit_id']}/evidence/{unit['record']}.json"
+                        )
                     )
+                    explanation = json.loads(record.read_text())["explanation"]
+                    assert "MAIN text" in explanation or "NODE text" in explanation
             before = list(calls)
             await pipeline.run(
                 inputs, checks=[CHECK], evidence_only=True, label_records=run["labels"]
@@ -342,7 +343,7 @@ def test_only_oversized_unit_is_trimmed_before_independent_label(tmp_path):
     asyncio.run(exercise())
 
 
-def test_omitted_initial_tool_payload_cannot_reenter_evidence(tmp_path):
+def test_omitted_initial_tool_payload_is_not_sent_to_explainer(tmp_path):
     async def exercise():
         reactions = catalog()
         omitted = "OMITTED_ONLY_EVIDENCE"
@@ -382,6 +383,7 @@ def test_omitted_initial_tool_payload_cannot_reenter_evidence(tmp_path):
         await evidence.client.aclose()
         decision.client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
         evidence.client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
+        evidence.api = evidence.api.with_options(http_client=evidence.client)
         try:
             run = await CheckPipeline(
                 tmp_path,
@@ -395,7 +397,7 @@ def test_omitted_initial_tool_payload_cannot_reenter_evidence(tmp_path):
             support = read_record(tmp_path / "evidence" / f"{key}.json", key)
             assert support["state"] == "requires_review"
             assert support["evidence"] == []
-            assert support["unit_evidence"][0]["state"] == "failed"
+            assert support["unit_evidence"][0]["state"] == "requires_review"
         finally:
             await decision.close()
             await evidence.close()

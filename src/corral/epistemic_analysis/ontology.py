@@ -37,6 +37,7 @@ EDGE_RELATIONS = [
     "updates_to",
     "competes_with",
     "contradicts",
+    "submitted_as",
 ]
 
 
@@ -65,6 +66,9 @@ ALLOWED_EDGE_TYPE_COMBOS: set[tuple[str, str, str]] = {
     ("informs", "J", "C"),
     ("informs", "J", "H"),
     ("informs", "J", "J"),
+    ("informs", "E", "F"),
+    ("informs", "J", "F"),
+    ("submitted_as", "H", "F"),
 }
 
 
@@ -77,6 +81,8 @@ def relation_allowed(relation, source, target):
         return False
     if relation == "observes" and target.get("evidence_origin") == "task_given":
         return False
+    if target.get("type") == "F" and source.get("time", 0) > target.get("time", 0):
+        return False  # Post-submission feedback cannot supply answer provenance.
     # Two labels on one passage do not establish successive reasoning steps.
     return not (
         relation == "informs"

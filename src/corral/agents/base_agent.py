@@ -153,6 +153,7 @@ def provider_messages(
     return [
         public
         for message in messages
+        if (message.get("metadata") or {}).get("agent_visible", True)
         if (public := public_message(message)) is not None
     ]
 

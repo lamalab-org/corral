@@ -8,11 +8,12 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import datetime, timezone
+from time import perf_counter
 from typing import Any
 
 from . import ontology
 from .annotators.base import AnnotationBackend, reset_models
-from .annotators.jev import MAX_WINDOW
+from .annotators.graph import MAX_WINDOW
 from .budget import RequestBudgetExceeded, estimator_configuration
 from .context import (
     SUBMISSION_SCOPE_VERSION,
@@ -35,6 +36,7 @@ from .graph_semantics import GRAPH_SEMANTICS_VERSION, annotate_node_semantics
 from .schema import (
     ANALYZABLE_COMPLETION_STATUSES,
     ANNOTATION_VERSION,
+    ANSWER_PROVENANCE_VERSION,
     GRAPH_SCHEMA_VERSION,
     AnnotatedGraph,
     AnnotationConfig,
@@ -87,6 +89,7 @@ def annotation_configuration(
         "implementation_version": ANNOTATION_VERSION,
         "coverage_policy": COVERAGE_POLICY,
         "graph_semantics": GRAPH_SEMANTICS_VERSION,
+        "answer_provenance_policy": ANSWER_PROVENANCE_VERSION,
         "graph_schema_version": GRAPH_SCHEMA_VERSION,
         "annotation_view_policy_version": VIEW_VERSION,
         "annotation_view_instructions_hash": content_hash(VIEW_INSTRUCTIONS),
@@ -167,6 +170,7 @@ async def _annotate_messages(
     view,
     originals,
     trace,
+    timings,
 ):
     """Extract nodes, normalize observations, then extract and validate edges."""
     model, window, overlap = config.model, config.window, config.overlap
@@ -191,6 +195,7 @@ async def _annotate_messages(
 
     node_pass = backend.extract_nodes
     edge_pass = backend.extract_edges
+    started = perf_counter()
     nodes, wA = await node_pass(
         messages=messages,
         model=model,
@@ -198,6 +203,7 @@ async def _annotate_messages(
         overlap=overlap,
         max_nodes_per_window=max_nodes_per_window,
     )
+    timings["nodes"] += perf_counter() - started
     qc_warnings.extend(wA)
     node_ids = set()
     for node in nodes:
@@ -227,6 +233,7 @@ async def _annotate_messages(
         nodes = visible_items(nodes)
     nodes = annotate_node_semantics(nodes, trace, view)
 
+    started = perf_counter()
     edges, wB = await edge_pass(
         messages=messages,
         nodes=nodes,
@@ -234,6 +241,7 @@ async def _annotate_messages(
         window=window,
         overlap=overlap,
     )
+    timings["edges"] += perf_counter() - started
     qc_warnings.extend(wB)
     if strict_support or limited_view:
         edges = visible_items(edges)
@@ -261,8 +269,10 @@ async def annotate_trace(
     *,
     prepared_view: AnnotationView | None = None,
 ) -> AnnotatedGraph:
-    if annotator.provenance.get("annotator") == "jev" and config.window > MAX_WINDOW:
-        raise ValueError(f"Decisions graph annotation requires window <= {MAX_WINDOW}")
+    started = perf_counter()
+    timings = {"nodes": 0.0, "edges": 0.0}
+    if annotator.provenance.get("annotator") == "graph" and config.window > MAX_WINDOW:
+        raise ValueError(f"Graph annotation requires window <= {MAX_WINDOW}")
     if (
         trace.reconstruction_status != "complete"
         or trace.completion_status not in ANALYZABLE_COMPLETION_STATUSES
@@ -310,7 +320,7 @@ async def annotate_trace(
         try:
             with annotation_context(view, config, diagnostics, requests, review_issues):
                 nodes, edges, warnings = await _annotate_messages(
-                    view.messages, annotator, config, view, messages, trace
+                    view.messages, annotator, config, view, messages, trace, timings
                 )
         except RequestBudgetExceeded as exc:
             attempts.append(
@@ -400,8 +410,10 @@ async def annotate_trace(
                 }
             ),
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            "answer_provenance_policy": ANSWER_PROVENANCE_VERSION,
         },
         qc={
+            "timings_s": {**timings, "annotation": perf_counter() - started},
             "warnings": warnings,
             "context_coverage": view.coverage,
             "annotation_attempts": attempts,

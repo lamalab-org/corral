@@ -12,11 +12,15 @@ from collections import defaultdict
 
 from .decision_applicability import ValidationPolicy, extract_facts
 from .epistemic_prompts import ANTIPATTERN_DESCRIPTIONS, SUBGRAPH_DESCRIPTIONS
-from .patterns import detect_antipatterns_local, detect_subgraphs_local
+from .patterns import (
+    analyze_answer_provenance,
+    detect_antipatterns_local,
+    detect_subgraphs_local,
+)
 from .schema import content_hash
 from .sources.inputs import CheckInput
 
-PATTERN_REVIEW_VERSION = "graph-motifs-and-paired-repeat-tests-scoped-v2"
+PATTERN_REVIEW_VERSION = "graph-motifs-and-answer-provenance-v3"
 STATISTICAL_MARKER = re.compile(
     r"\bp[-_ ]?values?\b|\bp\s*[<=>]\s*0\.\d+|\bstatistically significant\b",
     re.IGNORECASE,
@@ -249,6 +253,8 @@ def analyze_patterns(graph, graph_sha256):
             for name, description in descriptions.items()
         )
     repeated, coverage = repeated_test_candidates(graph)
+    provenance = analyze_answer_provenance(graph)
+    items.extend(provenance.pop("patterns"))
     return {
         "version": PATTERN_REVIEW_VERSION,
         "graph_sha256": graph_sha256,
@@ -261,6 +267,7 @@ def analyze_patterns(graph, graph_sha256):
         .get("context_coverage", {})
         .get("reduced_context", False),
         "patterns": items,
+        "answer_provenance": provenance,
         "repeated_tests": repeated,
         "call_coverage": coverage,
         "reviews": [],

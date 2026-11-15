@@ -14,6 +14,8 @@ const TYPES = {
 };
 const PATTERN_TITLES = {
   repeated_tool_testing: "Repeated tool tests under one hypothesis",
+  traceable_conclusion: "Traceable conclusion",
+  conclusion_without_evidence_provenance: "Conclusion without evidence provenance",
   fixed_hypothesis_test_tuning: "Fixed-hypothesis test-tuning motif",
   convergent_multi_test_evidence: "Multiple tests with recorded evidence",
   untested_claim: "Hypothesis without a test link",
@@ -671,6 +673,25 @@ function renderPatterns() {
   const others = details(`Other patterns · ${parent.patterns.length - matched.length}`);
   for (const pattern of parent.patterns.filter(p => p.status !== "matched")) others.append(el("p", "microcopy", `${patternTitle(pattern.name)} · ${pattern.status === "unassessed" ? "Unassessed in one or more units" : "Not found in the annotated graph"}`));
   container.append(others);
+  const provenance = analysis?.answer_provenance;
+  if (provenance) {
+    const section = details(`Final-answer provenance · ${provenance.claims.length} submitted passages`);
+    section.append(el("p", "microcopy", "Connections record evidence use, not correctness or sufficient justification. Unassessed passages do not count as failures."));
+    for (const claim of provenance.claims) {
+      const card = details(`${human(claim.status)} · ${claim.text}`);
+      card.append(endpoint("decisions_graph", claim.node_id));
+      for (const reason of claim.reasons) card.append(el("p", "microcopy", reason));
+      for (const path of claim.evidence_paths) {
+        const line = el("div", "pattern-unit");
+        line.append(endpoint("decisions_graph", path.evidence_id));
+        for (const edge of path.edges) line.append(el("span", "microcopy", human(edge.relation)), endpoint("decisions_graph", edge.dst));
+        card.append(line);
+      }
+      section.append(card);
+    }
+    if (!provenance.claims.length) section.append(el("p", "microcopy", "No final-answer claim was annotated in this unit."));
+    container.append(section);
+  }
   const repeatCount = (analysis?.repeated_tests || []).length;
   const repeats = details(`Repeated tests and p-hacking review · ${repeatCount} group${repeatCount === 1 ? "" : "s"} in this unit`);
   repeats.open = !!analysis?.repeated_tests?.length;

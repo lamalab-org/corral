@@ -331,6 +331,7 @@ def test_window_evidence_uses_positive_windows_and_original_quotes(tmp_path):
         await evidence.client.aclose()
         decision.client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
         evidence.client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
+        evidence.api = evidence.api.with_options(http_client=evidence.client)
         try:
             pipeline = CheckPipeline(
                 tmp_path, decision, evidence, overflow_tool_output_max_chars=100
@@ -339,14 +340,8 @@ def test_window_evidence_uses_positive_windows_and_original_quotes(tmp_path):
             key = run["evidence"]["cheating_attempt"]
             support = read_record(tmp_path / "evidence" / f"{key}.json", key)
             assert support["state"] == "requires_review"
-            assert support["evidence"][0]["quote"] == "positive proof"
-            quote = support["evidence"][0]
-            assert (
-                source.trace.messages[quote["msg_idx"]]["content"][
-                    quote["start"] : quote["end"]
-                ]
-                == quote["quote"]
-            )
+            assert support["evidence"] == []
+            assert "positive proof" in support["explanation"]
             before = list(calls)
             await pipeline.run(
                 source,

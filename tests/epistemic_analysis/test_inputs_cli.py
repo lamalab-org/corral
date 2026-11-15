@@ -1,7 +1,6 @@
 import asyncio
 import json
 import sys
-from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -9,17 +8,9 @@ import pytest
 from corral.cli import build_parser
 from corral.epistemic_analysis import (
     AnnotationBackend,
-    AnnotationConfig,
     cli,
     workflow,
 )
-from corral.epistemic_analysis.annotators import llm
-from corral.epistemic_analysis.annotators.jev import (
-    DEFAULT_ENDPOINT,
-    MAX_WINDOW,
-    JevClient,
-)
-from corral.epistemic_analysis.decisions import DEFAULT_DECISIONS_MODEL
 from corral.epistemic_analysis.sources.files import load_path
 from corral.epistemic_analysis.sources.inputs import resolve_inputs
 from corral.epistemic_analysis.sources.langfuse import (
@@ -72,87 +63,6 @@ def write_trace(path):
 def invoke(*options):
     args = build_parser().parse_args(["analyze", *map(str, options)])
     return asyncio.run(args._handler(args))
-
-
-@pytest.mark.parametrize(
-    "overrides",
-    [
-        [],
-        [
-            "--window",
-            "15",
-            "--overlap",
-            "3",
-            "--max-nodes-per-window",
-            "80",
-            "--tool-output-max-chars",
-            "8000",
-            "--max-request-tokens",
-            "64000",
-            "--no-strict-support",
-        ],
-    ],
-)
-def test_decisions_graph_shares_llm_graph_configuration(overrides):
-    parser = build_parser()
-    llm_args = parser.parse_args(
-        ["analyze", "--input", "trace.json", "--annotator", "llm", *overrides]
-    )
-    jev_args = parser.parse_args(
-        ["analyze", "--input", "trace.json", "--annotator", "jev", *overrides]
-    )
-    llm_config = cli.validate_options(llm_args)
-    jev_config = cli.validate_options(jev_args)
-    assert jev_config.model == DEFAULT_DECISIONS_MODEL
-    assert llm_config.model == "anthropic/claude-sonnet-4-6"
-    assert replace(jev_config, model=llm_config.model) == llm_config
-    if not overrides:
-        assert jev_config == AnnotationConfig(DEFAULT_DECISIONS_MODEL)
-    for name in ("concurrency", "timeout", "max_retries"):
-        assert getattr(jev_args, name) == getattr(llm_args, name)
-    assert jev_args.jev_endpoint == DEFAULT_ENDPOINT
-    assert cli.create_backend(jev_args).provenance["api"] == "openai-decisions"
-
-
-@pytest.mark.parametrize("endpoint_flag", ["--decisions-endpoint", "--jev-endpoint"])
-def test_decisions_graph_connection_and_model_can_be_overridden(endpoint_flag):
-    args = build_parser().parse_args(
-        [
-            "analyze",
-            "--input",
-            "trace.json",
-            "--annotator",
-            "jev",
-            "--model",
-            "pinned-decisions-model",
-            endpoint_flag,
-            "https://example.test/v1/decisions",
-        ]
-    )
-    assert cli.validate_options(args).model == "pinned-decisions-model"
-    assert (
-        cli.create_backend(args).provenance["endpoint"]
-        == "https://example.test/v1/decisions"
-    )
-
-
-def test_decisions_window_limit_leaves_room_for_none_support_choice():
-    parser = build_parser()
-    args = parser.parse_args(
-        [
-            "analyze",
-            "--input",
-            "trace.json",
-            "--annotator",
-            "jev",
-            "--window",
-            str(MAX_WINDOW),
-        ]
-    )
-    assert cli.validate_options(args).window == 254
-    args.window += 1
-    with pytest.raises(ValueError, match="window <= 254"):
-        cli.validate_options(args)
 
 
 def test_relative_mixed_lists_comments_spaces_fragments_and_diagnostics(
@@ -252,96 +162,6 @@ def test_url_project_and_host_validation(monkeypatch):
     )
     with pytest.raises(ValueError, match="project"):
         download_locator(locator)
-
-
-@pytest.mark.parametrize("source_kind", ["path", "langfuse"])
-@pytest.mark.parametrize("annotator", ["llm", "jev"])
-def test_all_four_source_backend_combinations(
-    tmp_path, monkeypatch, source_kind, annotator
-):
-    origin = str(write_trace(tmp_path / "trace.json")) if source_kind == "path" else URL
-    monkeypatch.setattr(workflow, "download_locator", lambda *args: rows())
-    requests = []
-
-    async def llm_call(model, system, user, **kwargs):
-        requests.append(system)
-        assert system in {llm.PASS_A_SYSTEM, llm.PASS_B_SYSTEM}
-        return (
-            {
-                "nodes": [
-                    {
-                        "type": "H",
-                        "time": 1,
-                        "text": "I think X.",
-                        "support": [{"msg_idx": 1, "quote": "I think X."}],
-                    }
-                ]
-            }
-            if system == llm.PASS_A_SYSTEM
-            else {"edges": []}
-        )
-
-    async def decisions(self, model, state, questions):
-        requests.append(state)
-        assert "check" not in state
-        answers = {}
-        for key in questions:
-            if key.startswith("edge_"):
-                choice = "unrelated"
-            elif key.startswith("same_"):
-                choice = "distinct"
-            else:
-                span_key, node_type = key.rsplit("_", 1)
-                kind = state["candidates"][span_key]["kind"]
-                expected = {
-                    "prose": "H",
-                    "final": "F",
-                    "action": "T",
-                    "observation": "E",
-                    "task": "E",
-                }[kind]
-                choice = "present" if node_type == expected else "absent"
-            answers[key] = {"choice": choice, "confidence": 1.0}
-        return answers
-
-    monkeypatch.setattr(llm, "llm_json_call_async", llm_call)
-    monkeypatch.setattr(JevClient, "evaluate", decisions)
-    output = tmp_path / "out"
-    assert invoke("--input", origin, "--annotator", annotator, "--output", output) == 0
-    assert requests
-    graph = json.loads(next((output / "annotations").glob("*.json")).read_text())
-    assert graph["nodes"]
-    assert graph["trace_checks_status"] == "unspecified"
-    assert graph["trace_checks"] == []
-    assert graph["source"]["locator"] == origin
-    assert len(graph["message_sources"]) == len(graph["messages"])
-    manifest = json.loads((output / "manifest.json").read_text())
-    assert len(manifest["annotations"]) == len(manifest["traces"]) == 1
-    assert json.loads((output / manifest["annotations"][0]).read_text()) == graph
-    assert not (output / "analysis").exists()
-    count = len(requests)
-    assert invoke("--input", origin, "--annotator", annotator, "--output", output) == 0
-    assert len(requests) == count  # exact fingerprint reuse
-    assert (
-        invoke(
-            "--input",
-            origin,
-            "--annotator",
-            annotator,
-            "--model",
-            "changed",
-            "--output",
-            output,
-        )
-        == 0
-    )
-    assert len(requests) > count
-    assert len(list((output / "annotations").glob("*.json"))) == 2
-    # The manifest selects only the most recent invocation; no old config leaks.
-    manifest = json.loads((output / "manifest.json").read_text())
-    assert len(manifest["annotations"]) == 1
-    selected = json.loads((output / manifest["annotations"][0]).read_text())
-    assert selected["provenance"]["fingerprint"]["configuration"]["model"] == "changed"
 
 
 def test_deduplication_dry_run_download_only_and_invalid_preflight(
@@ -510,11 +330,11 @@ assert main(["analyze", "--input", sys.argv[1], "--download-only", "--output", s
     [
         ("--concurrency", "0"),
         ("--batch-size", "0"),
-        ("--overlap", "20"),
+        ("--overlap", "254"),
         ("--window", "255"),
         ("--min-confidence", "1.1"),
         ("--timeout", "inf"),
-        ("--max-retries", "0"),
+        ("--max-retries", "-1"),
         ("--window", "2.5"),
         ("--overlap", "0.5"),
     ],
@@ -522,7 +342,7 @@ assert main(["analyze", "--input", sys.argv[1], "--download-only", "--output", s
 def test_invalid_cli_settings_fail_before_processing(tmp_path, option, value):
     trace = write_trace(tmp_path / "trace.json")
     with pytest.raises((ValueError, SystemExit)):
-        invoke("--input", trace, "--annotator", "jev", "--dry-run", option, value)
+        invoke("--input", trace, "--dry-run", option, value)
 
 
 def test_directory_names_do_not_supply_grouping_metadata(tmp_path):
@@ -531,3 +351,57 @@ def test_directory_names_do_not_supply_grouping_metadata(tmp_path):
     assert trace.grouping.agent_model is None
     assert trace.grouping.environment is None
     assert trace.grouping.level is None
+
+
+def test_cli_and_live_agent_share_local_defaults():
+    from corral.epistemic_analysis.annotators.local import GraphAnnotator
+
+    args = build_parser().parse_args(["analyze", "--input", "trace.json"])
+    live = GraphAnnotator()
+    assert cli.validate_options(args) == live.config
+    assert cli.resolve_provider(args) == live.provider_config
+
+
+def test_chat_cli_model_endpoint_and_credentials_are_configurable():
+    args = build_parser().parse_args(
+        [
+            "analyze",
+            "--input",
+            "trace.json",
+            "--provider",
+            "openai",
+            "--model",
+            "replacement",
+            "--base-url",
+            "https://endpoint.test/v1",
+            "--api-key-env",
+            "MODEL_KEY",
+            "--max-retries",
+            "0",
+            "--output-tokens",
+            "512",
+        ]
+    )
+    assert cli.validate_options(args).model == "replacement"
+    config = cli.resolve_provider(args)
+    assert config.endpoint == "https://endpoint.test/v1/chat/completions"
+    assert config.api_key_env == "MODEL_KEY"
+    assert config.retries == 0
+    assert config.output_tokens == 512
+    assert config.token_endpoint == ""
+
+
+def test_workflow_closes_provider_when_preflight_fails(tmp_path, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    trace = write_trace(tmp_path / "trace.json")
+    prepare = AsyncMock(side_effect=RuntimeError("server unavailable"))
+    close = AsyncMock()
+    backend = AnnotationBackend(
+        AsyncMock(), AsyncMock(), {}, prepare=prepare, close=close
+    )
+    monkeypatch.setattr(cli, "create_backend", lambda args: backend)
+    with pytest.raises(RuntimeError, match="server unavailable"):
+        invoke("--input", trace, "--output", tmp_path / "out")
+    close.assert_awaited_once()
+    backend.extract_nodes.assert_not_awaited()

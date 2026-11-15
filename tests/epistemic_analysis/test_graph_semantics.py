@@ -1,9 +1,12 @@
-"""Task facts and overlapping H/J roles retain distinct source semantics."""
+"""Task facts, shared H/J roles, and submitted claims retain source semantics."""
 
 import asyncio
+import json
 from dataclasses import replace
 
-from corral.epistemic_analysis.annotators.jev import JevAnnotator, candidate_spans
+import pytest
+
+from corral.epistemic_analysis.annotators.graph import GraphExtractor, candidate_spans
 from corral.epistemic_analysis.context import annotation_context, build_annotation_view
 from corral.epistemic_analysis.graph import (
     _filter_invalid_edges,
@@ -11,6 +14,7 @@ from corral.epistemic_analysis.graph import (
 )
 from corral.epistemic_analysis.ontology import relation_allowed
 from corral.epistemic_analysis.overflow import long_message_view, tool_excerpt_view
+from corral.epistemic_analysis.patterns import analyze_answer_provenance
 from corral.epistemic_analysis.pipeline import annotate_trace
 from corral.epistemic_analysis.schema import (
     AnnotationConfig,
@@ -58,7 +62,7 @@ class Choices:
 
 def run(trace, *, view=None):
     client = Choices()
-    backend = JevAnnotator(client).backend(stop_at_submission=False)
+    backend = GraphExtractor(client).backend(stop_at_submission=False)
     graph = asyncio.run(
         annotate_trace(
             trace,
@@ -221,3 +225,93 @@ def test_clause_splitting_does_not_split_nested_structured_data():
         spans = candidate_spans(view.messages, 1200)
     assert len(spans) == 1
     assert spans[0].quote == text
+
+
+@pytest.mark.parametrize("native", [False, True])
+def test_serialized_submission_claims_preserve_unicode_and_escaped_source_ranges(
+    native,
+):
+    answer = (
+        'The measured value is 3.14 μm. The label is "\\quoted🧪".\nThe shape is round.'
+    )
+    arguments = json.dumps({"answer": answer}, ensure_ascii=True)
+    if native:
+        from corral.epistemic_analysis.annotation_transcript import SAVED_FIELDS
+
+        content = SAVED_FIELDS + json.dumps(
+            {
+                "tool_calls": [
+                    {"function": {"name": "submit_answer", "arguments": arguments}}
+                ]
+            }
+        )
+    else:
+        content = (
+            f"<action>submit_answer</action><action_input>{arguments}</action_input>"
+        )
+    spans = candidate_spans([{"role": "assistant", "content": content}], 1200)
+    assert len(spans) == 3
+    assert all(s.kind == "final" and GraphExtractor.submission_span(s) for s in spans)
+    assert all(content[s.offset : s.offset + len(s.quote)] == s.quote for s in spans)
+
+
+class ProvenanceClaimClient:
+    async def evaluate(self, model, state, questions):
+        answers = {}
+        for key, question in questions.items():
+            if key.startswith("claim_"):
+                choice = "single"
+            elif key.startswith("same_"):
+                choice = "distinct"
+            elif key.startswith("edge_"):
+                _, src, dst = key.split("_")
+                first, second = state["nodes"][src], state["nodes"][dst]
+                links = (
+                    first["type"] == "E"
+                    and second["text"] == "The measured value is 5."
+                )
+                choice = (
+                    (f"m{second['time']}" if links else "none")
+                    if "none" in question["criteria"]
+                    else "informs"
+                    if links
+                    else "unrelated"
+                )
+            else:
+                span, kind = key.rsplit("_", 1)
+                candidate = state["candidates"][span]
+                selected = (
+                    "E"
+                    if candidate["kind"] == "observation"
+                    else "F"
+                    if candidate["kind"] == "final"
+                    else None
+                )
+                choice = "present" if kind == selected else "absent"
+            answers[key] = {
+                "choice": choice,
+                "confidence": 1.0,
+                "probabilities": {v: float(v == choice) for v in question["criteria"]},
+            }
+        return answers
+
+
+def test_jev_pipeline_keeps_independent_final_claims_and_reports_both_patterns():
+    messages = [
+        {"role": "tool", "content": "Measured value: 5."},
+        {
+            "role": "assistant",
+            "content": '<action>submit_answer</action><action_input>{"answer":"The measured value is 5. The material is stable."}</action_input>',
+        },
+    ]
+    trace = NormalizedTrace(messages, SourceReference("test", "test.json", "hash"))
+    graph = asyncio.run(
+        annotate_trace(
+            trace,
+            GraphExtractor(ProvenanceClaimClient()).backend(),
+            AnnotationConfig("mock"),
+        )
+    )
+    result = analyze_answer_provenance(graph.to_dict())
+    assert graph.annotation_status == "complete"
+    assert [c["status"] for c in result["claims"]] == ["traceable", "untraced"]

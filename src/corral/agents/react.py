@@ -88,7 +88,7 @@ class ReActAgent(EpistemicSupport):
 
     def __init__(
         self,
-        model: str = "openai/gpt-4o",
+        model: str | None = None,
         api_endpoint: str | None = None,
         system_prompt: str | None = None,
         user_prompt: str | None = None,

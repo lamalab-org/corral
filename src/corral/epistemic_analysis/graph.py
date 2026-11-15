@@ -6,10 +6,12 @@ import re
 from typing import Any
 
 from corral.epistemic_analysis._utils import (
+    iter_windows,
     normalize_whitespace,
     sha1_hex,
 )
 from corral.epistemic_analysis.ontology import (
+    EDGE_RELATIONS,
     EDGE_RELATIONS_SET,
     NODE_TYPES_SET,
 )
@@ -21,6 +23,36 @@ from .context import (
     task_message_indices,
 )
 from .ontology import relation_allowed
+
+
+def edge_pair_coverage(nodes, window, overlap):
+    """Count eligible node pairs covered by the annotation windows."""
+    end = max((node["time"] for node in nodes), default=-1) + 1
+    windows = iter_windows(end, window, overlap)
+    allowed = considered = 0
+    for i, first in enumerate(nodes):
+        for j, second in enumerate(nodes):
+            if i == j or (first["type"] == second["type"] and i > j):
+                continue
+            if not any(
+                relation_allowed(relation, first, second)
+                and not (relation == "tests" and first["type"] == "T")
+                for relation in EDGE_RELATIONS
+            ):
+                continue
+            allowed += 1
+            considered += any(
+                start <= first["time"] < stop and start <= second["time"] < stop
+                for start, stop in windows
+            )
+    return {
+        "stage": "edges",
+        "allowed_node_pairs": allowed,
+        "considered_node_pairs": considered,
+        "unexamined_node_pairs": allowed - considered,
+        "window_messages": window,
+        "overlap_messages": overlap,
+    }
 
 
 def is_runtime_notice(content: str) -> bool:
@@ -148,6 +180,14 @@ def coerce_node(
         node["time"] = time_idx
 
     node["text"] = normalize_whitespace(str(node.get("text", "")))
+
+    if t == "F" and node.get("claim_scope") not in {
+        "single",
+        "compound",
+        "nonclaim",
+        "unknown",
+    }:
+        node["claim_scope"] = "unknown"
 
     if t == "H":
         hyp = node.get("hypothesis") or {}

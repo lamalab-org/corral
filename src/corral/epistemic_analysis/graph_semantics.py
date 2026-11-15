@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections import defaultdict
 from itertools import pairwise
@@ -9,7 +10,7 @@ from itertools import pairwise
 from .context import task_message_indices
 from .schema import content_hash
 
-GRAPH_SEMANTICS_VERSION = "task-given-evidence-claim-spans-shared-roles-v1"
+GRAPH_SEMANTICS_VERSION = "task-given-evidence-claim-spans-shared-roles-final-claims-v2"
 
 # Conservative boundaries: do not break formulas, decimal numbers, nested data,
 # or quoted strings. The model still decides whether a clause is a scientific claim.
@@ -60,6 +61,85 @@ def claim_ranges(text):
             end -= 1
         if start < end:
             ranges.append((start, end))
+    return ranges
+
+
+def _submission_string_view(raw, mapping):
+    """Decode JSON escapes while retaining each character's original range."""
+    text, positions = [], []
+    for match in re.finditer(
+        r"\\u[dD][89aAbB][0-9a-fA-F]{2}\\u[dD][c-fC-F][0-9a-fA-F]{2}"
+        r"|\\u[0-9a-fA-F]{4}|\\.|[^\\]",
+        raw[1:-1],
+        re.DOTALL,
+    ):
+        start, end = match.start() + 1, match.end() + 1
+        value = json.loads('"' + match.group() + '"')
+        text.append(value)
+        positions.extend([(mapping[start][0], mapping[end - 1][1])] * len(value))
+    return "".join(text), positions
+
+
+def _submission_answer_view(raw, mapping):
+    decoder = json.JSONDecoder()
+    position = raw.index("{") + 1
+    while position < len(raw):
+        while raw[position].isspace() or raw[position] == ",":
+            position += 1
+        if raw[position] == "}":
+            return None
+        key, position = decoder.raw_decode(raw, position)
+        while raw[position].isspace():
+            position += 1
+        if raw[position] != ":":
+            return None
+        position += 1
+        while raw[position].isspace():
+            position += 1
+        start = position
+        value, position = decoder.raw_decode(raw, position)
+        fragment, offsets = raw[start:position], mapping[start:position]
+        if key == "answer":
+            return (
+                _submission_string_view(fragment, offsets)
+                if isinstance(value, str)
+                else (fragment, offsets)
+            )
+        if key in {"function", "arguments"}:
+            if isinstance(value, str):
+                fragment, offsets = _submission_string_view(fragment, offsets)
+            if isinstance(value, str | dict):
+                result = _submission_answer_view(fragment, offsets)
+                if result is not None:
+                    return result
+    return None
+
+
+def submission_claim_ranges(quote):
+    """Return sentence/clause candidates, never synthesized or decoded quotes.
+
+    Candidates are still classified by the annotator. Structured or inseparable
+    compound answers remain eligible for an explicit compound/unknown scope.
+    """
+    match = re.search(r"<action_input>(.*?)</action_input>", quote, re.DOTALL)
+    start, end = match.span(1) if match else (0, len(quote))
+    try:
+        result = _submission_answer_view(
+            quote[start:end], [(i, i + 1) for i in range(start, end)]
+        )
+    except (ValueError, IndexError, TypeError):
+        return []  # Keep the original submission available for annotation.
+    if result is None:
+        return []
+    text, mapping = result
+    # Structured results must not be split inside strings or numeric values.
+    if text.lstrip().startswith(("{", "[")):
+        return [(mapping[0][0], mapping[-1][1])] if mapping else []
+    ranges = []
+    for sentence in re.finditer(r"\S[\s\S]*?(?=\n|(?<=[.!?])\s+|$)", text):
+        for low, high in claim_ranges(sentence.group()):
+            left, right = sentence.start() + low, sentence.start() + high
+            ranges.append((mapping[left][0], mapping[right - 1][1]))
     return ranges
 
 

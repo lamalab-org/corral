@@ -11,7 +11,7 @@ from pathlib import Path
 
 FINISHED = {"complete", "requires_review"}
 METHOD = "decisions_graph"
-PATTERN_VERSION = "graph-motifs-and-paired-repeat-tests-scoped-v2"
+PATTERN_VERSION = "graph-motifs-and-answer-provenance-v3"
 
 
 def read(path):

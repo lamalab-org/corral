@@ -9,7 +9,8 @@ from typing import Any, Literal, TypedDict
 
 GRAPH_SCHEMA_VERSION = 1
 NORMALIZATION_VERSION = "corral-messages-v1"
-ANNOTATION_VERSION = "7"
+ANNOTATION_VERSION = "8"
+ANSWER_PROVENANCE_VERSION = "answer-provenance-v1"
 
 # Frozen catalog for schema-1 graphs saved before evaluation_shortcut was added.
 # Reading them must not invent an assessment for a check that was never run.
@@ -139,15 +140,13 @@ class NormalizedTrace:
 @dataclass(frozen=True)
 class AnnotationConfig:
     model: str
-    window: int = 2
+    window: int = 254
     overlap: int = 1
-    max_nodes_per_window: int = 100
+    max_nodes_per_window: int = 1000
     strict_support: bool = True
-    tool_output_max_chars: int = 4000
+    tool_output_max_chars: int = 0
     tool_output_truncation: str = "head-tail"
     max_request_tokens: int = 0
-    # Used only by the generative backend when budgeting is enabled.
-    llm_output_reserve_tokens: int = 4096
 
     def __post_init__(self) -> None:
         if not self.model.strip():
@@ -155,7 +154,6 @@ class AnnotationConfig:
         for name in (
             "tool_output_max_chars",
             "max_request_tokens",
-            "llm_output_reserve_tokens",
         ):
             value = getattr(self, name)
             if not isinstance(value, int) or isinstance(value, bool) or value < 0:
@@ -164,8 +162,6 @@ class AnnotationConfig:
             raise ValueError("tool_output_max_chars must be zero or at least 16")
         if self.tool_output_truncation != "head-tail":
             raise ValueError("tool_output_truncation must be head-tail")
-        if self.llm_output_reserve_tokens < 1:
-            raise ValueError("llm_output_reserve_tokens must be positive")
         for name in ("window", "max_nodes_per_window"):
             value = getattr(self, name)
             if not isinstance(value, int) or isinstance(value, bool) or value < 1:

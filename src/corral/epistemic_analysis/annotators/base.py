@@ -17,6 +17,8 @@ class AnnotationBackend:
     extract_nodes: Callable[..., Awaitable[tuple[list[dict[str, Any]], list[str]]]]
     extract_edges: Callable[..., Awaitable[tuple[list[dict[str, Any]], list[str]]]]
     provenance: dict[str, Any]
+    prepare: Callable[[], Awaitable[Any]] | None = None
+    close: Callable[[], Awaitable[None]] | None = None
 
     def resolved_models(self) -> set[str]:
         return _resolved_models.get() or set()

@@ -8,8 +8,7 @@ import json
 import math
 from pathlib import Path
 
-from .annotators.jev import DEFAULT_ENDPOINT, MAX_WINDOW
-from .decisions import DEFAULT_DECISIONS_MODEL
+from .annotators.graph import MAX_WINDOW
 from .schema import AnnotationConfig
 
 
@@ -29,10 +28,26 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Validate every input against this source type.",
     )
     parser.add_argument(
-        "--annotator",
-        choices=("llm", "jev"),
-        default="llm",
-        help="Graph extraction: generative LLM or Jev's workflow via OpenAI Decisions.",
+        "--provider",
+        choices=("knowline", "openai"),
+        help="Wire protocol; defaults to the local annotation profile.",
+    )
+    parser.add_argument(
+        "--profile", type=Path, help="Shared annotation/explanation/actor profile JSON."
+    )
+    parser.add_argument("--base-url", help="OpenAI-compatible base URL, including /v1.")
+    parser.add_argument(
+        "--api-key-env", help="Environment variable holding the endpoint's API key."
+    )
+    parser.add_argument(
+        "--endpoint", help="Full inference URL for a native KnowLine server."
+    )
+    parser.add_argument(
+        "--token-endpoint",
+        help="Optional server token-count endpoint (required for KnowLine).",
+    )
+    parser.add_argument(
+        "--metadata-endpoint", help="Optional served-model metadata endpoint."
     )
     parser.add_argument(
         "--model",
@@ -82,29 +97,22 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Estimated complete input budget (0 disables preflight enforcement).",
     )
     parser.add_argument(
-        "--llm-output-reserve-tokens",
+        "--output-tokens",
         type=int,
-        default=AnnotationConfig.llm_output_reserve_tokens,
-        help="Generation allowance reserved within LLM context when budgeting is enabled.",
+        default=None,
+        help="Generation allowance for the configured provider.",
     )
     parser.add_argument(
         "--strict-support",
         action=argparse.BooleanOptionalAction,
         default=AnnotationConfig.strict_support,
     )
-    parser.add_argument("--temperature", type=float, default=0.7)
-    parser.add_argument("--min-confidence", type=float, default=0.5)
+    parser.add_argument("--temperature", type=float, default=None)
+    parser.add_argument("--min-confidence", type=float, default=0.6)
     parser.add_argument("--max-span-chars", type=int, default=1200)
     parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--timeout", type=float, default=120)
-    parser.add_argument("--max-retries", type=int, default=5)
-    parser.add_argument(
-        "--decisions-endpoint",
-        "--jev-endpoint",
-        dest="jev_endpoint",
-        default=DEFAULT_ENDPOINT,
-        help="OpenAI Decisions endpoint for the Jev graph workflow.",
-    )
+    parser.add_argument("--timeout", type=float, default=None)
+    parser.add_argument("--max-retries", type=int, default=None)
     parser.add_argument(
         "--from-time",
         help="Langfuse observation start bound (ISO timestamp with timezone).",
@@ -116,25 +124,49 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.set_defaults(_handler=run_analysis)
 
 
+def resolve_provider(args):
+    from .annotators.local import provider_config
+
+    changes = {
+        name: getattr(args, name)
+        for name in (
+            "provider",
+            "model",
+            "base_url",
+            "api_key_env",
+            "endpoint",
+            "token_endpoint",
+            "metadata_endpoint",
+        )
+        if getattr(args, name) is not None
+    }
+    if args.output_tokens is not None:
+        changes["output_tokens"] = args.output_tokens
+    if args.timeout is not None:
+        changes["timeout"] = args.timeout
+    if args.max_retries is not None:
+        changes["retries"] = args.max_retries
+    if args.temperature is not None:
+        changes["extra_body"] = {"temperature": args.temperature}
+    return provider_config("annotation", changes, profile=args.profile)
+
+
 def validate_options(args) -> AnnotationConfig:
-    for name in ("concurrency", "max_span_chars", "batch_size", "max_retries"):
+    for name in ("concurrency", "max_span_chars", "batch_size"):
         if getattr(args, name) < 1:
             raise ValueError(f"{name} must be positive")
-    if not math.isfinite(args.timeout) or args.timeout <= 0:
-        raise ValueError("timeout must be positive and finite")
-    if not math.isfinite(args.temperature) or args.temperature < 0:
+    if args.batch_size > 64:
+        raise ValueError("batch_size must not exceed 64")
+    if args.temperature is not None and (
+        not math.isfinite(args.temperature) or args.temperature < 0
+    ):
         raise ValueError("temperature must be nonnegative and finite")
     if not math.isfinite(args.min_confidence) or not 0 <= args.min_confidence <= 1:
         raise ValueError("Confidence thresholds must lie between 0 and 1")
-    if args.annotator == "jev" and args.window > MAX_WINDOW:
-        raise ValueError(f"Decisions graph annotation requires window <= {MAX_WINDOW}")
+    if args.window > MAX_WINDOW:
+        raise ValueError(f"Graph annotation requires window <= {MAX_WINDOW}")
     return AnnotationConfig(
-        model=args.model
-        or (
-            DEFAULT_DECISIONS_MODEL
-            if args.annotator == "jev"
-            else "anthropic/claude-sonnet-4-6"
-        ),
+        model=resolve_provider(args).model,
         window=args.window,
         overlap=args.overlap,
         max_nodes_per_window=args.max_nodes_per_window,
@@ -142,30 +174,29 @@ def validate_options(args) -> AnnotationConfig:
         tool_output_max_chars=args.tool_output_max_chars,
         tool_output_truncation=args.tool_output_truncation,
         max_request_tokens=args.max_request_tokens,
-        llm_output_reserve_tokens=args.llm_output_reserve_tokens,
     )
 
 
 def create_backend(args):
-    if args.annotator == "llm":
-        from .annotators.llm import LLMAnnotator
+    from dataclasses import replace
 
-        return LLMAnnotator(
-            temperature=args.temperature,
-            timeout_s=args.timeout,
-            max_retries=args.max_retries,
-        ).backend()
-    from .annotators.jev import JevAnnotator, JevClient
+    from .annotators.graph import GraphExtractor
+    from .annotators.local import GraphQuestionClient, create_provider
 
-    client = JevClient(
-        endpoint=args.jev_endpoint,
+    provider = create_provider(resolve_provider(args))
+    questions = GraphQuestionClient(
+        provider,
+        Path(args.output) / "requests",
+        {},
         batch_size=args.batch_size,
-        timeout_s=args.timeout,
-        max_retries=args.max_retries,
+        reuse=not args.force,
     )
-    return JevAnnotator(
-        client, min_confidence=args.min_confidence, max_span_chars=args.max_span_chars
+    backend = GraphExtractor(
+        questions,
+        min_confidence=args.min_confidence,
+        max_span_chars=args.max_span_chars,
     ).backend()
+    return replace(backend, prepare=provider.preflight, close=provider.close)
 
 
 async def run_analysis(args) -> int:
@@ -184,8 +215,7 @@ def add_check_arguments(parser):
     parser.add_argument(
         "--config",
         type=Path,
-        required=True,
-        help="Independent decision/evidence provider JSON.",
+        help="Decision/evidence provider JSON; defaults to the shared local profile.",
     )
     parser.add_argument(
         "--context",
@@ -226,16 +256,22 @@ def _read_check_json(path):
 
 
 async def run_checks(args):
-    from .annotators.local import GemmaClient, KnowLineClient, ProviderConfig
+    from .annotators.local import OpenAIClient, create_provider, provider_config
     from .decision_applicability import ValidationPolicy
     from .sources.inputs import CheckInput
     from .storage import export_review
     from .trace_checks import CheckPipeline, check_definitions
 
-    config = _read_check_json(args.config)
-    decision_config = ProviderConfig(**config["decision"])
+    config = _read_check_json(args.config) if args.config else {}
+    decision_config = provider_config(
+        "annotation", config.get("decision", config.get("annotation"))
+    )
     evidence_config = (
-        ProviderConfig(**config["evidence"]) if config.get("evidence") else None
+        provider_config(
+            "explanation", config.get("evidence", config.get("explanation"))
+        )
+        if not args.config or config.get("evidence") or config.get("explanation")
+        else None
     )
     inputs = CheckInput.from_document(
         _read_check_json(args.input),
@@ -252,9 +288,9 @@ async def run_checks(args):
         )
     if args.force_labels and args.evidence_only:
         raise ValueError("evidence-only cannot force labels")
-    decision = KnowLineClient(decision_config)
+    decision = create_provider(decision_config)
     evidence = (
-        GemmaClient(evidence_config)
+        OpenAIClient(evidence_config)
         if evidence_config and not args.labels_only
         else None
     )

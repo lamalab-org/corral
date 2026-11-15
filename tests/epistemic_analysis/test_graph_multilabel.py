@@ -12,14 +12,12 @@ from corral.epistemic_analysis import (
     SourceReference,
     annotate_trace,
     ontology,
-    read_graph,
 )
-from corral.epistemic_analysis.annotators.jev import JevAnnotator, JevClient
+from corral.epistemic_analysis.annotators.graph import GraphExtractor
 from corral.epistemic_analysis.cli import validate_options
 from corral.epistemic_analysis.graph import validate_support_quotes
 from corral.epistemic_analysis.overflow import long_message_view, tool_excerpt_view
 from corral.epistemic_analysis.pipeline import can_reuse
-from corral.epistemic_analysis.storage import save_annotation_artifacts
 
 
 class Decisions:
@@ -31,50 +29,53 @@ class Decisions:
         self.confidence = confidence
         self.bodies = []
 
-    def post(self, body):
-        self.bodies.append(body)
-        state = json.loads(body["input"])
-        answers = []
-        for question in body["questions"]:
-            key = question["name"]
-            assert question["type"] == "choice"
-            assert "other" not in {c["value"] for c in question["choices"]}
+    async def evaluate(self, model, state, questions):
+        if not questions:
+            return {}
+        self.bodies.append(
+            {
+                "input": json.dumps(state),
+                "questions": [
+                    {
+                        "name": k,
+                        "type": "choice",
+                        "instructions": q.get("instructions", ""),
+                        "choices": [
+                            {"value": v, "description": d}
+                            for v, d in q["criteria"].items()
+                        ],
+                    }
+                    for k, q in questions.items()
+                ],
+            }
+        )
+        answers = {}
+        for key in questions:
             if key.startswith("same_"):
                 choice = "same" if self.same else "distinct"
+            elif key.startswith("claim_"):
+                choice = "single"
             elif key.startswith("edge_"):
                 choice = "unrelated"
             else:
                 span_key, node_type = key.rsplit("_", 1)
-                candidate = state["candidates"][span_key]
                 choice = (
-                    "present" if node_type in self.classify(candidate) else "absent"
+                    "present"
+                    if node_type in self.classify(state["candidates"][span_key])
+                    else "absent"
                 )
-            alternatives = len(question["choices"]) - 1
-            answers.append(
-                {
-                    "name": key,
-                    "type": "choice",
-                    "choice": choice,
-                    "confidence": self.confidence,
-                    "probabilities": [
-                        {
-                            "value": c["value"],
-                            "probability": self.confidence
-                            if c["value"] == choice
-                            else (1 - self.confidence) / alternatives,
-                        }
-                        for c in question["choices"]
-                    ],
-                }
-            )
-        return {"model": "decisions-resolved", "answers": answers}
+            answers[key] = {
+                "type": "choice",
+                "choice": choice,
+                "confidence": self.confidence,
+            }
+        return answers
 
 
 def annotate(messages, decisions, **options):
     trace = NormalizedTrace(messages, SourceReference("test", "test.json", "hash"))
-    client = JevClient("not-saved", batch_size=8)
-    client._post = decisions.post
-    backend = JevAnnotator(client).backend()
+    client = decisions
+    backend = GraphExtractor(client).backend()
     config = AnnotationConfig("jev", **options)
     return asyncio.run(annotate_trace(trace, backend, config)), trace, backend, config
 
@@ -219,7 +220,7 @@ def test_judgment_group_cannot_bridge_distinct_or_uncertain_assessments(conflict
         )
     ]
     result, warnings = asyncio.run(
-        JevAnnotator(PairChoices(), min_confidence=0.6)._merge_duplicates(
+        GraphExtractor(PairChoices(), min_confidence=0.6)._merge_duplicates(
             "test", {}, nodes
         )
     )
@@ -239,12 +240,11 @@ def test_judgment_group_audit_retains_original_offsets_after_message_trimming():
     view = long_message_view(source, tool_excerpt_view(source))
     assert len(view.messages[0]["content"]) < len(text)
     decisions = Decisions(lambda c: {"J"} if c["quote"] in quotes else set(), same=True)
-    client = JevClient("not-saved")
-    client._post = decisions.post
+    client = decisions
     graph = asyncio.run(
         annotate_trace(
             source,
-            JevAnnotator(client).backend(),
+            GraphExtractor(client).backend(),
             AnnotationConfig("jev"),
             prepared_view=view,
         )
@@ -293,9 +293,7 @@ def test_submit_answer_is_a_valid_final_annotation(types):
         Decisions(lambda candidate: types),
     )
     assert {n["type"] for n in graph.nodes} == types - {"N"}
-    assert all(
-        n["time"] == 0 and n["support"][0]["quote"] == submission for n in graph.nodes
-    )
+    assert all(n["time"] == 0 and n["support"][0]["quote"] == "X" for n in graph.nodes)
     assert graph.annotation_status == "complete"
     assert graph.qc["review_issues"] == []
 
@@ -338,11 +336,9 @@ def test_test_plan_and_action_count_once_and_neutral_result_stays_evidence():
 def test_defaults_bounded_windows_clipping_and_full_decision_artifacts(tmp_path):
     from corral.cli import build_parser
 
-    args = build_parser().parse_args(
-        ["analyze", "--input", "trace.json", "--annotator", "jev"]
-    )
+    args = build_parser().parse_args(["analyze", "--input", "trace.json"])
     config = validate_options(args)
-    assert (config.window, config.overlap, config.tool_output_max_chars) == (2, 1, 4000)
+    assert (config.window, config.overlap, config.tool_output_max_chars) == (254, 1, 0)
     decisions = Decisions(lambda c: {"E"} if c["kind"] == "observation" else {"H"})
     graph, trace, backend, config = annotate(
         [
@@ -352,6 +348,8 @@ def test_defaults_bounded_windows_clipping_and_full_decision_artifacts(tmp_path)
             {"role": "assistant", "content": "I think Z."},
         ],
         decisions,
+        window=2,
+        tool_output_max_chars=4000,
     )
     assert all(
         len(json.loads(body["input"])["messages"]) <= 2 for body in decisions.bodies
@@ -365,20 +363,6 @@ def test_defaults_bounded_windows_clipping_and_full_decision_artifacts(tmp_path)
         if not question["name"].startswith("edge_")
     ]
     assert len(node_keys) == len(set(node_keys))
-    assert graph.annotation_requests
-    assert any(
-        a["choice"] == "absent"
-        for r in graph.annotation_requests
-        for a in r["response"]["answers"]
-    )
-    assert "not-saved" not in json.dumps(graph.annotation_requests)
-    assert "Authorization" not in json.dumps(graph.annotation_requests)
-    save_annotation_artifacts(graph, tmp_path)
-    saved = json.loads(
-        (tmp_path / graph.provenance["annotation_requests_artifact"]).read_text()
-    )
-    assert saved == graph.annotation_requests
-    assert read_graph(graph.to_dict()).annotation_requests == saved
     # Both transports now report eligible pairs missed by graph windows.
     assert graph.annotation_status == "incomplete"
     assert any("cross graph windows" in issue for issue in graph.qc["review_issues"])

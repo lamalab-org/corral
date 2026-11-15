@@ -137,97 +137,107 @@ async def run(args, config) -> int:
         return 0
     failed = 0
     backend = create_backend(args)
-    semaphore = asyncio.Semaphore(args.concurrency)
+    try:
+        if backend.prepare:
+            await backend.prepare()
+        semaphore = asyncio.Semaphore(args.concurrency)
 
-    async def process(trace):
-        nonlocal failed
-        fingerprint = annotation_fingerprint(trace, backend, config)
-        request_id = content_hash(fingerprint)
-        cache_index = output / "cache" / f"{request_id}.json"
-        async with semaphore:
-            graph = None
-            if cache_index.is_file() and not args.force:
-                try:
-                    path = (
-                        output
-                        / json.loads(cache_index.read_text(encoding="utf-8"))[
-                            "annotation"
-                        ]
-                    )
-                    cached = read_graph(json.loads(path.read_text(encoding="utf-8")))
-                    if can_reuse(cached, trace, backend, config):
-                        graph = cached
-                        # Current input references/grouping do not affect extraction.
-                        graph.source, graph.grouping, graph.input_file = (
-                            trace.source,
-                            trace.grouping,
-                            trace.source.locator,
+        async def process(trace):
+            nonlocal failed
+            fingerprint = annotation_fingerprint(trace, backend, config)
+            request_id = content_hash(fingerprint)
+            cache_index = output / "cache" / f"{request_id}.json"
+            async with semaphore:
+                graph = None
+                if cache_index.is_file() and not args.force:
+                    try:
+                        path = (
+                            output
+                            / json.loads(cache_index.read_text(encoding="utf-8"))[
+                                "annotation"
+                            ]
                         )
-                except (ValueError, TypeError, KeyError, OSError):
-                    pass
-            if graph is None:
-                try:
-                    graph = await annotate_trace(trace, backend, config)
-                except Exception as exc:
-                    failed += 1
-                    graph = AnnotatedGraph(
-                        nodes=[],
-                        edges=[],
-                        source=trace.source,
-                        grouping=trace.grouping,
-                        input_file=trace.source.locator,
-                        annotation_status="failed",
-                        messages=trace.messages,
-                        message_sources=trace.message_sources,
-                        completion_status=trace.completion_status,
-                        reconstruction_status=trace.reconstruction_status,
-                        provenance={
-                            "fingerprint": fingerprint,
-                            "configuration_id": content_hash(
-                                fingerprint["configuration"]
-                            ),
-                        },
-                        qc={"warnings": [], "error": str(exc)},
-                        annotation_requests=getattr(exc, "annotation_requests", []),
-                    )
-                    if isinstance(exc, RequestBudgetExceeded):
-                        graph.annotation_view = exc.annotation_view
-                        graph.qc.update(
-                            {
-                                "annotation_attempts": exc.attempts,
-                                "request_diagnostics": exc.diagnostics,
-                                "size_error": exc.diagnostic,
-                            }
+                        cached = read_graph(
+                            json.loads(path.read_text(encoding="utf-8"))
                         )
-                        if exc.annotation_view:
-                            view = AnnotationView(**exc.annotation_view)
-                            graph.qc["context_coverage"] = view.coverage
-                            graph.provenance["effective_tool_output_max_chars"] = (
-                                view.effective_cap
+                        if can_reuse(cached, trace, backend, config):
+                            graph = cached
+                            # Current input references/grouping do not affect extraction.
+                            graph.source, graph.grouping, graph.input_file = (
+                                trace.source,
+                                trace.grouping,
+                                trace.source.locator,
                             )
-            saved_id = graph.provenance.get(
-                "resolved_fingerprint_hash", request_id + ".failed"
-            )
-            path = output / "annotations" / f"{saved_id}.annotated.json"
-            if graph.annotation_status == "incomplete":
-                failed += 1
-            save_annotation_artifacts(graph, output)
-            atomic_save(path, graph.to_dict())
-            if graph.annotation_status == "complete":
-                atomic_save(cache_index, {"annotation": str(path.relative_to(output))})
-        return graph, str(path.relative_to(output))
+                    except (ValueError, TypeError, KeyError, OSError):
+                        pass
+                if graph is None:
+                    try:
+                        graph = await annotate_trace(trace, backend, config)
+                    except Exception as exc:
+                        failed += 1
+                        graph = AnnotatedGraph(
+                            nodes=[],
+                            edges=[],
+                            source=trace.source,
+                            grouping=trace.grouping,
+                            input_file=trace.source.locator,
+                            annotation_status="failed",
+                            messages=trace.messages,
+                            message_sources=trace.message_sources,
+                            completion_status=trace.completion_status,
+                            reconstruction_status=trace.reconstruction_status,
+                            provenance={
+                                "fingerprint": fingerprint,
+                                "configuration_id": content_hash(
+                                    fingerprint["configuration"]
+                                ),
+                            },
+                            qc={"warnings": [], "error": str(exc)},
+                            annotation_requests=getattr(exc, "annotation_requests", []),
+                        )
+                        if isinstance(exc, RequestBudgetExceeded):
+                            graph.annotation_view = exc.annotation_view
+                            graph.qc.update(
+                                {
+                                    "annotation_attempts": exc.attempts,
+                                    "request_diagnostics": exc.diagnostics,
+                                    "size_error": exc.diagnostic,
+                                }
+                            )
+                            if exc.annotation_view:
+                                view = AnnotationView(**exc.annotation_view)
+                                graph.qc["context_coverage"] = view.coverage
+                                graph.provenance["effective_tool_output_max_chars"] = (
+                                    view.effective_cap
+                                )
+                saved_id = graph.provenance.get(
+                    "resolved_fingerprint_hash", request_id + ".failed"
+                )
+                path = output / "annotations" / f"{saved_id}.annotated.json"
+                if graph.annotation_status == "incomplete":
+                    failed += 1
+                save_annotation_artifacts(graph, output)
+                atomic_save(path, graph.to_dict())
+                if graph.annotation_status == "complete":
+                    atomic_save(
+                        cache_index, {"annotation": str(path.relative_to(output))}
+                    )
+            return graph, str(path.relative_to(output))
 
-    completed = await asyncio.gather(*(process(trace) for trace in traces))
-    annotations = [name for _, name in completed]
-    atomic_save(
-        output / "manifest.json",
-        {
-            "format": "corral-epistemic-selection-v1",
-            "annotations": annotations,
-            "traces": normalized_files,
-        },
-    )
-    logger.info(
-        f"Annotated {len(traces)} trace(s); {failed} annotation failure(s). Outputs: {output}"
-    )
-    return 1 if failed else 0
+        completed = await asyncio.gather(*(process(trace) for trace in traces))
+        annotations = [name for _, name in completed]
+        atomic_save(
+            output / "manifest.json",
+            {
+                "format": "corral-epistemic-selection-v1",
+                "annotations": annotations,
+                "traces": normalized_files,
+            },
+        )
+        logger.info(
+            f"Annotated {len(traces)} trace(s); {failed} annotation failure(s). Outputs: {output}"
+        )
+        return 1 if failed else 0
+    finally:
+        if backend.close:
+            await backend.close()

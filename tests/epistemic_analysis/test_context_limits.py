@@ -2,11 +2,8 @@
 
 import asyncio
 import copy
-import io
 import json
 from dataclasses import replace
-from types import SimpleNamespace
-from urllib.error import HTTPError
 
 import pytest
 
@@ -20,7 +17,7 @@ from corral.epistemic_analysis import (
     cli,
     read_graph,
 )
-from corral.epistemic_analysis.annotators import jev, llm
+from corral.epistemic_analysis.annotators import graph as extraction
 from corral.epistemic_analysis.budget import RequestBudgetExceeded
 from corral.epistemic_analysis.context import (
     annotation_context,
@@ -241,6 +238,8 @@ class Decisions:
         for key, question in questions.items():
             if key.startswith("same_"):
                 answers[key] = {"choice": "distinct", "confidence": 1}
+            elif key.startswith("claim_"):
+                answers[key] = {"choice": "single", "confidence": 1}
             elif key.startswith("edge_"):
                 choice = (
                     "m3"
@@ -255,7 +254,12 @@ class Decisions:
             else:
                 span_key, node_type = key.rsplit("_", 1)
                 kind = state["candidates"][span_key]["kind"]
-                expected = {"action": "T", "observation": "E", "prose": "J"}.get(kind)
+                expected = {
+                    "action": "T",
+                    "observation": "E",
+                    "prose": "J",
+                    "final": "F",
+                }.get(kind)
                 if (
                     "<action>submit_answer</action>"
                     in state["candidates"][span_key]["quote"]
@@ -268,7 +272,7 @@ class Decisions:
         return answers
 
 
-@pytest.mark.parametrize("kind", ["llm", "jev"])
+@pytest.mark.parametrize("kind", ["graph"])
 @pytest.mark.parametrize("strict_support", [True, False])
 def test_both_backends_stop_at_submission(monkeypatch, kind, strict_support):
     trace = source()
@@ -300,12 +304,7 @@ def test_both_backends_stop_at_submission(monkeypatch, kind, strict_support):
             ]
         }
 
-    monkeypatch.setattr(llm, "llm_json_call_async", respond)
-    backend = (
-        llm.LLMAnnotator().backend()
-        if kind == "llm"
-        else jev.JevAnnotator(client).backend()
-    )
+    backend = extraction.GraphExtractor(client).backend()
     settings = replace(config(), window=20, overlap=1, strict_support=strict_support)
     graph = asyncio.run(annotate_trace(trace, backend, settings))
     assert "POST_SUBMISSION" not in json.dumps(requests + client.requests)
@@ -324,9 +323,9 @@ def test_both_backends_stop_at_submission(monkeypatch, kind, strict_support):
     assert not can_reuse(old, trace, backend, settings)
 
 
-def test_jev_uses_same_view_everywhere_including_edge_support():
+def test_graph_uses_same_view_everywhere_including_edge_support():
     trace, client = source(), Decisions()
-    backend = jev.JevAnnotator(client).backend()
+    backend = extraction.GraphExtractor(client).backend()
     graph = asyncio.run(annotate_trace(trace, backend, config()))
     assert graph.messages == trace.messages
     assert graph.edges
@@ -415,84 +414,6 @@ def test_runtime_neutral_fallback_preserves_existing_labels_and_ordinary_text():
     result, warnings = _postprocess_runtime_notices(nodes, messages)
     assert result == nodes
     assert warnings == []
-
-
-def test_llm_both_passes_and_automatic_observation_support(monkeypatch):
-    seen = []
-
-    async def respond(model, system, user, **kwargs):
-        seen.append(user)
-        assert "HIDDEN MIDDLE" not in user
-        if "Nodes:\n" in user:
-            return {"edges": []}
-        return {
-            "nodes": [
-                {
-                    "type": "T",
-                    "time": 2,
-                    "text": "measure",
-                    "support": [{"msg_idx": 2, "quote": "<action>measure</action>"}],
-                }
-            ]
-        }
-
-    monkeypatch.setattr(llm, "llm_json_call_async", respond)
-    graph = asyncio.run(
-        annotate_trace(
-            source(),
-            llm.LLMAnnotator().backend(),
-            config(),
-        )
-    )
-    assert any("Nodes:\n" in request for request in seen)
-    observations = [n for n in graph.nodes if n["time"] == 3]
-    assert len(observations) == 1
-    assert len(observations[0]["support"]) == 2
-    assert all(
-        validate_support_quotes(graph.messages, n["support"])[0] for n in graph.nodes
-    )
-
-
-def test_llm_stream_timeout_retries_even_when_chunks_keep_arriving(monkeypatch):
-    calls, cancelled, delays = [], [], []
-    sleep = asyncio.sleep
-
-    async def stream(stall):
-        try:
-            yield "chunk"
-            if stall:
-                while True:
-                    await sleep(0.001)
-                    yield "chunk"
-        finally:
-            cancelled.append(stall)
-
-    async def respond(**kwargs):
-        calls.append(kwargs)
-        return stream(len(calls) == 1)
-
-    async def retry_sleep(delay):
-        delays.append(delay)
-
-    client = SimpleNamespace(
-        token_counter=lambda **kwargs: 10,
-        acompletion=respond,
-        stream_chunk_builder=lambda chunks, **kwargs: {
-            "model": "resolved",
-            "choices": [{"message": {"content": '{"nodes": []}'}}],
-        },
-    )
-    monkeypatch.setattr(llm, "_load_litellm", lambda: client)
-    monkeypatch.setattr(llm.asyncio, "sleep", retry_sleep)
-    response = asyncio.run(
-        llm.llm_json_call_async(
-            "model", "system", "user", timeout_s=0.02, max_retries=2
-        )
-    )
-    assert response == {"nodes": []}
-    assert len(calls) == 2
-    assert cancelled == [True, False]
-    assert delays == [2]
 
 
 def test_hidden_support_rejected_even_with_strict_support_disabled():
@@ -621,134 +542,6 @@ def test_unknown_jev_tokenizer_fallback_is_byte_sensitive(monkeypatch):
     unicode_tokens, _ = budget.estimate_request({"text": "🧪🧪🧪🧪"})
     assert unicode_tokens > ascii_tokens
     assert identity == "utf8-bytes-plus-256-v1"
-
-
-@pytest.mark.parametrize("provider_rejection", [False, True])
-def test_jev_splits_batches_without_repeating_oversized_payload(
-    monkeypatch, provider_rejection
-):
-    bodies = []
-    monkeypatch.setattr(
-        jev,
-        "estimate_request",
-        lambda body: (500 + len(body["questions"]) * 100, "test"),
-    )
-
-    def post(body):
-        bodies.append(body)
-        if provider_rejection and len(body["questions"]) > 1:
-            raise HTTPError(
-                "https://example.test",
-                400,
-                "Bad Request",
-                {},
-                io.BytesIO(
-                    b'{"error":{"code":"max_tokens_exceeded","message":"secret"}}'
-                ),
-            )
-        return {
-            "answers": [
-                {"name": q["name"], "type": "predicate", "probability": 0.5}
-                for q in body["questions"]
-            ],
-            "usage": {"input_tokens": 42},
-        }
-
-    client = jev.JevClient(
-        "test", batch_size=8, max_request_tokens=0 if provider_rejection else 650
-    )
-    monkeypatch.setattr(client, "_post", post)
-    questions = {f"q{i}": {"type": "noul"} for i in range(4)}
-    answers = asyncio.run(client.evaluate("jev", {"content": "same"}, questions))
-    assert set(answers) == set(questions)
-    assert len({json.dumps(body, sort_keys=True) for body in bodies}) == len(bodies)
-    assert all(json.loads(body["input"]) == {"content": "same"} for body in bodies)
-    assert len(bodies) == (7 if provider_rejection else 4)
-
-
-def test_decisions_honors_requested_budget_above_old_typesafe_limit(monkeypatch):
-    bodies = []
-    monkeypatch.setattr(jev, "estimate_request", lambda body: (40000, "test"))
-
-    def post(body):
-        bodies.append(body)
-        return {"answers": [{"name": "q", "type": "predicate", "probability": 0.5}]}
-
-    client = jev.JevClient("test", max_request_tokens=50000)
-    monkeypatch.setattr(client, "_post", post)
-    answers = asyncio.run(client.evaluate("gpt-6-luna", {}, {"q": {"type": "noul"}}))
-    assert answers["q"]["noul"] == 0.5
-    assert len(bodies) == 1
-
-
-@pytest.mark.parametrize("status", [400, 401, 403])
-def test_other_http_errors_never_trigger_cap_fallback(monkeypatch, status):
-    calls = []
-
-    def fail(body):
-        calls.append(body)
-        raise HTTPError(
-            "https://example.test",
-            status,
-            "Bad request",
-            {},
-            io.BytesIO(b'{"error":"invalid_schema secret"}'),
-        )
-
-    client = jev.JevClient("secret")
-    monkeypatch.setattr(client, "_post", fail)
-    with pytest.raises(jev.JevError, match=f"HTTP {status}") as error:
-        asyncio.run(client.evaluate("jev", {}, {"q": {"type": "noul"}}))
-    assert len(calls) == 1
-    assert "secret" not in str(error.value)
-
-
-def test_single_question_provider_overflow_is_sanitized_and_not_retried(monkeypatch):
-    calls = []
-
-    def fail(body):
-        calls.append(body)
-        raise HTTPError(
-            "https://example.test",
-            400,
-            "Bad request",
-            {},
-            io.BytesIO(b'{"error":{"code":"max_tokens_exceeded","message":"secret"}}'),
-        )
-
-    client = jev.JevClient("secret", max_retries=5)
-    monkeypatch.setattr(client, "_post", fail)
-    with pytest.raises(RequestBudgetExceeded) as error:
-        asyncio.run(
-            client.evaluate("jev", {"text": "private trace"}, {"q": {"type": "noul"}})
-        )
-    assert len(calls) == 1
-    assert error.value.diagnostic["reason"] == "max_tokens_exceeded"
-    assert "secret" not in str(error.value)
-    assert "private trace" not in json.dumps(error.value.diagnostic)
-
-
-def test_llm_reserves_output_and_counts_complete_chat_before_call(monkeypatch):
-    seen = []
-    client = SimpleNamespace(
-        token_counter=lambda **kwargs: seen.append(kwargs) or 500,
-        get_model_info=lambda model: {"max_input_tokens": 1000},
-    )
-    monkeypatch.setattr(llm, "_load_litellm", lambda: client)
-    cfg = replace(config(), llm_output_reserve_tokens=400)
-    view = build_annotation_view(source(), cfg)
-    with (
-        annotation_context(view, cfg, []),
-        pytest.raises(RequestBudgetExceeded) as error,
-    ):
-        asyncio.run(
-            llm.llm_json_call_async("llm", "ontology", "messages and node text")
-        )
-    assert error.value.diagnostic["budget_tokens"] == 600
-    assert seen[0]["messages"] == [
-        {"role": "system", "content": "ontology"},
-        {"role": "user", "content": "messages and node text"},
-    ]
 
 
 def invoke(*options):

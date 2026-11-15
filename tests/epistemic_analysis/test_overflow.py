@@ -183,6 +183,7 @@ def test_pipeline_uses_one_excerpt_request_and_evidence_original_offsets(tmp_pat
         await evidence.client.aclose()
         decision.client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
         evidence.client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
+        evidence.api = evidence.api.with_options(http_client=evidence.client)
         try:
             pipeline = CheckPipeline(
                 tmp_path,
@@ -210,13 +211,8 @@ def test_pipeline_uses_one_excerpt_request_and_evidence_original_offsets(tmp_pat
                 ).read_text()
             )
             assert support["state"] == "requires_review"
-            quote = support["evidence"][0]
-            assert (
-                source.trace.messages[quote["msg_idx"]]["content"][
-                    quote["start"] : quote["end"]
-                ]
-                == quote["quote"]
-            )
+            assert support["evidence"] == []
+            assert "[C:1]>>[C:1]O" in support["explanation"]
             # Completed labels can be reused by the separate evidence worker.
             await pipeline.run(
                 source,

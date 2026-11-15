@@ -16,6 +16,43 @@ ACTION = re.compile(
 )
 
 
+def live_annotation_trace(messages, task):
+    """Convert public agent messages using the same normalizer as saved traces."""
+    from .reports import scientific_messages
+    from .sources.inputs import CheckInput
+
+    context = [{"role": "user", "content": task}] if isinstance(task, str) else task
+    public = [*copy.deepcopy(context), *scientific_messages(messages)]
+    for message in public:
+        content = message.get("content")
+        if isinstance(content, list):
+            content = "\n".join(
+                block["text"]
+                for block in content
+                if isinstance(block, dict)
+                and block.get("type") in {"text", "output_text"}
+                and isinstance(block.get("text"), str)
+            )
+        message["content"] = content or ""
+        if message.get("name") == "submission_proposal":
+            marker = "Proposed final answer (not yet submitted):\n"
+            justification, separator, answer = message["content"].rpartition(marker)
+            if separator:
+                message["content"] = (
+                    justification
+                    + marker
+                    + "<final_answer>"
+                    + answer
+                    + "</final_answer>"
+                )
+    return CheckInput.from_document(
+        {
+            "messages": public,
+            "reconstruction_status": "complete",
+        }
+    ).trace
+
+
 def _parts(message, source):
     text, separator, suffix = message["content"].rpartition(SAVED_FIELDS)
     if not separator:

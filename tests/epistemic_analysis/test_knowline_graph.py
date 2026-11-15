@@ -11,10 +11,10 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from corral.epistemic_analysis.annotators.jev import JevAnnotator, candidate_spans
+from corral.epistemic_analysis.annotators.graph import GraphExtractor, candidate_spans
 from corral.epistemic_analysis.annotators.local import (
+    GraphQuestionClient,
     KnowLineClient,
-    KnowLineGraphClient,
     ProviderConfig,
 )
 from corral.epistemic_analysis.budget import RequestBudgetExceeded
@@ -92,13 +92,13 @@ def test_jev_graph_uses_the_same_decisions_with_native_transport(tmp_path):
             return httpx.Response(200, json={"answers": answers})
 
         provider = KnowLineClient(config(), transport=httpx.MockTransport(handle))
-        native_client = KnowLineGraphClient(
+        native_client = GraphQuestionClient(
             provider, tmp_path, {"task": "shared context"}, batch_size=64
         )
         outputs = []
         try:
             for client in (baseline_client, native_client):
-                annotator = JevAnnotator(client)
+                annotator = GraphExtractor(client)
                 nodes, warnings = await annotator.extract_nodes(
                     messages, "local", 32, 16, 10000
                 )
@@ -133,8 +133,8 @@ def test_jev_graph_uses_the_same_decisions_with_native_transport(tmp_path):
                 tuple(f"m{i}" for i in range(32)),
                 tuple(f"m{i}" for i in range(16, 40)),
             }
-            backend = JevAnnotator(native_client).backend(stop_at_submission=False)
-            assert backend.provenance["annotator"] == "jev"
+            backend = GraphExtractor(native_client).backend(stop_at_submission=False)
+            assert backend.provenance["annotator"] == "graph"
             assert backend.provenance["api"] == "native-systemone"
             assert backend.provenance["provider"]["revision"] == "revision"
             assert backend.provenance["endpoint"] == config().endpoint
@@ -173,10 +173,12 @@ def native(messages, function="submit_answer", arguments=None):
 def test_native_calls_keep_exact_offsets_and_submission_identity():
     messages = native([{"role": "user", "content": "Task"}])
     spans = candidate_spans(messages, 1200)
-    actions = [s for s in spans if s.kind == "action"]
+    actions = [s for s in spans if s.tool_name == "submit_answer"]
     assert len(actions) == 1
     assert actions[0].tool_name == "submit_answer"
-    assert JevAnnotator.submission_span(actions[0])
+    assert GraphExtractor.submission_span(actions[0])
+    assert actions[0].kind == "final"
+    assert actions[0].quote == r"\\u03b1\\u03b2"
     assert (
         messages[1]["content"][
             actions[0].offset : actions[0].offset + len(actions[0].quote)
@@ -207,7 +209,7 @@ def test_escaped_native_arguments_cannot_be_mistaken_for_json_members():
     actions = [s for s in candidate_spans(messages, 1200) if s.kind == "action"]
     assert len(actions) == 1
     assert actions[0].tool_name == "write_file"
-    assert not JevAnnotator.submission_span(actions[0])
+    assert not GraphExtractor.submission_span(actions[0])
 
 
 def test_native_transport_batches_caches_and_preserves_wire_protocol(tmp_path):
@@ -233,7 +235,7 @@ def test_native_transport_batches_caches_and_preserves_wire_protocol(tmp_path):
             return httpx.Response(200, json={"answers": answers, "model": "local"})
 
         provider = KnowLineClient(config(), transport=httpx.MockTransport(handle))
-        client = KnowLineGraphClient(
+        client = GraphQuestionClient(
             provider, tmp_path, {"source_hashes": {"messages": "x"}}, batch_size=2
         )
         questions = {
@@ -312,7 +314,7 @@ def test_native_batches_prepare_and_refill_while_an_earlier_request_is_slow(tmp_
         provider = KnowLineClient(
             replace(config(), concurrency=2), transport=httpx.MockTransport(handle)
         )
-        client = KnowLineGraphClient(provider, tmp_path, {}, batch_size=1)
+        client = GraphQuestionClient(provider, tmp_path, {}, batch_size=1)
         questions = {
             f"q{i}": {
                 "type": "choice",
@@ -340,7 +342,7 @@ def test_native_context_failure_does_not_truncate_source(tmp_path):
             return httpx.Response(200, json={"count": 999999})
 
         provider = KnowLineClient(config(), transport=httpx.MockTransport(handle))
-        client = KnowLineGraphClient(provider, tmp_path, {})
+        client = GraphQuestionClient(provider, tmp_path, {})
         try:
             with pytest.raises(RequestBudgetExceeded):
                 await client.evaluate(
@@ -391,7 +393,7 @@ def test_native_backend_retains_messages_after_submit_and_skips_behavioral_pass(
             ],
             SourceReference("t", "t", "hash"),
         )
-        annotator = JevAnnotator(AbsentClient()).backend(stop_at_submission=False)
+        annotator = GraphExtractor(AbsentClient()).backend(stop_at_submission=False)
         settings = AnnotationConfig(
             model="local", window=3, overlap=1, tool_output_max_chars=0
         )
@@ -429,7 +431,7 @@ def test_cross_window_edges_remain_explicitly_unexamined(tmp_path):
         with annotation_context(
             build_annotation_view(trace, settings), settings, diagnostics, [], issues
         ):
-            edges, _ = await JevAnnotator(EmptyClient()).extract_edges(
+            edges, _ = await GraphExtractor(EmptyClient()).extract_edges(
                 messages, nodes, "local", 2, 1
             )
         assert edges == []
@@ -470,7 +472,7 @@ def test_graph_queue_refills_before_slow_trace_finishes(tmp_path, monkeypatch):
 
     monkeypatch.setattr(module, "verify_code", lambda root, manifest=None: None)
     monkeypatch.setattr(module, "ProviderConfig", lambda **kw: kw)
-    monkeypatch.setattr(module, "KnowLineClient", Client)
+    monkeypatch.setattr(module, "create_provider", Client)
 
     async def exercise():
         last_started = asyncio.Event()

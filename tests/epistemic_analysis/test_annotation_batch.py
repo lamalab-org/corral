@@ -97,8 +97,8 @@ def test_explanation_queue_does_not_retry_one_failed_attempt(tmp_path, monkeypat
         raise AssertionError("An exhausted explanation must not be generated again")
 
     monkeypatch.setattr(batch, "ProviderConfig", lambda **kw: kw)
-    monkeypatch.setattr(batch, "KnowLineClient", Client)
-    monkeypatch.setattr(batch, "GemmaClient", Client)
+    monkeypatch.setattr(batch, "create_provider", Client)
+    monkeypatch.setattr(batch, "OpenAIClient", Client)
     monkeypatch.setattr(batch, "process_job", unexpected)
     asyncio.run(batch.work(tmp_path, "evidence", None))
     status = json.loads((tmp_path / "status/evidence-gpu-5.json").read_text())
@@ -146,8 +146,8 @@ def test_evidence_trace_parallelism_preserves_finished_and_blocked_jobs(
             self.closed = True
 
     monkeypatch.setattr(batch, "ProviderConfig", lambda **kw: kw)
-    monkeypatch.setattr(batch, "KnowLineClient", Client)
-    monkeypatch.setattr(batch, "GemmaClient", Client)
+    monkeypatch.setattr(batch, "create_provider", Client)
+    monkeypatch.setattr(batch, "OpenAIClient", Client)
 
     async def exercise():
         entered = []
@@ -211,8 +211,8 @@ def test_label_queue_refills_before_slow_trace_finishes(
             pass
 
     monkeypatch.setattr(batch, "ProviderConfig", lambda **kw: kw)
-    monkeypatch.setattr(batch, "KnowLineClient", Client)
-    monkeypatch.setattr(batch, "GemmaClient", Client)
+    monkeypatch.setattr(batch, "create_provider", Client)
+    monkeypatch.setattr(batch, "OpenAIClient", Client)
 
     async def exercise():
         third_started = asyncio.Event()
@@ -281,8 +281,8 @@ def test_check_handoff_runs_before_trace_labels_finish_and_is_idempotent(
             pass
 
     monkeypatch.setattr(batch, "ProviderConfig", lambda **kw: kw)
-    monkeypatch.setattr(batch, "KnowLineClient", Client)
-    monkeypatch.setattr(batch, "GemmaClient", Client)
+    monkeypatch.setattr(batch, "create_provider", Client)
+    monkeypatch.setattr(batch, "OpenAIClient", Client)
     seen = []
 
     async def process(root, stage, queued, path, previous, clients, evidence, profile):

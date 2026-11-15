@@ -13,7 +13,7 @@ from .schema import content_hash
 
 
 def save_annotation_artifacts(graph, output: Path) -> None:
-    """Write portable views and exact Jev exchanges for inspection."""
+    """Write portable views and graph request references for inspection."""
     if graph.annotation_view is not None:
         digest = content_hash(graph.annotation_view)
         artifact = f"annotation_views/{digest}.json"

@@ -14,9 +14,7 @@ from corral.epistemic_analysis import (
     ontology,
     read_graph,
 )
-from corral.epistemic_analysis.annotators import llm
-from corral.epistemic_analysis.annotators.jev import JevAnnotator
-from corral.epistemic_analysis.annotators.llm import LLMAnnotator
+from corral.epistemic_analysis.annotators.graph import GraphExtractor
 from corral.epistemic_analysis.pipeline import can_reuse
 
 
@@ -43,51 +41,32 @@ def node(identity, kind, index, messages):
     }
 
 
-@pytest.mark.parametrize("kind", ["llm", "jev"])
+@pytest.mark.parametrize("kind", ["graph"])
 def test_corrected_and_added_observation_nodes_reach_both_backends(monkeypatch, kind):
     source = trace()
     checks = []
-    if kind == "llm":
 
-        async def respond(model, system, user, **kwargs):
-            if system == llm.PASS_A_SYSTEM:
-                return {
-                    "nodes": [
-                        node("ignored", "N", 0, source.messages),
-                        node("ignored2", "T", 2, source.messages),
-                    ]
-                }
-            nodes = json.loads(user.split("\n\nNodes:\n")[1])
-            checks.append({n["time"]: n["type"] for n in nodes})
-            return {"edges": []}
-
-        monkeypatch.setattr(llm, "llm_json_call_async", respond)
-        backend = LLMAnnotator().backend()
-    else:
-
-        class Decisions:
-            async def evaluate(self, model, state, questions):
-                if "nodes" in state:
-                    checks.append(
-                        {n["time"]: n["type"] for n in state["nodes"].values()}
+    class Decisions:
+        async def evaluate(self, model, state, questions):
+            if "nodes" in state:
+                checks.append({n["time"]: n["type"] for n in state["nodes"].values()})
+            answers = {}
+            for key in questions:
+                if key.startswith("edge_"):
+                    answers[key] = {"choice": "unrelated", "confidence": 1.0}
+                else:
+                    span_key, node_type = key.rsplit("_", 1)
+                    span = state["candidates"][span_key]
+                    expected = (
+                        "E"
+                        if span["kind"] == "observation"
+                        else ("N" if span["msg_idx"] == 0 else "T")
                     )
-                answers = {}
-                for key in questions:
-                    if key.startswith("edge_"):
-                        answers[key] = {"choice": "unrelated", "confidence": 1.0}
-                    else:
-                        span_key, node_type = key.rsplit("_", 1)
-                        span = state["candidates"][span_key]
-                        expected = (
-                            "E"
-                            if span["kind"] == "observation"
-                            else ("N" if span["msg_idx"] == 0 else "T")
-                        )
-                        choice = "present" if node_type == expected else "absent"
-                        answers[key] = {"choice": choice, "confidence": 1.0}
-                return answers
+                    choice = "present" if node_type == expected else "absent"
+                    answers[key] = {"choice": choice, "confidence": 1.0}
+            return answers
 
-        backend = JevAnnotator(Decisions()).backend()
+    backend = GraphExtractor(Decisions()).backend()
     graph = asyncio.run(
         annotate_trace(
             source, backend, AnnotationConfig("annotator-model", window=20, overlap=5)
@@ -113,13 +92,13 @@ def fake_backend():
     return AnnotationBackend(nodes, edges, {"annotator": "fake", "threshold": 0.5})
 
 
-@pytest.mark.parametrize("kind", ["llm", "jev"])
+@pytest.mark.parametrize("kind", ["graph"])
 def test_check_rubric_changes_do_not_invalidate_graph_annotations(monkeypatch, kind):
     from corral.epistemic_analysis import epistemic_prompts
     from corral.epistemic_analysis.pipeline import annotation_fingerprint
 
     def backend():
-        return (LLMAnnotator() if kind == "llm" else JevAnnotator(None)).backend()
+        return GraphExtractor(None).backend()
 
     source, config = trace(), AnnotationConfig("model")
     before = annotation_fingerprint(source, backend(), config)
@@ -222,7 +201,7 @@ def test_invalid_saved_graphs_are_rejected(document):
         read_graph(document)
 
 
-@pytest.mark.parametrize("kind", ["jev", "llm"])
+@pytest.mark.parametrize("kind", ["graph"])
 def test_coverage_allows_abstention_and_uses_only_the_annotation_view(kind):
     messages = [
         {"role": "user", "content": "Measure the sample."},

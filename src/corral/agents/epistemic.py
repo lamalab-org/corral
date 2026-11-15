@@ -8,14 +8,8 @@ from corral.agents.schema import SURRENDER_SENTINEL, AgentOutcome, BudgetExhaust
 from corral.agents.tool_calling import ToolCallingAgent
 from corral.core.action import SUBMIT_ANSWER_TOOL_NAME, Action
 from corral.core.errors import concise_error_message
-from corral.epistemic_analysis.decision_thresholds import CALIBRATED_THRESHOLD_POLICY
-from corral.epistemic_analysis.decisions import (
-    DEFAULT_DECISIONS_MODEL,
-    DEFAULT_EXPLANATION_CONCURRENCY,
-    REPORT_MESSAGE_NAME,
+from corral.epistemic_analysis.reports import (
     SUBMISSION_REVIEW_MESSAGE_NAME,
-    DecisionsAnnotator,
-    EpistemicReport,
     scientific_messages,
 )
 
@@ -82,66 +76,29 @@ class EpistemicAgent(ToolCallingAgent):
     """Annotate public activity and review proposed answers before submission.
 
     Reports are persisted as named session messages with full structured metadata.
-    The actor sees the full report history; no reports are sent to the annotator.
+    The actor sees graph-matched feedback; no reports are sent to the annotator.
     All mutable trajectory/report state belongs to the session, so an
     agent instance can be reused across concurrent trials.
     """
 
     def __init__(
         self,
-        model: str = "openai/gpt-4o",
+        model: str | None = None,
         *,
         system_prompt: str | None = None,
         user_prompt: str | None = None,
-        annotator: DecisionsAnnotator | None = None,
-        actor_refusal_max_retries: int = 1,
-        epistemic_model: str = DEFAULT_DECISIONS_MODEL,
-        epistemic_explanation_model: str | None = None,
-        epistemic_api_key: str | None = None,
-        epistemic_base_url: str | None = None,
-        epistemic_timeout_s: float = 120,
-        epistemic_max_retries: int = 2,
-        epistemic_stream_explanations: bool = False,
-        epistemic_explanation_concurrency: int = DEFAULT_EXPLANATION_CONCURRENCY,
-        epistemic_pattern_thresholds: str | Mapping[str, float] | None = (
-            CALIBRATED_THRESHOLD_POLICY
-        ),
         **kwargs: Any,
     ) -> None:
-        if (
-            isinstance(actor_refusal_max_retries, bool)
-            or not isinstance(actor_refusal_max_retries, int)
-            or actor_refusal_max_retries < 0
-        ):
-            raise ValueError("actor_refusal_max_retries must be a non-negative integer")
         super().__init__(
             model=model,
             system_prompt=(
                 EPISTEMIC_SYSTEM_PROMPT if system_prompt is None else system_prompt
             ),
             user_prompt=user_prompt or "epistemic/user_prompt",
+            epistemic=True,
             **kwargs,
         )
-        self.actor_refusal_max_retries = actor_refusal_max_retries
         self.system_prompt += "\n\n" + EPISTEMIC_PROMPT
-        self.annotator = (
-            annotator
-            if annotator is not None
-            else DecisionsAnnotator(
-                model=epistemic_model,
-                explanation_model=epistemic_explanation_model,
-                api_key=epistemic_api_key,
-                base_url=epistemic_base_url,
-                timeout_s=epistemic_timeout_s,
-                max_retries=epistemic_max_retries,
-                stream_explanations=epistemic_stream_explanations,
-                explanation_concurrency=epistemic_explanation_concurrency,
-                pattern_thresholds=epistemic_pattern_thresholds,
-            )
-        )
-
-    def _should_retry_refusal(self, consecutive_refusals: int) -> bool:
-        return consecutive_refusals <= self.actor_refusal_max_retries
 
     def _tools(self, session: AgentSession) -> list[dict[str, Any]]:
         tools = super()._tools(session)
@@ -155,7 +112,7 @@ class EpistemicAgent(ToolCallingAgent):
                     "Put only the complete answer in the answer argument.\n"
                     "Text alone does not complete the task.\n"
                     "The proposed answer is reviewed before acceptance.\n"
-                    "If supported unconstructive epistemic patterns remain, address the feedback, validate or revise the answer, and call submit_answer again."
+                    "If graph-matched unconstructive epistemic patterns remain, address the feedback, validate or revise the answer, and call submit_answer again."
                 )
         return tools
 
@@ -166,47 +123,6 @@ class EpistemicAgent(ToolCallingAgent):
             "Before any tool call, including submit_answer, briefly describe its purpose and the relevant evidence.\n"
             "Only submit_answer completes the task."
         )
-
-    async def _before_turn(
-        self,
-        session: AgentSession,
-        messages: list[dict[str, Any]],
-        trajectory: list[dict[str, Any]],
-        usage: _UsageAccumulator,
-    ) -> list[dict[str, Any]]:
-        # The loop supplies canonical history plus local provider calls/results,
-        # excluding initial prompts and few-shot demonstrations.
-        observed = scientific_messages(trajectory)
-        # Task facts and scaffolding alone are not prior agent behavior. Use the
-        # trajectory rather than a local iteration counter so resumed runs still
-        # receive feedback before their next turn.
-        if not any(message.get("role") == "assistant" for message in observed):
-            return messages
-        await self._record_report(session, messages, observed, usage)
-        return messages
-
-    async def _record_report(
-        self,
-        session: AgentSession,
-        messages: list[dict[str, Any]],
-        observed: list[dict[str, Any]],
-        usage: _UsageAccumulator,
-    ) -> EpistemicReport:
-        report = await self.annotator.annotate(observed, task=session.prompt)
-        model_calls = report.usage.get("llm_calls", 1)
-        usage.add(report.usage, llm_calls=model_calls)
-        feedback = {
-            "role": "user",
-            "name": REPORT_MESSAGE_NAME,
-            "content": report.format_for_agent(),
-        }
-        await session.record_message(
-            {**feedback, "metadata": {"epistemic_report": report.to_dict()}},
-            usage=report.usage,
-            llm_calls=model_calls,
-        )
-        messages.append(feedback)
-        return report
 
     async def _handle_submission(
         self,
