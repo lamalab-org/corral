@@ -1,19 +1,5 @@
 #!/usr/bin/env python3
-"""Generate and validate psychometrics task data.
-
-    python build.py                  # regenerate every task
-    python build.py --verify         # check every task is solvable as intended
-    python build.py --naive          # check the default analysis fails on each
-    python build.py --check          # build, verify, naive, then the scoring tests
-    python build.py --tasks 3 7      # limit any of the above to these tasks
-    python build.py --level 2        # limit it to one level instead
-    python build.py --data-root DIR  # build into DIR instead of the checkout
-
-Needs the package installed (``uv sync --group dev``); runs from any
-directory:
-
-    uv run python build.py --check
-"""
+"""Build, publish, and validate psychometrics task artifacts."""
 
 from __future__ import annotations
 
@@ -125,6 +111,7 @@ def scoring_tests(root, level=None, numbers=None):
 
 
 def main():
+    """Run selected build and validation stages."""
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )

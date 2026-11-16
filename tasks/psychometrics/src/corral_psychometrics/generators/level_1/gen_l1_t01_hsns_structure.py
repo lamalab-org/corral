@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Task 01 artifacts and scoring metadata.
-
-Generating model, HSNS in the United States: two correlated factors.
-
-    egocentrism      HSNS1 HSNS4 HSNS5 HSNS6 HSNS8 HSNS10
-    oversensitivity  HSNS2 HSNS3 HSNS7 HSNS9
-    phi 0.35
-
-On top of that: HSNS9 also loads 0.15 on egocentrism, HSNS5 and HSNS10 agree
-0.10 beyond the factors, and two items carry small gender DIF. Outside the
-United States the same two factors are measured worse and correlate 0.68, so
-pooling the countries blurs the structure the task asks for.
-"""
+"""Generate the HSNS structure task and validate competing factor models."""
 
 from __future__ import annotations
 
@@ -49,7 +37,6 @@ PHI = 0.35
 # Two small extras, so that the true model is a close approximation of the
 # data rather than an exact match. Real data never match a model exactly.
 CROSS_LOADING = ("HSNS9", F1, 0.15)
-RESIDUAL_CORR = (("HSNS5", "HSNS10"), 0.10)
 
 # Participants outside the US come from a weaker, less differentiated population.
 LOADING_SCALE_NON_US = 0.72
@@ -96,9 +83,9 @@ A single JSON object:
 
 `model_syntax` uses semopy syntax (`=~` loadings, `~~` (co)variances, `0*` to fix a parameter to zero).
 
-`loadings` gives, for each item you analysed, the largest absolute standardised loading that item has on any factor in your model.
+`loadings`: Largest absolute standardised loading per item across all model factors.
 
-`factor_correlation` is the correlation between the factors when your model has exactly two correlated factors, and null otherwise.
+`factor_correlation`: Factor correlation for a model with exactly two correlated factors; otherwise `null`.
 """
 
 
@@ -116,10 +103,9 @@ def build_dataset(rng):
             loadings=LOADINGS,
             phi_matrix=np.array([[1.0, phi], [phi, 1.0]]),
             factor_names=[F1, F2],
-            taus=C.THRESHOLDS,
+            intercepts=C.INTERCEPTS,
             scale=1.0 if is_us else LOADING_SCALE_NON_US,
             cross=CROSS_LOADING if is_us else None,
-            resid_corr=RESIDUAL_CORR if is_us else None,
             dif=GENDER_DIF if is_us else None,
             female=demo.gender == 2,
         )
@@ -130,14 +116,19 @@ def build_dataset(rng):
             phi_dd[names.index(b), names.index(a)] = v
         # Three correlated traits, the same everywhere: filler for this task.
         dd = C.correlated_block(
-            n, rng, loadings=DD_LOADINGS, phi_matrix=phi_dd, factor_names=names, taus=C.THRESHOLDS
+            n,
+            rng,
+            loadings=DD_LOADINGS,
+            phi_matrix=phi_dd,
+            factor_names=names,
+            intercepts=C.INTERCEPTS,
         )
         frames.append(pd.concat([hsns, dd, demo], axis=1))
     return C.finalize(frames, rng, SEED)
 
 
 def reference_syntax():
-    """lavaan syntax for the generating model, used as the scoring floor."""
+    """Reference measurement model in semopy syntax."""
     f1 = "+".join(k for k, v in LOADINGS.items() if v[0] == F1)
     f2 = "+".join(k for k, v in LOADINGS.items() if v[0] == F2)
     return f"F1 =~ {f1}\nF2 =~ {f2}"
@@ -173,9 +164,8 @@ def population_correlation_matrix():
         loadings=LOADINGS,
         phi_matrix=np.array([[1.0, PHI], [PHI, 1.0]]),
         factor_names=[F1, F2],
-        taus=C.THRESHOLDS,
+        intercepts=C.INTERCEPTS,
         cross=CROSS_LOADING,
-        resid_corr=RESIDUAL_CORR,
     )[ITEMS]
     return C.population_matrix(big, list(big.columns))
 
@@ -205,7 +195,6 @@ def build_truth(floor, pop, data_sha, rows):
                 "factor_of_item": {k: v[0] for k, v in LOADINGS.items()},
                 "phi": PHI,
                 "cross_loading": list(CROSS_LOADING),
-                "residual_correlation": [list(RESIDUAL_CORR[0]), RESIDUAL_CORR[1]],
             },
             "non_us": {"loading_scale": LOADING_SCALE_NON_US, "phi": PHI_NON_US},
             "gender_dif": GENDER_DIF,
@@ -213,7 +202,7 @@ def build_truth(floor, pop, data_sha, rows):
                 "loadings": {k: v[1] for k, v in DD_LOADINGS.items()},
                 "phi": {f"{a}_{b}": v for (a, b), v in DD_PHI.items()},
             },
-            "thresholds": C.THRESHOLDS,
+            "item_intercepts": C.INTERCEPTS,
         },
         "provenance": C.provenance(Path(__file__).name, SEED, rows, data_sha),
     }
@@ -232,7 +221,6 @@ def build_task_json(data_sha):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "codebook.md",
                     "data.csv",
@@ -335,7 +323,7 @@ def naive(df, pop):
         ("pooled (no filter)", df),
     ):
         X = sub[ITEMS]
-        X = X[(X != 0).all(axis=1)].astype(float)
+        X = X[X.notna().all(axis=1)].astype(float)
         import semopy
 
         model = semopy.Model(spec)
@@ -361,6 +349,7 @@ def naive(df, pop):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     rng = np.random.default_rng(SEED)
     print("Simulating ...")

@@ -4,9 +4,10 @@
 420 trials. Layout, names and index columns follow
 [`../README.md`](../README.md).
 
-The earlier full-benchmark runs (10 tasks per level, October) are archived in
+Full-task benchmark runs (10 tasks per level) are archived in
 [`archive/october-full/`](archive/october-full/); `build_index.py` ignores
-`archive/`.
+`archive/`. The archive now contains replacement results from the 20-task
+Psychometrics revision in PR #481; see its README for run provenance.
 
 ## Tasks (corral-mini v1)
 

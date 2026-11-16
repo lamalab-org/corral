@@ -1,16 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Task 02 artifacts and scoring metadata.
-
-Generating model, Dirty Dozen in the United States: bifactor.
-
-    broad    one trait under all 12 items
-    narrow   one per subscale - M, P, N - uncorrelated with the broad trait
-
-Outside the United States there is no broad trait at all, only the three
-subscales, correlated 0.20 to 0.35 and all measured worse. Analysing the
-countries together recovers neither picture. The HSNS items sit in the file
-as two correlated factors and belong to no part of this task.
-"""
+"""Generate the Dirty Dozen S−1 structure task."""
 
 from __future__ import annotations
 
@@ -28,9 +17,8 @@ TASK = paths.task(__file__)
 
 ITEMS = C.DD_ITEMS
 
-# Every item measures one broad trait and, on top of that, the narrower trait
-# its subscale is named for. The two are unrelated to each other, so what an
-# item explains is split between them.
+# Machiavellianism defines the reference factor. Only the other two facets
+# receive specific factors; their residual association is estimated.
 SPECIFIC_OF = {
     "DDM1": "M",
     "DDM2": "M",
@@ -50,29 +38,26 @@ GENERAL_LOADINGS = {
     "DDM2": 0.52,
     "DDM3": 0.48,
     "DDM4": 0.60,
-    "DDP1": 0.55,
-    "DDP2": 0.50,
-    "DDP3": 0.53,
-    "DDP4": 0.38,
-    "DDN1": 0.42,
-    "DDN2": 0.40,
-    "DDN3": 0.50,
-    "DDN4": 0.52,
+    "DDP1": 0.479710,
+    "DDP2": 0.436100,
+    "DDP3": 0.462266,
+    "DDP4": 0.331436,
+    "DDN1": 0.3738,
+    "DDN2": 0.3560,
+    "DDN3": 0.4450,
+    "DDN4": 0.4628,
 }
 SPECIFIC_LOADINGS = {
-    "DDM1": 0.48,
-    "DDM2": 0.44,
-    "DDM3": 0.42,
-    "DDM4": 0.50,
-    "DDP1": 0.52,
-    "DDP2": 0.48,
-    "DDP3": 0.55,
-    "DDP4": 0.35,
-    "DDN1": 0.58,
-    "DDN2": 0.56,
-    "DDN3": 0.45,
-    "DDN4": 0.30,
+    "DDP1": 0.453544,
+    "DDP2": 0.418656,
+    "DDP3": 0.479710,
+    "DDP4": 0.305270,
+    "DDN1": 0.5162,
+    "DDN2": 0.4984,
+    "DDN3": 0.4005,
+    "DDN4": 0.2670,
 }
+SPECIFIC_PHI = 0.25
 
 # Outside the US there is no broad trait at all, only three related ones, and
 # all of them are measured worse. Analysing everyone together recovers
@@ -116,9 +101,9 @@ A single JSON object:
 
 `model_syntax` uses semopy syntax (`=~` loadings, `~~` (co)variances, `0*` to fix a parameter to zero).
 
-`loadings` gives, for each item you analysed, the largest absolute standardised loading that item has on any factor in your model.
+`loadings`: Largest absolute standardised loading per item across all model factors.
 
-`factor_correlation` is the correlation between the factors when your model has exactly two correlated factors, and null otherwise.
+`factor_correlation`: Factor correlation for a model with exactly two correlated factors; otherwise `null`.
 """
 
 
@@ -128,15 +113,16 @@ def build_dataset(rng):
     for country, n in C.N_BY_COUNTRY.items():
         demo = C.demographics(n, rng, country)
         if country == "US":
-            # One broad trait plus a narrow one per subscale.
-            dd = C.bifactor_block(
+            dd = C.bifactor_s1_block(
                 n,
                 rng,
                 general=GENERAL_LOADINGS,
                 specific=SPECIFIC_LOADINGS,
                 specific_of=SPECIFIC_OF,
                 items=ITEMS,
-                taus=C.THRESHOLDS,
+                intercepts=C.INTERCEPTS,
+                reference="M",
+                specific_phi=SPECIFIC_PHI,
             )
         else:
             names = ["M", "P", "N"]
@@ -151,7 +137,7 @@ def build_dataset(rng):
                 loadings={i: (SPECIFIC_OF[i], NON_US_LOADING[SPECIFIC_OF[i]]) for i in ITEMS},
                 phi_matrix=phi,
                 factor_names=names,
-                taus=C.THRESHOLDS,
+                intercepts=C.INTERCEPTS,
             )[ITEMS]
         # Two correlated traits, the same everywhere: filler for this task.
         hsns = C.correlated_block(
@@ -160,19 +146,19 @@ def build_dataset(rng):
             loadings=HSNS_LOADINGS,
             phi_matrix=np.array([[1.0, HSNS_PHI], [HSNS_PHI, 1.0]]),
             factor_names=["ego", "sens"],
-            taus=C.THRESHOLDS,
+            intercepts=C.INTERCEPTS,
         )
         frames.append(pd.concat([hsns, dd, demo], axis=1))
     return C.finalize(frames, rng, SEED)
 
 
 def reference_syntax():
-    """lavaan syntax for the generating model, used as the scoring floor."""
+    """Reference measurement model in semopy syntax."""
     by = {k: [i for i in ITEMS if SPECIFIC_OF[i] == k] for k in "MPN"}
     lines = [f"G =~ {'+'.join(ITEMS)}"]
-    lines += [f"S{k} =~ {'+'.join(by[k])}" for k in "MPN"]
-    lines += [f"G ~~ 0*S{k}" for k in "MPN"]
-    lines += ["SM ~~ 0*SP", "SM ~~ 0*SN", "SP ~~ 0*SN"]
+    lines += [f"S{k} =~ {'+'.join(by[k])}" for k in "PN"]
+    lines += [f"G ~~ 0*S{k}" for k in "PN"]
+    lines += ["SP ~~ SN"]
     return "\n".join(lines)
 
 
@@ -184,28 +170,30 @@ def candidate_models():
         "unidimensional": f"G =~ {'+'.join(ITEMS)}",
         "three_correlated_factors": three,
         "second_order": three + "\nDT =~ FM+FP+FN",
-        "bifactor_general_plus_specifics": reference_syntax(),
+        "bifactor_s1_machiavellianism_reference": reference_syntax(),
     }
 
 
 def population_correlation_matrix():
     """Correlation matrix a perfectly specified model would reproduce."""
     rng = np.random.default_rng(SEED + 999)
-    big = C.bifactor_block(
+    big = C.bifactor_s1_block(
         POP_REFERENCE_N,
         rng,
         general=GENERAL_LOADINGS,
         specific=SPECIFIC_LOADINGS,
         specific_of=SPECIFIC_OF,
         items=ITEMS,
-        taus=C.THRESHOLDS,
+        intercepts=C.INTERCEPTS,
+        reference="M",
+        specific_phi=SPECIFIC_PHI,
     )
     return C.population_matrix(big, list(big.columns))
 
 
 def primary_loadings():
     """Largest absolute loading generated for each item, across all factors."""
-    return {i: round(max(GENERAL_LOADINGS[i], SPECIFIC_LOADINGS[i]), 3) for i in ITEMS}
+    return {i: round(max(GENERAL_LOADINGS[i], SPECIFIC_LOADINGS.get(i, 0.0)), 3) for i in ITEMS}
 
 
 def build_truth(floor, pop, data_sha, rows):
@@ -213,11 +201,16 @@ def build_truth(floor, pop, data_sha, rows):
     return {
         "task_id": TASK_ID,
         "scored": {
-            "model_family": "bifactor_general_plus_specifics",
-            "n_factors": 4,
+            "model_family": "bifactor_s1_machiavellianism_reference",
+            "facet_score_omega": facet_reliability(),
+            "n_factors": 3,
             "loadings": primary_loadings(),
             "item_assignment": {
-                i: ("G" if GENERAL_LOADINGS[i] >= SPECIFIC_LOADINGS[i] else f"S{SPECIFIC_OF[i]}")
+                i: (
+                    "G"
+                    if GENERAL_LOADINGS[i] >= SPECIFIC_LOADINGS.get(i, 0.0)
+                    else f"S{SPECIFIC_OF[i]}"
+                )
                 for i in ITEMS
             },
         },
@@ -234,7 +227,8 @@ def build_truth(floor, pop, data_sha, rows):
                 "general_loadings": GENERAL_LOADINGS,
                 "specific_loadings": SPECIFIC_LOADINGS,
                 "specific_of_item": SPECIFIC_OF,
-                "factors_orthogonal": True,
+                "reference_facet": "M",
+                "specific_factor_correlation": SPECIFIC_PHI,
             },
             "non_us": {
                 "structure": "three_correlated_factors",
@@ -245,7 +239,7 @@ def build_truth(floor, pop, data_sha, rows):
                 "loadings": {k: v[1] for k, v in HSNS_LOADINGS.items()},
                 "phi": HSNS_PHI,
             },
-            "thresholds": C.THRESHOLDS,
+            "item_intercepts": C.INTERCEPTS,
         },
         "provenance": C.provenance(Path(__file__).name, SEED, rows, data_sha),
     }
@@ -262,7 +256,7 @@ def build_task_json(data_sha):
                 "psychometrics",
                 "factor analysis",
                 "model selection",
-                "bifactor",
+                "bifactor-(S-1)",
                 "Dirty Dozen",
             ],
             "metrics": ["binary", "partial"],
@@ -270,7 +264,6 @@ def build_task_json(data_sha):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "codebook.md",
                     "data.csv",
@@ -306,6 +299,19 @@ def build_task_json(data_sha):
     ]
 
 
+def facet_reliability():
+    """Population omega of each four-item facet score, including both factors."""
+    result = {}
+    for facet in ("M", "P", "N"):
+        items = [item for item in ITEMS if SPECIFIC_OF[item] == facet]
+        general = np.array([GENERAL_LOADINGS[item] for item in items])
+        specific = np.array([SPECIFIC_LOADINGS.get(item, 0.0) for item in items])
+        signal = general.sum() ** 2 + specific.sum() ** 2
+        error = np.sum(1 - general**2 - specific**2)
+        result[facet] = float(signal / (signal + error))
+    return result
+
+
 def verify(df, pop):
     """Confirm the intended answer wins and each rival fails for its own reason."""
     from scipy.stats import chi2 as chi2_dist
@@ -330,9 +336,13 @@ def verify(df, pop):
         )
     print(pd.DataFrame(rows).to_string(index=False, float_format=lambda v: f"{v:.4f}"))
 
-    truth = criteria["bifactor_general_plus_specifics"]
+    truth = criteria["bifactor_s1_machiavellianism_reference"]
     three, second = criteria["three_correlated_factors"], criteria["second_order"]
     checks = [
+        (
+            "facet-score population reliability is between .60 and .70",
+            all(0.60 <= value <= 0.70 for value in facet_reliability().values()),
+        ),
         (
             "the three-factor model looks acceptable on its own (CFI > .95)",
             three["CFI"] > 0.95,
@@ -373,7 +383,7 @@ def naive(df, pop):
         ("pooled (no filter)", df),
     ):
         X = sub[ITEMS]
-        X = X[(X != 0).all(axis=1)].astype(float)
+        X = X[X.notna().all(axis=1)].astype(float)
         fitted = {k: abs(v) for k, v in C.loadings(C.fit(spec, X, ITEMS)).items()}
         worst = max(abs(fitted[i] - truth[i]) for i in ITEMS)
         outcome[label] = worst <= 0.08
@@ -389,6 +399,7 @@ def naive(df, pop):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     rng = np.random.default_rng(SEED)
     print("Simulating ...")

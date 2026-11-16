@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Task 08 artifacts and scoring metadata.
-
-Two instruments, each entitling its user to a different kind of score.
-
-    HSNS          one factor, modest and fairly even loadings, plus one small
-                  residual covariance. A sound total score, no subscales.
-    Dirty Dozen   bifactor with a weak broad trait under three strong narrow
-                  ones. Defensible subscales, no defensible total.
-
-Outside the United States both instruments behave the other way round - the
-HSNS splits into two factors and the Dirty Dozen gains a dominant general
-factor - so pooling the countries reverses both verdicts.
-"""
+"""Generate the task assessing the interpretation of total and facet scores."""
 
 from __future__ import annotations
 
@@ -47,19 +35,15 @@ HSNS_LOADINGS = {
     "HSNS9": 0.47,
     "HSNS10": 0.43,
 }
-# Two items are worded alike and agree a little beyond the trait. Small enough
-# to leave the total score sound, large enough that the model is an
-# approximation rather than an exact match.
-HSNS_RESIDUAL_CORR = (("HSNS2", "HSNS7"), 0.10)
 
-# A weak broad trait under three strong narrow ones. The balance between the
-# two varies from item to item within a subscale. Without that variation the
-# model would be three related traits written a different way.
+
+# Machiavellianism defines the reference factor. Its items do not load on a
+# specific factor; P and N retain strong residual facets.
 DD_GENERAL = {
-    "DDM1": 0.46,
-    "DDM2": 0.38,
-    "DDM3": 0.22,
-    "DDM4": 0.44,
+    "DDM1": 0.80,
+    "DDM2": 0.78,
+    "DDM3": 0.76,
+    "DDM4": 0.82,
     "DDP1": 0.40,
     "DDP2": 0.30,
     "DDP3": 0.44,
@@ -70,10 +54,6 @@ DD_GENERAL = {
     "DDN4": 0.30,
 }
 DD_SPECIFIC = {
-    "DDM1": 0.62,
-    "DDM2": 0.74,
-    "DDM3": 0.80,
-    "DDM4": 0.66,
     "DDP1": 0.70,
     "DDP2": 0.78,
     "DDP3": 0.64,
@@ -83,15 +63,14 @@ DD_SPECIFIC = {
     "DDN3": 0.66,
     "DDN4": 0.74,
 }
+DD_SPECIFIC_PHI = 0.25
 
-# Outside the United States both instruments behave differently, in the
-# direction that makes each one's verdict come out wrong.
+# Outside the United States the HSNS splits and the Dirty Dozen is one factor.
 NON_US_HSNS_F1 = ["HSNS1", "HSNS4", "HSNS5", "HSNS6", "HSNS8", "HSNS10"]
 NON_US_HSNS_F2 = ["HSNS2", "HSNS3", "HSNS7", "HSNS9"]
 NON_US_HSNS_LOADING = 0.60
 NON_US_HSNS_PHI = 0.25
-NON_US_DD_GENERAL = 0.70
-NON_US_DD_SPECIFIC = 0.25
+NON_US_DD_LOADING = 0.70
 
 TRUTH = {"hsns": "total_only", "dirty_dozen": "subscales_only"}
 OMEGA_H_FLOOR = 0.70
@@ -126,9 +105,6 @@ and runnable so the fit on the United States sample can be reproduced.
 """
 
 
-# --------------------------------------------------------------------------
-# Simulation
-# --------------------------------------------------------------------------
 def simulate_hsns(n, rng, us):
     """One factor in the United States; two weakly correlated factors elsewhere."""
     if us:
@@ -139,31 +115,38 @@ def simulate_hsns(n, rng, us):
             loadings={i: ("F", HSNS_LOADINGS[i]) for i in HSNS},
             phi_matrix=np.array([[1.0]]),
             factor_names=["F"],
-            taus=C.THRESHOLDS,
-            resid_corr=HSNS_RESIDUAL_CORR,
+            intercepts=C.INTERCEPTS,
         )[HSNS]
     phi = np.array([[1.0, NON_US_HSNS_PHI], [NON_US_HSNS_PHI, 1.0]])
     loadings = {i: ("A" if i in NON_US_HSNS_F1 else "B", NON_US_HSNS_LOADING) for i in HSNS}
     # Two weakly correlated factors instead: no total score to defend.
     return C.correlated_block(
-        n, rng, loadings=loadings, phi_matrix=phi, factor_names=["A", "B"], taus=C.THRESHOLDS
+        n, rng, loadings=loadings, phi_matrix=phi, factor_names=["A", "B"], intercepts=C.INTERCEPTS
     )[HSNS]
 
 
 def simulate_dd(n, rng, us):
-    """A weak general factor under strong specifics in the United States; a
-    dominant general factor with little left over elsewhere."""
-    general = DD_GENERAL if us else {i: NON_US_DD_GENERAL for i in DD}
-    specific = DD_SPECIFIC if us else {i: NON_US_DD_SPECIFIC for i in DD}
-    return C.bifactor_block(
+    """Reference-facet structure in the US; one broad factor elsewhere."""
+    if us:
+        return C.bifactor_s1_block(
+            n,
+            rng,
+            DD_GENERAL,
+            DD_SPECIFIC,
+            SPECIFIC_OF,
+            DD,
+            C.INTERCEPTS,
+            reference="M",
+            specific_phi=DD_SPECIFIC_PHI,
+        )
+    return C.correlated_block(
         n,
         rng,
-        general=general,
-        specific=specific,
-        specific_of=SPECIFIC_OF,
-        items=DD,
-        taus=C.THRESHOLDS,
-    )
+        {i: ("D", NON_US_DD_LOADING) for i in DD},
+        np.array([[1.0]]),
+        ["D"],
+        C.INTERCEPTS,
+    )[DD]
 
 
 def build_dataset(rng):
@@ -184,23 +167,23 @@ def build_dataset(rng):
     return C.finalize(frames, rng, SEED)
 
 
-# --------------------------------------------------------------------------
-# Models and reliability
-# --------------------------------------------------------------------------
 def hsns_syntax():
+    """Return the HSNS measurement model."""
     return "H =~ " + "+".join(HSNS)
 
 
 def dd_bifactor():
+    """Return the Dirty Dozen S−1 measurement model."""
     by = {k: [i for i in DD if SPECIFIC_OF[i] == k] for k in SUBSCALES}
     lines = ["G =~ " + "+".join(DD)]
-    lines += [f"S{k} =~ {'+'.join(by[k])}" for k in SUBSCALES]
-    lines += [f"G ~~ 0*S{k}" for k in SUBSCALES]
-    lines += ["SM ~~ 0*SP", "SM ~~ 0*SN", "SP ~~ 0*SN"]
+    lines += [f"S{k} =~ {'+'.join(by[k])}" for k in "PN"]
+    lines += [f"G ~~ 0*S{k}" for k in "PN"]
+    lines += ["SP ~~ SN"]
     return "\n".join(lines)
 
 
 def dd_three_factor():
+    """Return the correlated three-facet comparison model."""
     by = {k: [i for i in DD if SPECIFIC_OF[i] == k] for k in SUBSCALES}
     return "\n".join(f"F{k} =~ {'+'.join(by[k])}" for k in SUBSCALES)
 
@@ -210,15 +193,13 @@ def reference_syntax():
     return hsns_syntax() + "\n" + dd_bifactor()
 
 
-def omega(general, specific, items):
-    """Proportion of a sum score's variance due to the general factor, and to all
-    common factors: omega_hierarchical and omega_total."""
+def omega(general, specific, items, specific_phi=DD_SPECIFIC_PHI):
+    """Reference-factor and total common variance shares of an item sum."""
     from_general = sum(general[i] for i in items) ** 2
-    from_specific = sum(
-        sum(specific[i] for i in items if SPECIFIC_OF[i] == k) ** 2
-        for k in dict.fromkeys(SPECIFIC_OF[i] for i in items)
-    )
-    unique = sum(1 - general[i] ** 2 - specific[i] ** 2 for i in items)
+    p = sum(specific.get(i, 0.0) for i in items if SPECIFIC_OF[i] == "P")
+    n = sum(specific.get(i, 0.0) for i in items if SPECIFIC_OF[i] == "N")
+    from_specific = p**2 + n**2 + 2 * specific_phi * p * n
+    unique = sum(1 - general[i] ** 2 - specific.get(i, 0.0) ** 2 for i in items)
     total = from_general + from_specific + unique
     return from_general / total, (from_general + from_specific) / total
 
@@ -229,8 +210,8 @@ def hsns_omega():
     return common / (common + sum(1 - v**2 for v in HSNS_LOADINGS.values()))
 
 
-def omega_h_from_fit(X):
-    """Omega_hierarchical of the Dirty Dozen total, from a fitted bifactor model."""
+def reference_share_from_fit(X):
+    """Reference-factor variance share from a fitted S-1 model."""
     import semopy
 
     model = semopy.Model(dd_bifactor())
@@ -239,7 +220,12 @@ def omega_h_from_fit(X):
     load = ins[ins.op == "~"]
     general = {r["lval"]: float(r["Est. Std"]) for _, r in load.iterrows() if r["rval"] == "G"}
     specific = {r["lval"]: float(r["Est. Std"]) for _, r in load.iterrows() if r["rval"] != "G"}
-    return omega(general, specific, DD)[0]
+    cov = ins[
+        (ins.op == "~~")
+        & (((ins.lval == "SP") & (ins.rval == "SN")) | ((ins.lval == "SN") & (ins.rval == "SP")))
+    ]
+    phi = float(cov["Est. Std"].iloc[0])
+    return omega(general, specific, DD, phi)[0]
 
 
 def population_correlation_matrix():
@@ -251,19 +237,16 @@ def population_correlation_matrix():
     return C.population_matrix(big, ITEMS)
 
 
-# --------------------------------------------------------------------------
-# Artifacts
-# --------------------------------------------------------------------------
 def build_truth(floor, pop, data_sha, rows):
     """Assemble the hidden ground truth, scoring reference and provenance."""
-    omega_h, omega_total = omega(DD_GENERAL, DD_SPECIFIC, DD)
+    reference_share, omega_total = omega(DD_GENERAL, DD_SPECIFIC, DD)
     return {
         "task_id": TASK_ID,
         "scored": {
             "scoring": TRUTH,
             "item_assignment": {
                 **{i: "H" for i in HSNS},
-                **{i: f"S{SPECIFIC_OF[i]}" for i in DD},
+                **{i: ("G" if SPECIFIC_OF[i] == "M" else f"S{SPECIFIC_OF[i]}") for i in DD},
             },
             "calibration_country": "US",
         },
@@ -279,10 +262,6 @@ def build_truth(floor, pop, data_sha, rows):
             "hsns": {
                 "loadings": HSNS_LOADINGS,
                 "omega": round(hsns_omega(), 3),
-                "residual_correlation": {
-                    "items": list(HSNS_RESIDUAL_CORR[0]),
-                    "covariance": HSNS_RESIDUAL_CORR[1],
-                },
                 "non_us_loading": NON_US_HSNS_LOADING,
                 "non_us_phi": NON_US_HSNS_PHI,
                 "non_us_f1_items": NON_US_HSNS_F1,
@@ -292,13 +271,14 @@ def build_truth(floor, pop, data_sha, rows):
                 "general_loadings": DD_GENERAL,
                 "specific_loadings": DD_SPECIFIC,
                 "specific_of_item": SPECIFIC_OF,
-                "omega_hierarchical": round(omega_h, 3),
+                "reference_facet": "M",
+                "specific_factor_correlation": DD_SPECIFIC_PHI,
+                "reference_variance_share": round(reference_share, 3),
                 "omega_total": round(omega_total, 3),
-                "non_us_general": NON_US_DD_GENERAL,
-                "non_us_specific": NON_US_DD_SPECIFIC,
+                "non_us_loading": NON_US_DD_LOADING,
             },
             "omega_h_floor": OMEGA_H_FLOOR,
-            "thresholds": C.THRESHOLDS,
+            "item_intercepts": C.INTERCEPTS,
         },
         "provenance": C.provenance(Path(__file__).name, SEED, rows, data_sha),
     }
@@ -343,7 +323,6 @@ def build_task_json(data_sha):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "codebook.md",
                     "data.csv",
@@ -364,6 +343,7 @@ def candidate_submissions(X):
     del X
 
     def sub(hsns, dd, syntax=None):
+        """Build an instrument-score interpretation submission."""
         return {
             "model_syntax": syntax or reference_syntax(),
             "scoring": {"hsns": hsns, "dirty_dozen": dd},
@@ -380,22 +360,21 @@ def candidate_submissions(X):
     }
 
 
-# --------------------------------------------------------------------------
-# Checks
-# --------------------------------------------------------------------------
 def verify(df, pop):
-    """Confirm alpha ranks the instruments backwards and omega_h puts them right."""
+    """Confirm alpha misses the reference-facet interpretation."""
     del pop
     import semopy
 
     us = C.analysis_sample(df, ITEMS)
-    pooled = df[ITEMS][(df[ITEMS] != 0).all(axis=1)].astype(float)
+    pooled = df[ITEMS][df[ITEMS].notna().all(axis=1)].astype(float)
     print(f"US calibration sample: {len(us):,}   whole file: {len(pooled):,}\n")
 
     a_hsns, a_dd = C.alpha(us[HSNS]), C.alpha(us[DD])
     w_hsns = hsns_omega()
     w_dd_h, w_dd_total = omega(DD_GENERAL, DD_SPECIFIC, DD)
-    print(f"{'instrument':14s} {'alpha':>7s} {'omega_h':>9s} {'omega_total':>12s} {'verdict':>20s}")
+    print(
+        f"{'instrument':14s} {'alpha':>7s} {'reference share':>15s} {'omega_total':>12s} {'verdict':>20s}"
+    )
     print(f"{'HSNS':14s} {a_hsns:7.3f} {w_hsns:9.3f} {w_hsns:12.3f} {TRUTH['hsns']:>20s}")
     print(
         f"{'Dirty Dozen':14s} {a_dd:7.3f} {w_dd_h:9.3f} {w_dd_total:12.3f} "
@@ -454,17 +433,20 @@ def verify(df, pop):
             )
 
     pooled_cfi = float(semopy.calc_stats(_fitted(hsns_syntax(), pooled, HSNS))["CFI"].iloc[0])
-    pooled_omega_h = omega_h_from_fit(pooled)
+    pooled_omega_h = reference_share_from_fit(pooled)
     print(
         f"\nSkipping the United States filter: HSNS unidimensional CFI "
         f"{fits['unidimensional'][0]:.4f} -> {pooled_cfi:.4f}, "
-        f"Dirty Dozen omega_h {w_dd_h:.3f} -> {pooled_omega_h:.3f}, "
+        f"Dirty Dozen reference share {w_dd_h:.3f} -> {pooled_omega_h:.3f}, "
         f"alpha {a_dd:.3f} -> {C.alpha(pooled[DD]):.3f}"
     )
 
     checks = [
         ("alpha ranks the Dirty Dozen above the HSNS", a_dd - a_hsns > 0.05),
-        ("omega_h ranks them the other way, decisively", w_hsns > OMEGA_H_FLOOR and w_dd_h < 0.50),
+        (
+            "reference share does not justify a broad total",
+            w_hsns > OMEGA_H_FLOOR and w_dd_h < 0.65,
+        ),
         ("the Dirty Dozen total is reliable yet uninterpretable", w_dd_total > 0.85),
         (
             "its subscales are worth scoring",
@@ -486,14 +468,15 @@ def verify(df, pop):
             pooled_cfi < 0.95 and pooled_omega_h > 0.50,
         ),
         (
-            "neither generating model recovers its data exactly",
-            fits["unidimensional"][3] < 0.001 and fits["bifactor"][3] < 0.001,
+            "both reference structures fit their continuous data well",
+            fits["unidimensional"][0] > 0.99 and fits["bifactor"][0] > 0.99,
         ),
     ]
     return C.report(checks)
 
 
 def _fitted(spec, X, items):
+    """Fit a semopy model to the selected items."""
     import semopy
 
     model = semopy.Model(spec)
@@ -523,6 +506,7 @@ def naive(df, pop):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     rng = np.random.default_rng(SEED)
     print("Simulating ...")

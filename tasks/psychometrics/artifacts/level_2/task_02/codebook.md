@@ -1,6 +1,6 @@
 # Codebook - out-of-sample validation
 
-Each tab-separated file contains responses to the same ten HSNS items. Ratings run from 1 (Disagree) to 5 (Agree); 0 denotes a missing response.
+Each tab-separated file contains responses to the same ten HSNS items. Responses are continuous and unbounded, centered around zero; empty fields denote missing responses.
 
 | item | text |
 |---|---|

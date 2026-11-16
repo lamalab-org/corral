@@ -1,47 +1,38 @@
-# Psychometrics reports (archived: October full runs)
+# Psychometrics reports
 
-Archived on 2026-11-06 when the corral-mini v1 runs replaced them in
-[`reports/psychometrics/`](../../). These are the full-benchmark runs
-(10 tasks per level) published in the October Hugging Face datasets.
+These full-task Psychometrics reports replace the October full-task results with
+runs against the 20-task revision from PR #481. They are archived here because
+the root Psychometrics directory now contains corral-mini v1 reports.
 
-14 runs (7 agent/model pairs × 2 levels), 10 tasks × k = 5, 700 trials.
-Layout, names and index columns follow [`reports/README.md`](../../../README.md).
+It contains 14 runs (7 agent/model pairs × 2 levels), with all 10 tasks × 5
+trials at each level (700 trials total).
+Kimi K3.1 Pro is excluded.
 
-| Agent | Model | L1 passes | L1 errors | L2 passes | L2 errors | Task version |
-|---|---|---:|---:|---:|---:|---|
-| ai-scientist | claude-opus-5-5 | 24/50 | 0 | 25/50 | 0 | current |
-| claude-code | claude-opus-5-5 | 30/50 | 0 | 35/50 | 0 | earlier |
-| codex | gpt-5.6-sol | 24/50 | 0 | 29/50 | 0 | earlier |
-| openhands | kimi-k3 | 8/50 | 0 | 10/50 | 1 | current |
-| react | claude-opus-5-5 | 22/50 | 0 | 27/50 | 0 | current |
-| react | gpt-5.6-sol | 21/50 | 0 | 33/50 | 0 | earlier |
-| react | kimi-k3 | 10/50 | 10 | 8/50 | 8 | current |
+| Agent | Model | L1 passes /50 | L1 errors | L1 Pass@5 | L2 passes /50 | L2 errors | L2 Pass@5 |
+|---|---|---:|---:|---:|---:|---:|---:|
+| ai-scientist | claude-opus-5-5 | 9 | 28 | 0.4179 | 0 | 46 | 0.0000 |
+| claude-code | claude-opus-5-5 | 22 | 2 | 0.5661 | 25 | 0 | 0.7246 |
+| codex | gpt-5.6-sol | 16 | 0 | 0.3672 | 16 | 0 | 0.4344 |
+| openhands | kimi-k3 | 2 | 16 | 0.1345 | 6 | 7 | 0.2584 |
+| react | claude-opus-5-5 | 16 | 0 | 0.4584 | 20 | 4 | 0.5334 |
+| react | gpt-5.6-sol | 16 | 5 | 0.4344 | 20 | 6 | 0.5651 |
+| react | kimi-k3 | 9 | 22 | 0.3334 | 18 | 12 | 0.4911 |
 
-**Runs used two task versions.** Two commits changed the tasks while the runs
-were under way:
+`passes /50` counts trials with a positive score. `errors` counts trials with a
+saved terminal error; scores and pass@k are calculated from the report's saved
+trial scores. Reports include verbose output and ran in Docker sandbox mode.
+The adjacent `provenance.json` records the model settings and image digest;
+`run-metadata.json` records the task limits and source commit.
 
-- `f0f93e234` (2026-10-07 13:37 UTC) names semopy as the model syntax and adds
-  a note on its factor-covariance default to every prompt that asks for a model
-  (all of L1, L2 t01 and t05). Scoring is unchanged (re-scoring the submitted
-  models with the missing correlations added changed no score), but agents in
-  later runs saw the extra note.
-- `fa56c111d` (2026-10-07 20:41 UTC) reworks L2 t03, t04, t09 and t10 so their
-  prompts stop prescribing the method.
+**Source revision:** Claude Code, ReAct, Codex and OpenHands reports used the
+PR #481 checkout at `e601ae03b`. AI Scientist used the `main` checkout at
+`4ec6f582`, which contains a different Psychometrics task revision. Its results
+are included as requested, but should be interpreted with that source difference
+in mind. The AI Scientist runs used Claude Opus 5.5, `max_iterations=100`,
+`max_tool_calls=256`, `max_actions_per_node=256`, `max_search_nodes=8`, and
+`max_validation_nodes=8`. They recorded 28 L1 and 46 L2 trials ending with
+“LLM-call budget exhausted (100)”; these errors are preserved in the reports
+and score as failures.
 
-"earlier" runs started before both commits; "current" runs started after
-both. This is inferred from run times, since reports do not record the task
-commit. On L1 the two groups differ only by the semopy note. On L2, compare
-them only on t02 and t06–t08, the tasks neither commit touched.
-
-react GPT-5.6 Sol includes reruns of six trials that failed for infrastructure
-reasons: three provider usage-policy rejections and two socket timeouts on L1
-(t01 trials 1 and 2), and one agent bug on L2. The socket-timeout reruns ran
-on 2026-10-21 against the earlier task version (`493ecdda4`), so they saw the
-same prompt as the rest of the run.
-
-react Kimi K3 errors are model failures, not infrastructure ones, and are kept:
-exhausted interaction budgets, plus one L1 trial (t06 trial 2) that read the
-whole 3.5 MB data file with `read_file` and overflowed the model's context,
-which OpenRouter rejected as HTTP 400.
-
-The runs were launched with [`reports/run_psychometrics.sh`](../../../run_psychometrics.sh).
+Kimi K3 runs used default reasoning settings (OpenHands records the provider
+SDK default as high); no Kimi K3.1 Pro reports are included.
