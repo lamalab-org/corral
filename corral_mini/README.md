@@ -27,6 +27,24 @@ A level the mini does not cover runs in full with a warning. The run
 metadata records the subset (`task_subset`), and mini run IDs contain
 `tasks-mini-v<N>`, so mini and full results are not mixed up.
 
+## Partial v1 run results
+
+The current [benchmark reports](../reports/README.md#corral-mini-run-coverage)
+contain 118 completed runs across six environments. The family plots show
+pass@5, pass^5, and trials that reached the configured 50-iteration limit.
+The third panel labels each completed run as limit hits out of 15 trials and
+shows the family total; missing runs are gray:
+
+| Family | Plot |
+|---|---|
+| Kimi | [PNG](figures/mini_v1_kimi.png) · [PDF](figures/mini_v1_kimi.pdf) |
+| Claude | [PNG](figures/mini_v1_claude.png) · [PDF](figures/mini_v1_claude.pdf) |
+| OpenAI | [PNG](figures/mini_v1_openai.png) · [PDF](figures/mini_v1_openai.pdf) |
+
+Regenerate them from the report indexes with
+`python scripts/plot_mini_v1_reports.py` after installing the plotting
+dependencies in `pyproject.toml`.
+
 ## Build a release
 
 The AFM selection in v1 was updated when its reports arrived. Its report
