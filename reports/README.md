@@ -7,17 +7,40 @@ same layout, names and index files, so runs can be compared across them.
 |---|---|---|---:|---:|
 | AFM | [`afm/`](afm/) | `afm-reports-november-2026` | 14 | 700 |
 | Inference optimization | [`inference_opt/`](inference_opt/) | `ml_env_baseline` | 14 | 700 |
-| Psychometrics | [`psychometrics/`](psychometrics/) | `psychometric_hint_cleanup_clean` | 14 | 700 |
-| Resistor network (v4, Docker sandbox) | [`resistor_network/`](resistor_network/) | `resistor-network-native-docker-reports` | 14 | 700 |
-| Corral MD | [`corral_md/`](corral_md/) | — | 14 | 700 |
-| Retrosynthesis | [`retrosynthesis/`](retrosynthesis/) | — | 14 | 700 |
-| Spectra elucidation | [`spectra_elucidation/`](spectra_elucidation/) | — | 14 | 1,400 |
+| Psychometrics (corral-mini v1; October full runs in `archive/`) | [`psychometrics/`](psychometrics/) | `mini-1-psychom` | 28 | 420 |
+| Resistor network (v4, Docker sandbox; corral-mini v2 in [`resistor_network/mini-v2/`](resistor_network/mini-v2/)) | [`resistor_network/`](resistor_network/) | `resistor-network-native-docker-reports` | 14 | 700 |
+| Corral MD (corral-mini v2 in [`corral_md/mini-v2/`](corral_md/mini-v2/)) | [`corral_md/`](corral_md/) | — | 14 | 700 |
+| Retrosynthesis (corral-mini v2 in [`retrosynthesis/mini-v2/`](retrosynthesis/mini-v2/)) | [`retrosynthesis/`](retrosynthesis/) | — | 14 | 700 |
+| Spectra elucidation (corral-mini v2 in [`spectra_elucidation/mini-v2/`](spectra_elucidation/mini-v2/)) | [`spectra_elucidation/`](spectra_elucidation/) | — | 14 | 1,400 |
 | Stargazer | [`stargazer/`](stargazer/) | — | 14 | 700 |
-| Wetlab | [`wetlab/`](wetlab/) | — | 14 | 700 |
+| Wetlab (corral-mini v2 in [`wetlab/mini-v2/`](wetlab/mini-v2/)) | [`wetlab/`](wetlab/) | — | 14 | 700 |
 
-All nine environments together have **126 runs and 7,000 trials**. Each
+All nine environments together have **140 runs and 6,720 trials**. Each
 environment has its own indexes, with report paths relative to its folder. The
 `runs` and `trials` configs of the Hugging Face summary dataset combine them.
+
+Psychometrics holds the corral-mini v1 runs. corral-mini v2 runs sit next to
+the full-benchmark runs of their environment, in `<environment>/mini-v2/` with
+their own indexes (wetlab, retrosynthesis, spectra elucidation, resistor network, corral MD); the totals above count only the full runs.
+Each mini version has its own Hugging Face datasets, not the October ones:
+`jablonkagroup/corral-reports-mini-v1` (psychometrics) and
+`jablonkagroup/corral-reports-mini-v2` (wetlab, retrosynthesis, spectra elucidation, resistor network,
+corral MD), each with a `-summary`. The
+push scripts refuse to put runs whose ID contains `-mini-` into a repo without
+`mini` in its name (or the reverse), or runs of one mini version into another
+version's repo:
+
+```bash
+python scripts/push_october_reports_to_hf.py --env=wetlab,retrosynthesis,spectra_elucidation,resistor_network,corral_md --only_env \
+    --repo=jablonkagroup/corral-reports-mini-v2
+python scripts/push_october_summary_to_hf.py --env=wetlab,retrosynthesis,spectra_elucidation,resistor_network,corral_md \
+    --repo=jablonkagroup/corral-reports-mini-v2-summary
+```
+
+List every environment with runs of that mini version. The shared tables
+(`runs`, and the summary's `runs`, `tasks` and `trials`) are rebuilt from the
+listed environments and replaced as a whole, so the scripts refuse a mini push
+that leaves one out.
 
 The `report_audit` branch collects all environments. Add or update reports
 there, following [Adding or updating reports](#adding-or-updating-reports).

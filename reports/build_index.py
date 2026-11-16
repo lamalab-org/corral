@@ -4,7 +4,9 @@ Reads every ``reports/<env>/level_<L>/<agent>__<model>/report.json.gz`` (or
 ``.json.xz``, used where gzip compresses a report far worse) and
 writes ``reports/<env>/runs.csv`` (one row per run) and
 ``reports/<env>/trials.csv`` (one row per trial, with its Langfuse links).
-Anything under ``archive/`` or ``provenance/`` is ignored.
+Anything under ``archive/`` or ``provenance/`` is ignored. corral-mini runs live
+in ``reports/<env>/mini-v<N>/`` with their own indexes; build them by passing
+that folder (its ``environment`` column is still ``<env>``).
 
 Langfuse IDs are derived the same way Corral sets them when tracing:
 the session ID defaults to the execution's run ID and the trace ID is
@@ -12,7 +14,9 @@ the session ID defaults to the execution's run ID and the trace ID is
 (``corral.observability.langfuse.deterministic_trace_id``). A report's adjacent
 ``run-metadata.json`` may set ``langfuse_session_id`` when its replacement
 executions have been consolidated into one session. Its optional
-``langfuse_trace_ids`` mapping records replacement trace IDs by execution ID.
+``langfuse_trace_ids`` mapping records replacement trace IDs by execution ID,
+and ``langfuse_session_ids`` records the session of executions that belong to
+another session than the run's (for example trials reused from an earlier run).
 Legacy trace IDs may also be recorded in an adjacent ``langfuse-overrides.json``.
 
 Usage:
@@ -58,6 +62,17 @@ MODELS = {
     "claude-opus-5-5": ("claude-opus-5-5", "anthropic/claude-opus-5-5"),
     "gpt-5.6-sol": ("gpt-5.6-sol", "openai/gpt-5.6-sol"),
     "kimi-k3": ("kimi-k3", "openrouter/moonshotai/kimi-k3"),
+    # corral-mini v1 runs
+    "kimi-k3.1-pro": ("kimi-k3.1-pro", "openrouter/moonshotai/kimi-k3.1-pro"),
+    "kimi-k2.5": ("kimi-k2.5", "openrouter/moonshotai/kimi-k2.5"),
+    "kimi-k2-0905": ("kimi-k2-0905", "openrouter/moonshotai/kimi-k2-0905"),
+    "gpt-6.1-sol": ("gpt-6.1-sol", "openai/gpt-6.1-sol"),
+    "gpt-5-2025-08-07": ("gpt-5-2025-08-07", "openai/gpt-5-2025-08-07"),
+    "claude-opus-4-7": ("claude-opus-4-7", "anthropic/claude-opus-4-7"),
+    "claude-opus-4-5-20251101": (
+        "claude-opus-4-5-20251101",
+        "anthropic/claude-opus-4-5-20251101",
+    ),
 }
 
 RUN_FIELDS = [
@@ -154,7 +169,7 @@ def trace_overrides(report: Path, execution_ids: set[str]) -> dict[str, str]:
 
 def langfuse_overrides(
     report: Path, execution_ids: set[str]
-) -> tuple[str | None, dict[str, str]]:
+) -> tuple[str | None, dict[str, str], dict[str, str]]:
     """Combine publication metadata with legacy trace overrides."""
     metadata_path = report.with_name("run-metadata.json")
     publication = (
@@ -179,9 +194,20 @@ def langfuse_overrides(
             f"{metadata_path}: langfuse_trace_ids must map report execution IDs "
             "to 32-character lowercase hexadecimal trace IDs"
         )
+    publication_sessions = publication.get("langfuse_session_ids", {})
+    if not isinstance(publication_sessions, dict) or any(
+        execution not in execution_ids
+        or not isinstance(session, str)
+        or not session.strip()
+        for execution, session in publication_sessions.items()
+    ):
+        raise ValueError(
+            f"{metadata_path}: langfuse_session_ids must map report execution IDs "
+            "to nonempty session IDs"
+        )
     overrides = trace_overrides(report, execution_ids)
     overrides.update(publication_traces)
-    return session_override, overrides
+    return session_override, overrides, publication_sessions
 
 
 def index_run(env_dir: Path, report: Path, env: str) -> tuple[dict, list[dict]]:
@@ -196,7 +222,7 @@ def index_run(env_dir: Path, report: Path, env: str) -> tuple[dict, list[dict]]:
     k = int(meta["benchmark"]["trials_per_task"])
     metrics = data["metrics"]
     rel = report.relative_to(env_dir).as_posix()
-    session_override, overrides = langfuse_overrides(
+    session_override, overrides, trial_sessions = langfuse_overrides(
         report,
         {
             t["trial_id"]
@@ -212,7 +238,11 @@ def index_run(env_dir: Path, report: Path, env: str) -> tuple[dict, list[dict]]:
             tid = overrides.get(t["trial_id"], trace_id(t["trial_id"]))
             # Grouping can change without rewriting immutable execution IDs.
             # Keep in-session retry labels separate from cross-session reruns.
-            session = session_override or session_id(t["trial_id"], run_id)
+            session = (
+                trial_sessions.get(t["trial_id"])
+                or session_override
+                or session_id(t["trial_id"], run_id)
+            )
             trials.append(
                 {
                     "environment": env,
@@ -321,6 +351,13 @@ def verify(trials: list[dict]) -> list[str]:
     ]
 
 
+def environment_name(env_dir: Path) -> str:
+    """``reports/<env>`` and ``reports/<env>/mini-v<N>`` both belong to ``<env>``."""
+    if re.fullmatch(r"mini-v\d+", env_dir.name):
+        return env_dir.parent.name
+    return env_dir.name
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("env_dir", type=Path)
@@ -331,7 +368,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     env_dir = args.env_dir.resolve()
-    env = env_dir.name
+    env = environment_name(env_dir)
 
     runs, trials = [], []
     for report in sorted(env_dir.glob("level_*/*/report.json.[gx]z")):

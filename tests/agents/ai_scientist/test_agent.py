@@ -200,9 +200,13 @@ async def test_branch_checkpoint_restores_workspace_without_repeating_tools(tmp_
             lambda: source.execute(Action(name="measure", arguments={"value": 1}))
         )
         assert response.success
+        saved_environment = sessions.session(
+            source.execution_id
+        ).state.environment.values
         snapshot = await anyio.to_thread.run_sync(
             lambda: sessions.checkpoint(source.execution_id)
         )
+        assert "environment" not in snapshot
         Path(parent.workspace, "stale.txt").write_text("stale", encoding="utf-8")
         restored = await anyio.to_thread.run_sync(
             lambda: sessions.restore_branch(snapshot)
@@ -212,7 +216,7 @@ async def test_branch_checkpoint_restores_workspace_without_repeating_tools(tmp_
     assert calls == [1]
     assert Path(restored.workspace, "result.txt").read_text() == "measured"
     assert not Path(restored.workspace, "stale.txt").exists()
-    assert restored_state.environment.values == snapshot["environment"]
+    assert restored_state.environment.values == saved_environment
     assert "result.txt" in restored_state.workspace.files
 
 

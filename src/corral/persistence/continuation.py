@@ -15,7 +15,7 @@ from corral.core.actors import ActorRef
 from corral.core.commit import CommitRequest
 from corral.core.events import ExecutionForked
 from corral.core.tool_catalog import state_tool_policy
-from corral.persistence.artifacts import LocalArtifactStore
+from corral.persistence.artifacts import LocalArtifactStore, iter_blob_refs
 from corral.persistence.base import CommitConflictError
 from corral.persistence.sqlite import SQLiteCommitStore
 
@@ -110,22 +110,6 @@ async def read_checkpoint(source: ContinuationSource) -> ExecutionForked:
         configured=bool(configured),
         message=source.message_payload,
     )
-
-
-def _blob_refs(value):
-    if isinstance(value, Mapping):
-        for key, child in value.items():
-            if (
-                key == "blob_ref"
-                and isinstance(child, str)
-                and child.startswith("sha256:")
-            ):
-                yield child
-            else:
-                yield from _blob_refs(child)
-    elif isinstance(value, tuple | list):
-        for child in value:
-            yield from _blob_refs(child)
 
 
 def validate_destination(request: RunTaskInput, store_path: Path | None = None) -> None:
@@ -231,7 +215,7 @@ async def import_checkpoint(
         }
     )
     root = Path(event.source_trial) / "artifacts"
-    refs = set(_blob_refs(event.source.model_dump(mode="python")))
+    refs = set(iter_blob_refs(event.source.model_dump(mode="python")))
     if refs:
         if not root.is_dir():
             raise FileNotFoundError(f"source artifacts are missing: {root}")

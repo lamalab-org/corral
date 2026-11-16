@@ -4,7 +4,8 @@ Run with the pinned tasks table, for example:
   python scripts/plot_corral_mini_pass_hat_5.py --tasks-parquet PATH
 
 Writes a results CSV and a cost-based PNG and PDF figure. AFM uses the
-November reports recorded in the corral-mini v2 manifest.
+November reports recorded in the corral-mini v2 manifest, and the
+environments under the manifest's `local_sources` use their reports in this repository.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from corral_mini_common import (
     held_out_model_losses,
     load,
     load_afm_strata,
+    load_report_strata,
     material_losses,
     row_spearman,
     select,
@@ -44,6 +46,16 @@ def load_strata(tasks_parquet: Path) -> tuple[dict, list[str]]:
         manifest["source"]["revision"], tasks_parquet, prices_path, "pass_hat_5"
     )
     strata.update(load_afm_strata(ROOT / "reports/afm/trials.csv", prices_path, agents))
+    for environment, local in manifest.get("local_sources", {}).items():
+        strata.update(
+            load_report_strata(
+                ROOT / local["trials_csv"],
+                prices_path,
+                agents,
+                "pass_hat_5",
+                environment,
+            )
+        )
     return dict(sorted(strata.items())), agents
 
 
