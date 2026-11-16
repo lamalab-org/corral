@@ -1,7 +1,7 @@
 """Shared loading, task selection and scoring for corral-mini.
 
 Terms used throughout:
-- stratum: one (environment, level), scored with Pass@5 per task and agent.
+- stratum: one (environment, level), scored with Pass@5 or Pass^5 per task and agent.
 - agent: one agent/model combination ("subject" in the report tables).
 - material loss: a pair of agents at least MATERIAL_GAP apart on the full
   stratum that ties or flips order on the mini subset.
@@ -32,7 +32,7 @@ MATERIAL_GAP = 0.05
 @dataclass
 class Stratum:
     tasks: np.ndarray  # task IDs
-    passes: np.ndarray  # Pass@5, tasks x agents
+    passes: np.ndarray  # selected pass metric, tasks x agents
     costs: np.ndarray  # estimated USD for five trials, tasks x agents
     solved: np.ndarray  # solved in at least one of five trials, tasks x agents
 
@@ -112,7 +112,7 @@ def load_report_strata(
     score_column: str = "pass_hat_5",
     environment: str = "afm",
 ) -> dict:
-    """Load an environment's reports/<environment>/trials.csv as five-trial strata."""
+    """Load five-trial strata from an environment's trials.csv."""
     if score_column not in {"pass_hat_5", "pass_at_5"}:
         raise ValueError(f"unknown score column: {score_column}")
     data = pd.read_csv(trials_csv)

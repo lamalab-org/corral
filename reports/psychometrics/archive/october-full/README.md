@@ -10,7 +10,7 @@ Kimi K3.1 Pro is excluded.
 
 | Agent | Model | L1 passes /50 | L1 errors | L1 Pass@5 | L2 passes /50 | L2 errors | L2 Pass@5 |
 |---|---|---:|---:|---:|---:|---:|---:|
-| ai-scientist | claude-opus-5-5 | 9 | 28 | 0.4179 | 0 | 46 | 0.0000 |
+| ai-scientist | claude-opus-5-5 | 4 | 23 | 0.1662 | 1 | 46 | 0.0672 |
 | claude-code | claude-opus-5-5 | 22 | 2 | 0.5661 | 25 | 0 | 0.7246 |
 | codex | gpt-5.6-sol | 16 | 0 | 0.3672 | 16 | 0 | 0.4344 |
 | openhands | kimi-k3 | 2 | 16 | 0.1345 | 6 | 7 | 0.2584 |
@@ -24,15 +24,15 @@ trial scores. Reports include verbose output and ran in Docker sandbox mode.
 The adjacent `provenance.json` records the model settings and image digest;
 `run-metadata.json` records the task limits and source commit.
 
-**Source revision:** Claude Code, ReAct, Codex and OpenHands reports used the
-PR #481 checkout at `e601ae03b`. AI Scientist used the `main` checkout at
-`4ec6f582`, which contains a different Psychometrics task revision. Its results
-are included as requested, but should be interpreted with that source difference
-in mind. The AI Scientist runs used Claude Opus 5.5, `max_iterations=100`,
+**Source:** six agent/model pairs used `e601ae03b`; AI Scientist used merged main
+`541230efa`, with identical Psychometrics tasks, datasets, and scoring code.
+The AI Scientist reports replace the older-task runs from `4ec6f582`.
+
+AI Scientist used Claude Opus 5.5, `max_iterations=100`,
 `max_tool_calls=256`, `max_actions_per_node=256`, `max_search_nodes=8`, and
-`max_validation_nodes=8`. They recorded 28 L1 and 46 L2 trials ending with
-“LLM-call budget exhausted (100)”; these errors are preserved in the reports
-and score as failures.
+`max_validation_nodes=8`, reasoning effort `medium`, and temperature 1.0.
+Both levels have no scoring errors and all 100 Langfuse traces were verified.
+The 23 L1 and 46 L2 “LLM-call budget exhausted (100)” errors count as failures.
 
 Kimi K3 runs used default reasoning settings (OpenHands records the provider
 SDK default as high); no Kimi K3.1 Pro reports are included.
