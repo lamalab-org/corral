@@ -195,11 +195,7 @@ def main() -> None:
                     "started_at": started.isoformat(),
                     "completed_at": finished.isoformat(),
                     "source_runs": sorted(r["benchmark_run_id"] for _, _, r in loaded),
-                    **(
-                        {"unscored_scored_as_failure": unscored}
-                        if unscored
-                        else {}
-                    ),
+                    **({"unscored_scored_as_failure": unscored} if unscored else {}),
                 },
                 indent=2,
             )
