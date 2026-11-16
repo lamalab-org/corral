@@ -1,12 +1,9 @@
 """Write corral-mini release `--version`: k tasks per environment/level.
 
-Levels with report data use `--method`. AFM uses its newer local reports for
-Pass^5 selection, as do the environments named with `--local-reports` (for
-example retrosynthesis, whose October reports were corrected after the dataset
-revision was published). Tasks named with `--exclude-task` are left out before
-selection (for example, a task whose student model is no longer served).
-Environments without reports are drawn with `--seed`.
-Releases are never overwritten.
+Levels with report data use `--method`. AFM uses local reports for Pass^5;
+`--local-reports ENVIRONMENT[=REPORTS_DIR]` overrides other report sources.
+`--exclude-task` removes tasks before selection. Environments without reports
+are drawn with `--seed`. Existing output files are never overwritten.
 """
 
 from __future__ import annotations

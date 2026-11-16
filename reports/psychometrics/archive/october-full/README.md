@@ -24,22 +24,15 @@ trial scores. Reports include verbose output and ran in Docker sandbox mode.
 The adjacent `provenance.json` records the model settings and image digest;
 `run-metadata.json` records the task limits and source commit.
 
-**Source revision:** Claude Code, ReAct, Codex and OpenHands reports used the
-PR #481 checkout at `e601ae03b`. AI Scientist used the merged `main` checkout at
-`541230efa`, with the same Psychometrics task files, datasets, and scoring code
-as `e601ae03b`. Its reports replace the incorrectly included runs from older
-main `4ec6f582`; those older results must not be used for revised-task comparison
-or mini selection. All seven pairs now cover the revised 20 tasks.
-The AI Scientist runs used Claude Opus 5.5, `max_iterations=100`,
+**Source:** six agent/model pairs used `e601ae03b`; AI Scientist used merged main
+`541230efa`, with identical Psychometrics tasks, datasets, and scoring code.
+The AI Scientist reports replace the older-task runs from `4ec6f582`.
+
+AI Scientist used Claude Opus 5.5, `max_iterations=100`,
 `max_tool_calls=256`, `max_actions_per_node=256`, `max_search_nodes=8`, and
 `max_validation_nodes=8`, reasoning effort `medium`, and temperature 1.0.
-The image was rebuilt from `541230efa` and its runtime and task files verified
-against the checkout. Runs resumed from checkpoints at 20 concurrent trials
-per level after initially starting at 50 per level. Both reports contain
-50 trials and no scoring errors, with Langfuse tracing and verbose output.
-They recorded 23 L1 and 46 L2 trials ending with
-“LLM-call budget exhausted (100)”; these errors are preserved in the reports
-and score as failures.
+Both levels have no scoring errors and all 100 Langfuse traces were verified.
+The 23 L1 and 46 L2 “LLM-call budget exhausted (100)” errors count as failures.
 
 Kimi K3 runs used default reasoning settings (OpenHands records the provider
 SDK default as high); no Kimi K3.1 Pro reports are included.

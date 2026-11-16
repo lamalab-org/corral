@@ -8,8 +8,7 @@ first, k = 3, 54 tasks
 ([`corral_mini_v2.json`](../src/corral/subsets/corral_mini_v2.json)). All 18
 levels use report-based selection; AFM uses its November 2026 reports, and
 retrosynthesis and corral MD use their corrected October reports (see
-[Corrections](#corrections-2026-11-13)). Psychometrics uses the replacement
-full-task reports merged in #481 (see
+[Corrections](#corrections-2026-11-13)). Psychometrics uses revised full-task reports (see
 [Psychometrics](#psychometrics-correction-2026-11-16)). The
 original [v1 release](../src/corral/subsets/corral_mini_v1.json) remains
 available by version. Levels without report data in other environments (e.g.
@@ -37,9 +36,9 @@ metadata records the subset (`task_subset`), and mini run IDs contain
 
 AFM's report source is recorded separately in the manifest (`afm_source`), as
 are environments built from their reports in this repository with
-`--local-reports ENVIRONMENT[=REPORTS_DIR]` (`local_sources`); the pinned Hugging Face source
-describes the other environments. The build script refuses to overwrite
-existing releases.
+`--local-reports ENVIRONMENT[=REPORTS_DIR]` (`local_sources`). The optional directory
+is relative to the repository root. The pinned Hugging Face source describes the
+other environments. The build script refuses to overwrite existing releases.
 
 Pin the Hugging Face summary dataset by its full commit hash (v1 source:
 `6d8dc71d6bcc3a3c6c76a28609f4f4a510ea2dd8`). Add `--tasks-parquet PATH` to
@@ -127,38 +126,13 @@ python scripts/build_corral_mini.py --version 2 --output PATH \
 
 ## Psychometrics correction (2026-11-16)
 
-Psychometrics v2 was reselected from the replacement full-task reports merged
-in #481 and the corrected AI Scientist runs on those revised tasks:
-700 trials, seven agent/model pairs, and ten tasks at each level.
-The source is
-[`reports/psychometrics/archive/october-full`](../reports/psychometrics/archive/october-full/README.md),
-whose name is retained for the full-report archive; the root reports directory
-contains mini v1 runs. Kimi K3 is included; Kimi K3.1 Pro is excluded.
-The manifest records the full reports' paths and SHA-256 hashes.
-
-Selection uses the existing v2 algorithm below: unsaturated tasks first,
-then maximum Pass^5 rank correlation, minimum cost, minimum score error,
-and seed 0 for any remaining tie. Only the Psychometrics selections change.
-
-| Level | Selected task IDs | Unsaturated candidates | Spearman | Sets tied at best rank → after cost |
-|---|---|---:|---:|---:|
-| 1 | `psy_l1_t01_hsns_structure`, `psy_l1_t05_defensible_comparisons`, `psy_l1_t09_careless_responding` | 9/10 | 1.000 | 1 → 1 |
-| 2 | `psy_l2_t01_group_comparability`, `psy_l2_t03_population_classification`, `psy_l2_t08_misfit_replication` | 10/10 | 0.991 | 6 → 1 |
-
-All selected tasks are unsaturated. Cost resolves the L2 rank tie; neither
-score error nor randomness decides either level. Estimated selection costs
-are $294.35 (L1) and $365.66 (L2), for seven agents × five trials at the
-existing prices. These are selection estimates rather than future run budgets.
-
-All seven pairs use matching revised tasks: AI Scientist ran on merged main
-`541230efa`, whose Psychometrics files, datasets, and scoring code are identical
-to the six other pairs' `e601ae03b` revision. The earlier AI Scientist results
-from `4ec6f582` have been replaced and are excluded from selection. The corrected
-runs retain 23 L1 and 46 L2 LLM budget failures, scored as failures, and all
-100 trials have verified Langfuse traces. See the full reports' README for
-provenance. The v2 figures and Pass^5 comparison are regenerated with this
-source; the original v1 analysis and saturation figures below describe the
-original October data.
+Psychometrics uses the [revised full reports](../reports/psychometrics/archive/october-full/README.md):
+700 trials across seven agent/model pairs, including corrected AI Scientist runs.
+The manifest records the selected tasks and source hashes. The same v2 method
+selects three unsaturated tasks per level, with Spearman 1.000 (L1) and 0.991
+(L2); cost resolves the L2 rank tie. Only Psychometrics selections change.
+The v2 figures use these reports; the original v1 analysis and saturation
+figures describe the original October data.
 
 ## Methods
 
@@ -225,7 +199,7 @@ level.
 | **Rank** | Has the highest Spearman correlation between mini and full agent ranking. Ties go to the lower score error. | Overfits the ranking: one agent's level score can be off by 0.4 at k = 4. |
 | **Rank + score guard** | Has the highest Spearman among combinations that pass the **score guard**. | Ranking ends up slightly below Rank. |
 | **Cost-aware** | Is cheapest among combinations that pass the **score guard**. | Ranking quality changes unpredictably with *k*. |
-| **Rank + cost** | Has the highest Spearman. Ties go to the cheapest. | Same ranking as Rank for less money, but generalizes worse to a held-out model. Ignores score error. |
+| **Rank + cost** | Has the highest Spearman. Ties go to the cheapest, then lowest score error. | Same ranking as Rank for less money, but generalizes worse to a held-out model. |
 
 **Score guard:** a combination passes when its worst per-agent score error is
 within **0.02** of the smallest worst-case error any combination in that level
