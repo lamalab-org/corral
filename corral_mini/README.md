@@ -128,7 +128,8 @@ python scripts/build_corral_mini.py --version 2 --output PATH \
 ## Psychometrics correction (2026-11-16)
 
 Psychometrics v2 was reselected from the replacement full-task reports merged
-in #481: 700 trials, seven agent/model pairs, and ten tasks at each level.
+in #481 and the corrected AI Scientist runs on those revised tasks:
+700 trials, seven agent/model pairs, and ten tasks at each level.
 The source is
 [`reports/psychometrics/archive/october-full`](../reports/psychometrics/archive/october-full/README.md),
 whose name is retained for the full-report archive; the root reports directory
@@ -142,20 +143,22 @@ and seed 0 for any remaining tie. Only the Psychometrics selections change.
 | Level | Selected task IDs | Unsaturated candidates | Spearman | Sets tied at best rank → after cost |
 |---|---|---:|---:|---:|
 | 1 | `psy_l1_t01_hsns_structure`, `psy_l1_t05_defensible_comparisons`, `psy_l1_t09_careless_responding` | 9/10 | 1.000 | 1 → 1 |
-| 2 | `psy_l2_t01_group_comparability`, `psy_l2_t02_out_of_sample_generalization`, `psy_l2_t04_hsns_population_classification` | 10/10 | 0.991 | 6 → 1 |
+| 2 | `psy_l2_t01_group_comparability`, `psy_l2_t03_population_classification`, `psy_l2_t08_misfit_replication` | 10/10 | 0.991 | 6 → 1 |
 
 All selected tasks are unsaturated. Cost resolves the L2 rank tie; neither
 score error nor randomness decides either level. Estimated selection costs
-are $302.81 (L1) and $359.84 (L2), for seven agents × five trials at the
+are $294.35 (L1) and $365.66 (L2), for seven agents × five trials at the
 existing prices. These are selection estimates rather than future run budgets.
 
-**Source caveat:** the published AI Scientist reports used main at `4ec6f582`,
-which contains a different Psychometrics task revision from the six other
-agent/model pairs (`e601ae03b`). This selection includes all seven published
-pairs and preserves their recorded failures. See the full reports' README
-for provenance and AI Scientist's LLM budget failures. The v2 figures and
-Pass^5 comparison are regenerated with this source; the original v1 analysis
-and saturation figures below describe the original October data.
+All seven pairs use matching revised tasks: AI Scientist ran on merged main
+`541230efa`, whose Psychometrics files, datasets, and scoring code are identical
+to the six other pairs' `e601ae03b` revision. The earlier AI Scientist results
+from `4ec6f582` have been replaced and are excluded from selection. The corrected
+runs retain 23 L1 and 46 L2 LLM budget failures, scored as failures, and all
+100 trials have verified Langfuse traces. See the full reports' README for
+provenance. The v2 figures and Pass^5 comparison are regenerated with this
+source; the original v1 analysis and saturation figures below describe the
+original October data.
 
 ## Methods
 
@@ -412,8 +415,8 @@ panel uses a symmetric log scale to show both the mean and large positive
 outliers. Values are in [`results_pass_hat_5_unsaturated.csv`](results_pass_hat_5_unsaturated.csv).
 
 At three tasks per level, Rank + cost has Spearman 0.889, 17 held-out levels
-with an inversion, and a −32.5% average score change. Rank + score has Spearman
-0.890, 17 held-out levels with an inversion, and a −35.9% average score change.
+with an inversion, and a −34.4% average score change. Rank + score has Spearman
+0.890, 17 held-out levels with an inversion, and a −33.1% average score change.
 
 To regenerate the figures from the pinned summary table:
 
