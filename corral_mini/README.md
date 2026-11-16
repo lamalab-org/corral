@@ -8,7 +8,9 @@ first, k = 3, 54 tasks
 ([`corral_mini_v2.json`](../src/corral/subsets/corral_mini_v2.json)). All 18
 levels use report-based selection; AFM uses its November 2026 reports, and
 retrosynthesis and corral MD use their corrected October reports (see
-[Corrections](#corrections-2026-11-13)). The
+[Corrections](#corrections-2026-11-13)). Psychometrics uses the replacement
+full-task reports merged in #481 (see
+[Psychometrics](#psychometrics-correction-2026-11-16)). The
 original [v1 release](../src/corral/subsets/corral_mini_v1.json) remains
 available by version. Levels without report data in other environments (e.g.
 wetlab L1, retrosynthesis L1, samplemath) are not part of the mini.
@@ -35,7 +37,7 @@ metadata records the subset (`task_subset`), and mini run IDs contain
 
 AFM's report source is recorded separately in the manifest (`afm_source`), as
 are environments built from their reports in this repository with
-`--local-reports ENVIRONMENT` (`local_sources`); the pinned Hugging Face source
+`--local-reports ENVIRONMENT[=REPORTS_DIR]` (`local_sources`); the pinned Hugging Face source
 describes the other environments. The build script refuses to overwrite
 existing releases.
 
@@ -116,11 +118,44 @@ Reproduce the manifest with:
 python scripts/build_corral_mini.py --version 2 --output PATH \
   --revision 6d8dc71d6bcc3a3c6c76a28609f4f4a510ea2dd8 \
   --local-reports retrosynthesis --local-reports corral_md \
+  --local-reports psychometrics=reports/psychometrics/archive/october-full \
   --exclude-task inference_opt/math_number_theory_a \
   --exclude-task inference_opt/math_counting_probability_a \
   --exclude-task inference_opt/math_geometry_a \
   --exclude-task inference_opt/gsm_p2_a
 ```
+
+## Psychometrics correction (2026-11-16)
+
+Psychometrics v2 was reselected from the replacement full-task reports merged
+in #481: 700 trials, seven agent/model pairs, and ten tasks at each level.
+The source is
+[`reports/psychometrics/archive/october-full`](../reports/psychometrics/archive/october-full/README.md),
+whose name is retained for the full-report archive; the root reports directory
+contains mini v1 runs. Kimi K3 is included; Kimi K3.1 Pro is excluded.
+The manifest records the full reports' paths and SHA-256 hashes.
+
+Selection uses the existing v2 algorithm below: unsaturated tasks first,
+then maximum Pass^5 rank correlation, minimum cost, minimum score error,
+and seed 0 for any remaining tie. Only the Psychometrics selections change.
+
+| Level | Selected task IDs | Unsaturated candidates | Spearman | Sets tied at best rank → after cost |
+|---|---|---:|---:|---:|
+| 1 | `psy_l1_t01_hsns_structure`, `psy_l1_t05_defensible_comparisons`, `psy_l1_t09_careless_responding` | 9/10 | 1.000 | 1 → 1 |
+| 2 | `psy_l2_t01_group_comparability`, `psy_l2_t02_out_of_sample_generalization`, `psy_l2_t04_hsns_population_classification` | 10/10 | 0.991 | 6 → 1 |
+
+All selected tasks are unsaturated. Cost resolves the L2 rank tie; neither
+score error nor randomness decides either level. Estimated selection costs
+are $302.81 (L1) and $359.84 (L2), for seven agents × five trials at the
+existing prices. These are selection estimates rather than future run budgets.
+
+**Source caveat:** the published AI Scientist reports used main at `4ec6f582`,
+which contains a different Psychometrics task revision from the six other
+agent/model pairs (`e601ae03b`). This selection includes all seven published
+pairs and preserves their recorded failures. See the full reports' README
+for provenance and AI Scientist's LLM budget failures. The v2 figures and
+Pass^5 comparison are regenerated with this source; the original v1 analysis
+and saturation figures below describe the original October data.
 
 ## Methods
 
@@ -359,8 +394,10 @@ What changes:
 The following figure compares unsaturated-first **Rank + cost** and **Rank +
 score** using task Pass^5 instead of Pass@5 for selection and evaluation. Pass^5
 is `(successful trials / 5)^5` for each agent and task. AFM uses the November
-reports and retrosynthesis and corral MD their corrected October reports, all
-recorded in the v2 manifest; the other environments use the pinned October summary table. The Rank + cost point at k = 3 is the v2 selection.
+reports, retrosynthesis and corral MD their corrected October reports, and
+Psychometrics the replacement full reports from #481, all recorded in the v2
+manifest; the other environments use the pinned October summary table. The
+Rank + cost point at k = 3 is the v2 selection.
 
 ![Pass^5 comparison against estimated cost](figures/pass_hat_5_tradeoffs_vs_cost_unsaturated.png)
 
@@ -374,9 +411,9 @@ so its percentage change is undefined and omitted from that panel. The score
 panel uses a symmetric log scale to show both the mean and large positive
 outliers. Values are in [`results_pass_hat_5_unsaturated.csv`](results_pass_hat_5_unsaturated.csv).
 
-At three tasks per level, Rank + cost has Spearman 0.880, 17 held-out levels
-with an inversion, and a −36.1% average score change. Rank + score has Spearman
-0.882, 17 held-out levels with an inversion, and a −34.8% average score change.
+At three tasks per level, Rank + cost has Spearman 0.889, 17 held-out levels
+with an inversion, and a −32.5% average score change. Rank + score has Spearman
+0.890, 17 held-out levels with an inversion, and a −35.9% average score change.
 
 To regenerate the figures from the pinned summary table:
 

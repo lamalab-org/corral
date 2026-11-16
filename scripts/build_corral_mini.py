@@ -76,9 +76,9 @@ def main() -> None:
         "--local-reports",
         action="append",
         default=[],
-        metavar="ENVIRONMENT",
-        help="take this environment's scores from reports/<environment>/trials.csv "
-        "instead of the dataset revision (repeatable)",
+        metavar="ENVIRONMENT[=REPORTS_DIR]",
+        help="take scores from reports/<environment>/trials.csv or the supplied "
+        "repository-relative directory instead of the dataset revision (repeatable)",
     )
     parser.add_argument(
         "--exclude-task",
@@ -114,8 +114,13 @@ def main() -> None:
             "trials_csv_sha256": hashlib.sha256(trials_csv.read_bytes()).hexdigest(),
         }
     local_sources = {}
-    for environment in args.local_reports:
-        trials_csv = REPOSITORY / "reports" / environment / "trials.csv"
+    for entry in args.local_reports:
+        environment, separator, reports_dir = entry.partition("=")
+        trials_csv = (
+            REPOSITORY / reports_dir
+            if separator
+            else REPOSITORY / "reports" / environment
+        ) / "trials.csv"
         runs_csv = trials_csv.with_name("runs.csv")
         replaced = {key for key in strata if key[0] == environment}
         loaded = load_report_strata(
