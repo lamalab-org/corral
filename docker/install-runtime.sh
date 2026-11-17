@@ -2,6 +2,11 @@
 # Shared Python/Conda image setup. SDK versions come from Corral's extras.
 set -eu
 
+# Keep network utilities identical across protected and ablation trials.
+apt-get update
+apt-get install -y --no-install-recommends curl wget git
+rm -rf /var/lib/apt/lists/*
+
 CORRAL_EXTRAS=${CORRAL_EXTRAS:-}
 # Tracing is passive and stays off without Langfuse keys, so every image has it.
 python -m pip install --no-cache-dir --editable ".[langfuse${CORRAL_EXTRAS:+,$CORRAL_EXTRAS}]" "$@"

@@ -260,6 +260,7 @@ class ClaudeCodeAgent:
         max_turns: int,
         *,
         corral_sandbox: bool = False,
+        native_sandbox_disabled: bool = False,
     ) -> Any:
         """Assemble the fully-isolated `ClaudeAgentOptions` for a run."""
         opts: dict[str, Any] = {
@@ -269,7 +270,11 @@ class ClaudeCodeAgent:
             # Bash, Read, and Edit; disabling it restores the full preset.
             "tools": {"type": "preset", "preset": "claude_code"},
             "mcp_servers": {_MCP_SERVER_NAME: server},
-            "env": {"MCP_TOOL_TIMEOUT": str(math.ceil(self.tool_timeout_s * 1000))},
+            "env": {
+                "MCP_TOOL_TIMEOUT": str(math.ceil(self.tool_timeout_s * 1000)),
+                # Claude permits root bypass mode only in an explicit sandbox.
+                **({"IS_SANDBOX": "1"} if native_sandbox_disabled else {}),
+            },
             # Ignore project `.mcp.json`, user settings, and plugin MCP servers
             # so only the corral task endpoint is loaded.
             "strict_mcp_config": True,
@@ -277,13 +282,15 @@ class ClaudeCodeAgent:
             # Native tools remain subject to Claude Code's automatic safety
             # review. Task-scoped MCP tools are pre-approved above because the
             # benchmark is non-interactive and the endpoint is capability-scoped.
-            "permission_mode": "auto",
+            "permission_mode": "bypassPermissions"
+            if native_sandbox_disabled
+            else "auto",
             # Corral's Docker worker already enforces the filesystem and UID
             # boundary. Local runs still need Claude's own OS sandbox.
             "sandbox": {
-                "enabled": not corral_sandbox,
+                "enabled": not (corral_sandbox or native_sandbox_disabled),
                 "autoAllowBashIfSandboxed": True,
-                "allowUnsandboxedCommands": False,
+                "allowUnsandboxedCommands": native_sandbox_disabled,
             },
             # Load *no* filesystem configuration: `[]` (unlike `None`, which
             # loads user/project/local settings, CLAUDE.md, hooks, and MCP
@@ -377,16 +384,23 @@ class ClaudeCodeAgent:
             cwd,
             max_turns,
             corral_sandbox=getattr(session, "native_tool_workspace", None) is not None,
+            native_sandbox_disabled=getattr(session, "native_sandbox_disabled", False),
         )
         if getattr(session, "native_tool_workspace", None):
             options.system_prompt["append"] += (
                 f"\nNative tools and Corral MCP tools share the task workspace at {cwd}.\n"
-                "Native commands run inside Corral's enforced sandbox."
+                + (
+                    "Native commands run inside the Docker container."
+                    if getattr(session, "native_sandbox_disabled", False)
+                    else "Native commands run inside Corral's enforced sandbox."
+                )
             )
         run.metadata = self._harness_metadata(options, tools)
         run.metadata["mcp_url"] = mcp_url
         run.metadata["workspace_access"] = (
-            "corral_sandbox"
+            "docker_unrestricted"
+            if getattr(session, "native_sandbox_disabled", False)
+            else "corral_sandbox"
             if getattr(session, "native_tool_workspace", None)
             else "isolated_sdk_workspace_and_mcp"
         )

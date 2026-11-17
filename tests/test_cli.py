@@ -271,6 +271,7 @@ def test_benchmark_parser_has_safe_docker_defaults():
     )
 
     assert args.sandbox == "docker"
+    assert args.sandbox_guardrails == "on"
     assert args.sandbox_image is None
     assert args.sandbox_cpus == 2.0
     assert args.sandbox_memory == "4g"
@@ -933,3 +934,26 @@ def test_benchmark_parser_defaults_to_verbose_reports():
     assert cli.build_parser().parse_args(base).verbose is True
     assert cli.build_parser().parse_args([*base, "--verbose"]).verbose is True
     assert cli.build_parser().parse_args([*base, "--no-verbose"]).verbose is False
+
+
+@pytest.mark.parametrize("guardrails", ["on", "off"])
+def test_benchmark_guardrails_are_serialized(guardrails):
+    args = cli.build_parser().parse_args(
+        [
+            "bench",
+            "--agent",
+            "react",
+            "--environment",
+            "samplemath",
+            "--sandbox-guardrails",
+            guardrails,
+        ]
+    )
+    assert cli._sandbox_profile(args).docker.guardrails == guardrails
+
+
+def test_guardrails_off_requires_docker():
+    with pytest.raises(ValueError, match="requires --sandbox docker"):
+        cli._sandbox_profile(
+            argparse.Namespace(sandbox="local", sandbox_guardrails="off")
+        )

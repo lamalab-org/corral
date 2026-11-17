@@ -264,21 +264,31 @@ def test_claude_is_only_a_new_session_agent():
 
 
 @pytest.mark.anyio
-async def test_claude_uses_and_preserves_corral_workspace(monkeypatch, tmp_path):
+@pytest.mark.parametrize("guardrails", ["on", "off"])
+async def test_claude_uses_and_preserves_corral_workspace(
+    monkeypatch, tmp_path, guardrails
+):
     async def messages(options, captured):
         assert options.cwd == str(tmp_path)
         assert options.sandbox["enabled"] is False
-        assert options.permission_mode == "auto"
+        assert options.permission_mode == (
+            "auto" if guardrails == "on" else "bypassPermissions"
+        )
+        assert options.sandbox["allowUnsandboxedCommands"] == (guardrails == "off")
+        assert options.env.get("IS_SANDBOX") == ("1" if guardrails == "off" else None)
         Path(options.cwd, "native.txt").write_text("native output")
         return [FakeResultMessage("done")]
 
     _install_fake_sdk(monkeypatch, messages)
     session = FakeSession(submission="done", submission_status="submitted")
     session.native_tool_workspace = str(tmp_path)
+    session.native_sandbox_disabled = guardrails == "off"
     outcome = await ClaudeCodeAgent().run_session(session)
     assert outcome.status == "completed"
     assert (tmp_path / "native.txt").read_text() == "native output"
-    assert outcome.metadata["workspace_access"] == "corral_sandbox"
+    assert outcome.metadata["workspace_access"] == (
+        "corral_sandbox" if guardrails == "on" else "docker_unrestricted"
+    )
 
 
 def test_claude_usage_includes_cached_and_cache_created_input_tokens():

@@ -9,7 +9,11 @@ from anyio.from_thread import BlockingPortal
 
 from corral.agents.ai_scientist.agent import _BranchSessionRegistry
 from corral.agents.schema import AgentOutcome
-from corral.agents.session import AgentSession, run_agent_session
+from corral.agents.session import (
+    AgentSession,
+    AgentSessionCapabilities,
+    run_agent_session,
+)
 from corral.core import Action, ActorRef, AgentStarted, CommitRequest
 from corral.core.action import submit_answer_action
 from corral.core.environment import Environment, Toolset
@@ -18,6 +22,7 @@ from corral.core.tool_catalog import state_tool_catalog
 from corral.persistence import SQLiteCommitStore
 from corral.report.projection import _token_usage, _tool_statistics
 from corral.report.results import BenchmarkResult, TaskTrialResult, TaskTrialResults
+from corral.runtime import permissions
 from corral.workspace import AbsoluteWorkspaceFilesystem, build_terminal_tool
 
 
@@ -461,3 +466,29 @@ async def test_sdk_chronology_survives_delayed_delivery_and_resume(workspace_ses
         }
     )
     assert await session.state_store.head("main") == commits[-1]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("enforced", "disabled", "native", "shared"),
+    [
+        (False, False, True, False),  # local mode keeps SDK isolation
+        (True, False, True, True),  # protected Docker worker
+        (False, True, True, True),  # unconfined Docker process
+        (False, True, False, False),  # workspace sharing still requires opt-in
+    ],
+)
+async def test_native_workspace_policy(
+    workspace_session, monkeypatch, enforced, disabled, native, shared
+):
+    session = workspace_session
+    session.capabilities = AgentSessionCapabilities(native_workspace=native)
+    monkeypatch.setattr(permissions, "enabled", lambda: enforced)
+    monkeypatch.setattr(permissions, "guardrails_disabled", lambda: disabled)
+    assert session.native_sandbox_disabled == disabled
+    assert session.native_tool_workspace == (session.workspace if shared else None)
+    if shared and not enforced:
+        Path(session.workspace, "ablation.txt").write_text("native output")
+        await session._capture_native_workspace()
+        restored = await session.state_store.materialize("main")
+        assert "ablation.txt" in restored.workspace.files

@@ -191,6 +191,7 @@ class LocalTaskLauncher:
             scaffold_metadata.update(
                 sandbox_image_digest=docker.image_digest,
                 sandbox_network=docker.network,
+                sandbox_guardrails=docker.guardrails,
                 sandbox_resources={
                     "cpus": docker.cpus,
                     "memory": docker.memory,
@@ -654,6 +655,7 @@ class DockerTaskLauncher:
             "corral.execution_id": request.execution_id,
             "corral.image_digest": docker.image_digest or "unresolved",
             "corral.runtime_protocol_version": docker.runtime_protocol_version,
+            "corral.guardrails": docker.guardrails,
         }
         volume_arguments = [self.docker_executable, "volume", "create"]
         for key, value in labels.items():
@@ -825,7 +827,10 @@ class DockerTaskLauncher:
                 "benchmark_run_id": request.benchmark_run_id,
                 "container_id": container_id,
                 "container_name": container_name,
-                "permissions_policy": "workspace-root-v1",
+                "permissions_policy": (
+                    "workspace-root-v1" if docker.guardrails == "on" else "disabled"
+                ),
+                "guardrails": docker.guardrails,
                 "cpus": docker.cpus,
                 "gpus": docker.gpus,
                 "execution_id": request.execution_id,

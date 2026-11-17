@@ -557,14 +557,20 @@ class OpenHandsAgent(BaseAgent):
         )
         run.metadata["dropped_image_parts"] = dropped_images
         run.metadata["workspace_access"] = (
-            "corral_sandbox"
+            "docker_unrestricted"
+            if getattr(session, "native_sandbox_disabled", False)
+            else "corral_sandbox"
             if run.native_workspace
             else "isolated_sdk_workspace_and_mcp"
         )
         if run.native_workspace is not None:
             prompt += (
                 f"\nNative tools and Corral MCP tools share the task workspace at {run.native_workspace}.\n"
-                "Corral provides the execution sandbox."
+                + (
+                    "Native commands run inside the Docker container."
+                    if getattr(session, "native_sandbox_disabled", False)
+                    else "Corral provides the execution sandbox."
+                )
             )
         # Keep a conservative fallback for adapters/tests that do not expose
         # SDK metrics. The real OpenHands path replaces this with the count

@@ -102,6 +102,7 @@ class _RunState:
     """Mutable scratch owned by one invocation, never by the agent instance."""
 
     native_workspace: str | None = None
+    native_sandbox_disabled: bool = False
     messages: StreamingTranscript = field(
         default_factory=lambda: StreamingTranscript("codex")
     )
@@ -379,8 +380,18 @@ class CodexAgent(BaseAgent):
                 model=self.harness_model,
                 cwd=str(workspace),
                 developer_instructions=developer_instructions,
-                approval_mode=ApprovalMode.auto_review,
-                sandbox=None if run.native_workspace is not None else Sandbox.read_only,
+                approval_mode=(
+                    ApprovalMode.deny_all
+                    if run.native_sandbox_disabled
+                    else ApprovalMode.auto_review
+                ),
+                sandbox=(
+                    Sandbox.full_access
+                    if run.native_sandbox_disabled
+                    else None
+                    if run.native_workspace is not None
+                    else Sandbox.read_only
+                ),
                 ephemeral=True,
             )
             return self._drive_turn(thread, prompt, run)
@@ -393,7 +404,7 @@ class CodexAgent(BaseAgent):
         (b) select the final answer with the SDK's phase-aware logic, and
         (c) enforce a wall-clock deadline via a watchdog that interrupts the turn.
         """
-        if run.native_workspace is not None:
+        if run.native_workspace is not None and not run.native_sandbox_disabled:
             # SDK 0.1's preset enum omits externalSandbox. Use its wire client
             # for this policy, retaining the normal SDK streaming turn handle.
             started = thread._client.turn_start(
@@ -414,8 +425,12 @@ class CodexAgent(BaseAgent):
             turn = thread.turn(
                 prompt,
                 effort=self.reasoning_effort,
-                sandbox=Sandbox.read_only,
-                approval_mode=ApprovalMode.auto_review,
+                sandbox=Sandbox.full_access
+                if run.native_sandbox_disabled
+                else Sandbox.read_only,
+                approval_mode=ApprovalMode.deny_all
+                if run.native_sandbox_disabled
+                else ApprovalMode.auto_review,
             )
 
         # Watchdog: interrupt the turn if it outlives the wall-clock deadline.
@@ -763,7 +778,8 @@ class CodexAgent(BaseAgent):
             )
 
         run = _RunState(
-            native_workspace=getattr(session, "native_tool_workspace", None)
+            native_workspace=getattr(session, "native_tool_workspace", None),
+            native_sandbox_disabled=getattr(session, "native_sandbox_disabled", False),
         )
         iteration_limit = session.iteration_limit
 
@@ -791,7 +807,11 @@ class CodexAgent(BaseAgent):
         if run.native_workspace is not None:
             developer_instructions += (
                 f"\nNative tools and Corral MCP tools share the task workspace at {run.native_workspace}.\n"
-                "Corral provides the execution sandbox."
+                + (
+                    "Native commands run inside the Docker container."
+                    if run.native_sandbox_disabled
+                    else "Corral provides the execution sandbox."
+                )
             )
         mcp_url = session.tool_connection.mcp_url
         run.metadata = self._harness_metadata(
@@ -803,7 +823,11 @@ class CodexAgent(BaseAgent):
         )
         run.metadata["dropped_image_parts"] = dropped_images
         if run.native_workspace is not None:
-            run.metadata["sandbox"] = "externalSandbox"
+            run.metadata["sandbox"] = (
+                "dangerFullAccess" if run.native_sandbox_disabled else "externalSandbox"
+            )
+        if run.native_sandbox_disabled:
+            run.metadata["approval_mode"] = "never"
         # A Codex thread.turn(...) is one SDK turn for Corral usage
         # accounting, even though it can contain many internal events.
         run.metadata["sdk_turns"] = 1
@@ -943,7 +967,9 @@ class CodexAgent(BaseAgent):
             run.native_workspace is not None
         )
         run.metadata["workspace_access"] = (
-            "corral_sandbox"
+            "docker_unrestricted"
+            if run.native_sandbox_disabled
+            else "corral_sandbox"
             if run.native_workspace
             else "isolated_sdk_workspace_and_mcp"
         )
