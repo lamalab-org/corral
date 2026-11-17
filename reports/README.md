@@ -7,7 +7,7 @@ same layout, names and index files, so runs can be compared across them.
 |---|---|---|---:|---:|
 | AFM | [`afm/`](afm/) | `afm-reports-november-2026` | 14 | 700 |
 | Inference optimization | [`inference_opt/`](inference_opt/) | `ml_env_baseline` | 14 | 700 |
-| Psychometrics (corral-mini v1; October full runs in `archive/`) | [`psychometrics/`](psychometrics/) | `mini-1-psychom` | 28 | 420 |
+| Psychometrics (mini v1; [mini v2](psychometrics/mini-v2/); full runs in `archive/`) | [`psychometrics/`](psychometrics/) | `mini-1-psychom` | 28 | 420 |
 | Resistor network (v4, Docker sandbox; corral-mini v2 in [`resistor_network/mini-v2/`](resistor_network/mini-v2/)) | [`resistor_network/`](resistor_network/) | `resistor-network-native-docker-reports` | 14 | 700 |
 | Corral MD (corral-mini v2 in [`corral_md/mini-v2/`](corral_md/mini-v2/)) | [`corral_md/`](corral_md/) | — | 14 | 700 |
 | Retrosynthesis (corral-mini v2 in [`retrosynthesis/mini-v2/`](retrosynthesis/mini-v2/)) | [`retrosynthesis/`](retrosynthesis/) | — | 14 | 700 |
@@ -21,7 +21,8 @@ environment has its own indexes, with report paths relative to its folder. The
 
 Psychometrics holds the corral-mini v1 runs. corral-mini v2 runs sit next to
 the full-benchmark runs of their environment, in `<environment>/mini-v2/` with
-their own indexes (wetlab, retrosynthesis, spectra elucidation, resistor network, corral MD); the totals above count only the full runs.
+their own indexes (wetlab, retrosynthesis, spectra elucidation, resistor network,
+corral MD, psychometrics). The totals above exclude these mini v2 folders.
 Each mini version has its own Hugging Face datasets, not the October ones:
 `jablonkagroup/corral-reports-mini-v1` (psychometrics) and
 `jablonkagroup/corral-reports-mini-v2` (wetlab, retrosynthesis, spectra elucidation, resistor network,
