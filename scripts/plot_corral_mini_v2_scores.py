@@ -18,7 +18,7 @@ mpl.use("Agg")
 import lama_aesthetics as lama
 import matplotlib.pyplot as plt
 import numpy as np
-from corral_mini_common import load, load_afm_strata
+from corral_mini_common import load, load_afm_strata, load_report_strata
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "src/corral/subsets/corral_mini_v2.json"
@@ -46,6 +46,16 @@ def load_data(
     ):
         raise ValueError("AFM trials do not match the v2 manifest")
     strata.update(load_afm_strata(afm_path, prices, agents, score_column))
+    for environment, local in manifest.get("local_sources", {}).items():
+        trials_csv = ROOT / local["trials_csv"]
+        if (
+            hashlib.sha256(trials_csv.read_bytes()).hexdigest()
+            != local["trials_csv_sha256"]
+        ):
+            raise ValueError(f"{environment} trials do not match the v2 manifest")
+        strata.update(
+            load_report_strata(trials_csv, prices, agents, score_column, environment)
+        )
     return manifest, dict(sorted(strata.items())), agents
 
 

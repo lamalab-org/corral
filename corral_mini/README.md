@@ -53,6 +53,27 @@ uv run --no-project --with "lama-aesthetics @ git+https://github.com/lamalab-org
   python scripts/plot_corral_mini.py
 ```
 
+## Stargazer scoring correction (2026-11-17)
+
+PR #504 changes complete scoring to a 0.60 mean match cutoff and a 0.35
+per-planet floor. The [October rescore](../reports/stargazer/README.md#calibrated-complete-scorer-pr-504-2026-11-17)
+changes L1 from 190 to 268 passes out of 350; L2 remains 0/350. The manifest
+uses these local reports and records their hashes. Add `--local-reports stargazer`
+when rebuilding a release with `scripts/build_corral_mini.py`.
+
+| Level | Before | After |
+|---|---|---|
+| 1 | `seed21_diff5`, `seed29_diff3`, `seed3_diff4` | `seed15_diff5`, `seed21_diff5`, `seed503_diff2` |
+| 2 | `seed122_diff10`, `seed176_diff9`, `seed1_diff8` | unchanged |
+
+Reselection uses the same v2 method. L1's selected set has Spearman 0.9273
+against the seven agents' full-level Pass^5 scores. L2's ranking stays
+constant at zero, so cost still chooses its tasks. The
+[selection audit](../reports/stargazer/provenance/scorer-504/mini-selection.json)
+records the selected sets and tie counts. Reproduce just this correction with
+`python scripts/reselect_stargazer_mini.py --audit-dir PATH` (add `--write`
+to update the manifest and Stargazer tie rows).
+
 ## Methods
 
 **v2 selection.** In each level, choose three tasks. Prefer tasks that at least
@@ -305,9 +326,9 @@ so its percentage change is undefined and omitted from that panel. The score
 panel uses a symmetric log scale to show both the mean and large positive
 outliers. Values are in [`results_pass_hat_5_unsaturated.csv`](results_pass_hat_5_unsaturated.csv).
 
-At three tasks per level, Rank + cost has Spearman 0.887, 17 held-out levels
-with an inversion, and a −33.1% average score change. Rank + score has Spearman
-0.887, 17 held-out levels with an inversion, and a −35.3% average score change.
+At three tasks per level, Rank + cost has Spearman 0.942, 17 held-out levels
+with an inversion, and a -30.5% average score change. Rank + score has Spearman
+0.942, 17 held-out levels with an inversion, and a -32.6% average score change.
 
 To regenerate the figures from the pinned summary table:
 

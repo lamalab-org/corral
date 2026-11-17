@@ -19,6 +19,7 @@ from corral_mini_common import (
     METHODS,
     load,
     load_afm_strata,
+    load_report_strata,
     rank_cost_tie_counts,
     select,
 )
@@ -66,6 +67,14 @@ def main() -> None:
         default=True,
         help="prefer tasks not solved by all agents (default: enabled)",
     )
+    parser.add_argument(
+        "--local-reports",
+        action="append",
+        default=[],
+        metavar="ENVIRONMENT[=REPORTS_DIR]",
+        help="take scores from reports/<environment>/trials.csv or the supplied "
+        "repository-relative directory instead of the dataset revision (repeatable)",
+    )
     parser.add_argument("--output", type=Path)
     parser.add_argument(
         "--ties-output",
@@ -87,6 +96,28 @@ def main() -> None:
         strata.update(load_afm_strata(trials_csv, args.prices, agents))
         strata = dict(sorted(strata.items()))
         afm_source = {
+            "runs_csv": str(runs_csv.relative_to(REPOSITORY)),
+            "runs_csv_sha256": hashlib.sha256(runs_csv.read_bytes()).hexdigest(),
+            "trials_csv": str(trials_csv.relative_to(REPOSITORY)),
+            "trials_csv_sha256": hashlib.sha256(trials_csv.read_bytes()).hexdigest(),
+        }
+    local_sources = {}
+    for entry in args.local_reports:
+        environment, separator, reports_dir = entry.partition("=")
+        trials_csv = (
+            REPOSITORY / reports_dir
+            if separator
+            else REPOSITORY / "reports" / environment
+        ) / "trials.csv"
+        runs_csv = trials_csv.with_name("runs.csv")
+        replaced = {key for key in strata if key[0] == environment}
+        loaded = load_report_strata(
+            trials_csv, args.prices, agents, args.score_metric, environment
+        )
+        if set(loaded) != replaced:
+            raise SystemExit(f"{environment}: local levels differ from the dataset")
+        strata.update(loaded)
+        local_sources[environment] = {
             "runs_csv": str(runs_csv.relative_to(REPOSITORY)),
             "runs_csv_sha256": hashlib.sha256(runs_csv.read_bytes()).hexdigest(),
             "trials_csv": str(trials_csv.relative_to(REPOSITORY)),
@@ -145,6 +176,8 @@ def main() -> None:
         "source": source,
         "tasks_by_environment": dict(sorted(tasks_by_environment.items())),
     }
+    if local_sources:
+        manifest["local_sources"] = local_sources
     if afm_source is not None:
         manifest["afm_source"] = afm_source
     output.parent.mkdir(parents=True, exist_ok=True)
