@@ -21,6 +21,7 @@ import pytest
 
 from corral.agents.schema import AgentOutcome
 from corral.core import RESOURCE_STATE_NAMESPACE, Action, ExecutionState
+from corral.core.environment import Environment
 from corral.core.task import topological_order
 from corral.core.tool import Tool
 from corral.observability import NoOpObserver
@@ -192,6 +193,37 @@ def test_task_definitions_run_and_restore(
                     environment.current_task.excluded_tools
                 )
                 assert expected_tools <= environment.tools.keys(), task_id
+                for name, tool in environment.tools.items():
+                    context = f"{benchmark}/{task_id}/{name}"
+                    resources = set(tool.resources)
+                    stateful = resources & environment.resource_adapters.keys()
+                    file_resources = environment.file_resources.keys()
+                    assert (
+                        resources
+                        <= environment.resource_adapters.keys() | file_resources
+                    ), context
+                    assert not stateful or tool.trusted, context
+                    private_inputs = (
+                        set(tool.hidden_args)
+                        - set(tool.workspace_args)
+                        - file_resources
+                    )
+                    assert (
+                        not private_inputs or tool.trusted or tool.controller_dispatch
+                    ), context
+                    public_schema = tool.get_openai_tool_format()["function"][
+                        "parameters"
+                    ]
+                    assert (
+                        not set(tool.hidden_args)
+                        & public_schema.get("properties", {}).keys()
+                    ), context
+                    if tool.controller_dispatch:
+                        assert (
+                            type(environment).execute_controller_tool
+                            is not Environment.execute_controller_tool
+                            or callable(getattr(tool, "execute_controller", None))
+                        ), context
                 try:
                     state = await TaskRuntime(store, NoOpObserver()).run(
                         SubmitAgent(),

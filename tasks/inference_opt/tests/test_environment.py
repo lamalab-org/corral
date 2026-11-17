@@ -502,3 +502,73 @@ def test_a_reference_task_passes_on_a_tie_with_the_larger_model():
     result = final_result(config, {"student_b": run})
     assert result["score"] == 1.0
     assert "(Llama 3.1 70B Instruct 33%)" in result["feedback"]
+
+
+class TestSubmissionPreflight:
+    def test_missing_private_labels_do_not_spend_the_submission(self, tmp_path, monkeypatch):
+        from inference_opt import datasets, runner
+        from inference_opt.tools import create_tools
+
+        workspace = _workspace_with_policy(tmp_path, TestSubmission.POLICY)
+        real_load = datasets.load_targets
+
+        def missing(benchmark, split):
+            if split == "test":
+                raise FileNotFoundError("private labels unavailable")
+            return real_load(benchmark, split)
+
+        monkeypatch.setattr(datasets, "load_targets", missing)
+        # If preflight unexpectedly reaches execution, fail without running a policy.
+        monkeypatch.setattr(runner, "_execute_host", lambda *_args: pytest.fail("executed"))
+        tools = create_tools(_task_config(1, "math_algebra_b"), "")
+        ledger = {}
+        with pytest.raises(FileNotFoundError, match="private labels"):
+            tools["submit_policy"]._func(work_dir=str(workspace), inference_state=ledger)
+        budget = tools["get_budget"]._func(work_dir=str(workspace), inference_state=ledger)
+        assert json.loads(budget.splitlines()[1])["remaining"]["submissions"] == 1
+
+    def test_receipt_directory_is_rejected_before_running(self, tmp_path, monkeypatch):
+        from inference_opt.tools import create_tools
+
+        workspace = _workspace_with_policy(tmp_path, TestSubmission.POLICY)
+        (workspace / "submission.json").mkdir()
+        monkeypatch.setattr("inference_opt.tools.run_policy", lambda **_kwargs: pytest.fail("executed"))
+        tools = create_tools(_task_config(1, "math_algebra_b"), "")
+        ledger = {}
+        with pytest.raises(ValueError, match="must be a file"):
+            tools["submit_policy"]._func(work_dir=str(workspace), inference_state=ledger)
+        budget = tools["get_budget"]._func(work_dir=str(workspace), inference_state=ledger)
+        assert json.loads(budget.splitlines()[1])["remaining"]["submissions"] == 1
+
+    def test_receipt_failure_preserves_completed_result(self, tmp_path, monkeypatch):
+        from inference_opt.runner import ModelRun
+        from inference_opt.tools import create_tools
+
+        workspace = _workspace_with_policy(tmp_path, TestSubmission.POLICY)
+        executions = []
+
+        def run(**kwargs):
+            kwargs["before_execution"]()
+            executions.append(kwargs["run_id"])
+            return {"student_b": ModelRun(model="student_b", split="test", question_ids=[])}
+
+        real_write = Path.write_text
+
+        def write(path, *args, **kwargs):
+            if path.name == "submission.json":
+                raise PermissionError("receipt unavailable")
+            return real_write(path, *args, **kwargs)
+
+        monkeypatch.setattr("inference_opt.tools.run_policy", run)
+        monkeypatch.setattr("inference_opt.tools.final_result", lambda *_args: {"score": 1.0})
+        monkeypatch.setattr(Path, "write_text", write)
+        tools = create_tools(_task_config(1, "math_algebra_b"), "")
+        ledger = {}
+        result = tools["submit_policy"]._func(work_dir=str(workspace), inference_state=ledger)
+        assert result.startswith("Submitted.")
+        assert "receipt unavailable" in result
+        assert ledger["final"]["result"] == {"score": 1.0}
+        assert ledger["submissions"] == 1
+        retry = tools["submit_policy"]._func(work_dir=str(workspace), inference_state=ledger)
+        assert retry.startswith("NOT submitted")
+        assert len(executions) == 1

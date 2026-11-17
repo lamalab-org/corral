@@ -155,3 +155,23 @@ def test_without_a_shared_ledger_branches_are_independent():
     first.reserve(calls=10)
     second.reserve(calls=10)
     assert "shared_across_branches" not in first.snapshot()
+
+
+def test_only_one_parallel_branch_can_reserve_the_final_submission(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    branches = _branches(tmp_path, BudgetSpec(max_submissions=1), count=8)
+
+    def submit(ledger):
+        try:
+            ledger.reserve(submissions=1)
+            return True
+        except BudgetExhausted:
+            return False
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        assert sum(pool.map(submit, branches)) == 1
+    assert all(branch.remaining()["submissions"] == 0 for branch in branches)
+    winner = next(branch for branch in branches if branch.state["submissions"])
+    winner.refund(submissions=1)  # e.g. a policy import failed before evaluation
+    assert all(branch.remaining()["submissions"] == 1 for branch in branches)

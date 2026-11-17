@@ -1459,12 +1459,34 @@ class AgentSession:
             await branch._refresh(observed_hash=commit.hash)
         return branch
 
+    async def checkpoint_environment(self) -> None:
+        """Commit controller-owned shared resources before saving a checkpoint."""
+        current = await self._refresh()
+        captured = await anyio.to_thread.run_sync(
+            self.environment.capture_environment, current.environment.values
+        )
+        operations = environment_operations(
+            current.environment.values,
+            self.environment.normalize_public_paths(captured),
+        )
+        if operations:
+            commit = await self._append_runtime(
+                TaskConfigured(
+                    status="Environment checkpoint saved",
+                    environment_operations=operations,
+                    expected_environment_revision=current.environment.revision,
+                ),
+                f"environment-checkpoint:{uuid4()}",
+            )
+            await self._refresh(observed_hash=commit.hash)
+
     async def checkpoint_branch(self) -> dict[str, Any]:
         """Save branch state without exposing private environment values to workers.
 
         The opaque blob and public workspace manifest are both retained in agent
         bookkeeping so continuation imports the snapshot and its file bytes.
         """
+        await self.checkpoint_environment()
         state = await self.state_store.materialize(self.branch_id)
         payload = {
             "environment": state.environment.values,

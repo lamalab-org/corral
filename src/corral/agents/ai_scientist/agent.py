@@ -46,6 +46,7 @@ from corral.core.errors import concise_error_message
 _SCIENTIST_SYSTEM_PROMPT = """
 You are the reasoning component of a scientific experiment manager.
 Interact with the task environment only through experiments explicitly represented by the supplied tool schemas.
+All branches draw from the same resources. Forking or restoring a checkpoint does not replenish them.
 
 Return the requested structured object without Markdown or surrounding prose.
 """.strip()
@@ -287,7 +288,9 @@ class AIScientistAgent(BaseAgent):
     def _search_tools(self, session: AgentSession) -> list[dict[str, Any]]:
         """The session's tools without the final actions, which only the main
         session runs."""
-        final_names = {action.name for action in self.config.final_actions}
+        final_names = {action.name for action in self.config.final_actions} | {
+            SUBMIT_ANSWER_TOOL_NAME
+        }
         return [
             dict(tool)
             for tool in session.tools
@@ -403,6 +406,7 @@ class AIScientistAgent(BaseAgent):
                 raise
 
         def checkpoint(search: ScientistState, active_pool: ExecutionPool) -> None:
+            portal.call(session.checkpoint_environment)
             branches = [
                 {
                     "branch_id": branch.branch_id,
