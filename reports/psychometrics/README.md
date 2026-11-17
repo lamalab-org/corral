@@ -9,6 +9,8 @@ Full-task benchmark runs (10 tasks per level) are archived in
 `archive/`. The archive now contains replacement results from the 20-task
 Psychometrics revision in PR #481; see its README for run provenance.
 
+Revised-task corral-mini v2 results (540 trials) are in [`mini-v2/`](mini-v2/).
+
 ## Tasks (corral-mini v1)
 
 | Level | Tasks |
