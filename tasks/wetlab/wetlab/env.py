@@ -501,13 +501,6 @@ class QualitativeAnalysisEnvironment(Environment):
                 if key != "work_dir":
                     prompt += f"- {key}: {value}\n"
 
-        if self.shared_inventory:
-            prompt += (
-                "\nAll exploration branches share one inventory of samples and products. "
-                "Branching does not replenish it. Check check_inventory for current "
-                "availability and use unique experiment labels across branches.\n"
-            )
-
         event(
             "DEBUG",
             "environment.prompt_generated",

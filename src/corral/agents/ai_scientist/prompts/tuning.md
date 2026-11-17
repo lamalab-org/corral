@@ -35,5 +35,3 @@ Do not precompute tool actions.
 A bounded worker will choose up to {{max_actions}} listed-tool actions one at a time from actual observations.
 Follow the task environment's public path contract for all output paths.
 Return exactly {{count}} proposal(s) when possible.
-
-All branches draw from the same trial resources. Forking or restoring a checkpoint does not replenish them.

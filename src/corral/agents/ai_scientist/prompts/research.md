@@ -35,5 +35,3 @@ A DEBUG node must address the concrete failed action.
 The experiment must use listed tools only.
 Follow the task environment's public path contract for all output paths.
 Return exactly {{count}} proposal(s) when possible.
-
-All branches draw from the same trial resources. Forking or restoring a checkpoint does not replenish them.

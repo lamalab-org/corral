@@ -502,15 +502,3 @@ def test_a_reference_task_passes_on_a_tie_with_the_larger_model():
     result = final_result(config, {"student_b": run})
     assert result["score"] == 1.0
     assert "(Llama 3.1 70B Instruct 33%)" in result["feedback"]
-
-
-@pytest.mark.parametrize("shared", [True, False])
-def test_resource_sharing_configuration_survives_binding(tmp_path, shared):
-    from corral.core.state import ExecutionState
-
-    environment = create_environments(
-        level=1, work_dir=str(tmp_path), shared_budget=shared
-    )["math_algebra_b"].for_task("bound")
-    assert environment.shared_budget is shared
-    prompt = environment.current_task.prompt_fn(environment, ExecutionState)
-    assert ("All exploration branches" in prompt) is shared

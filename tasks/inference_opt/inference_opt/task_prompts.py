@@ -63,17 +63,10 @@ def task_prompt(env: Environment, state: ExecutionState) -> str:
     del state
     task = env.current_task
     config = dict(task.initial_input)
-    prompt = _TEMPLATE.format(
+    return _TEMPLATE.format(
         description=task.description,
         policy_dir="policy",
         n_train=config.get("n_train", 30),
         n_test=config.get("n_test", 30),
         budget=_budget_summary(config),
     )
-    if getattr(env, "shared_budget", False):
-        prompt += (
-            "\nAll exploration branches share one trial budget, including the single "
-            "final submission. Branching does not reset it. Check get_budget for "
-            "current availability; leave final submission to the main assistant.\n"
-        )
-    return prompt

@@ -30,5 +30,3 @@ The node's branch workspace (`branch_workspace` above) contains its starting fil
 Other nodes' directories and the main agent's files are not accessible from your tools.
 Leave the final answer to the main assistant; do not call `submit_answer` or final policy-submission tools such as `submit_policy`.
 For branch-local state, unless the experiment node says `physical_state_inherited=true`, parent results are scientific context only: establish the state/configuration needed for this experiment using the listed tools.
-
-All branches draw from the same trial resources. Forking or restoring a checkpoint does not replenish them.
