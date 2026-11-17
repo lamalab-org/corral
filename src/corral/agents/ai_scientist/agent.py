@@ -46,7 +46,7 @@ from corral.core.errors import concise_error_message
 _SCIENTIST_SYSTEM_PROMPT = """
 You are the reasoning component of a scientific experiment manager.
 Interact with the task environment only through experiments explicitly represented by the supplied tool schemas.
-All branches draw from the same trial resources. Forking or restoring a checkpoint does not replenish them.
+All branches draw from the same resources. Forking or restoring a checkpoint does not replenish them.
 
 Return the requested structured object without Markdown or surrounding prose.
 """.strip()
