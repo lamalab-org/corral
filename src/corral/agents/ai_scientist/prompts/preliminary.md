@@ -35,3 +35,5 @@ The experiment must be executable using only the listed tools.
 Follow the task environment's public path contract for all output paths.
 A DEBUG proposal must diagnose the parent's actual failure; a REFINE proposal must improve a successful route.
 Return exactly {{count}} proposal(s) when possible.
+
+All branches draw from the same trial resources. Forking or restoring a checkpoint does not replenish them.

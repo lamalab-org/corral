@@ -146,7 +146,7 @@ def _shared_ledger(work_dir: str) -> SharedLedger | None:
 
 
 def create_tools(
-    config: dict[str, Any], work_dir: str, *, shared_budget: bool = False
+    config: dict[str, Any], work_dir: str, *, shared_budget: bool = True
 ) -> dict[str, Tool]:
     """Build the tool set for one task.
 
@@ -276,8 +276,6 @@ def create_tools(
         """
         ledger = _ledger(inference_state, work_dir)
         count = max(1, min(int(count), spec.reveal_batch))
-        ledger.reserve(reveals=1)
-
         items = datasets.load_items(benchmark, "examples")
         targets = datasets.load_targets(benchmark, "examples")
         baselines = datasets.load_example_baselines(models)
@@ -299,8 +297,8 @@ def create_tools(
         else:
             random.Random(len(already)).shuffle(pool)
 
-        chosen = pool[:count]
-        ledger.mark_revealed([item.item_id for item in chosen])
+        chosen_ids = set(ledger.claim_reveal([item.item_id for item in pool], count))
+        chosen = [item for item in pool if item.item_id in chosen_ids]
         new_records = [_example_record(item, targets, baselines) for item in chosen]
         # A long reply or reasoning is cut to its end, where the answer or the
         # point it stopped is, to keep the result readable; the stored copy and
@@ -795,7 +793,7 @@ def create_tools(
         ledger = _ledger(inference_state, work_dir)
         policy_dir = _resolve(work_dir, policy_path)
         used = int(ledger.state["submissions"])
-        if used >= spec.max_submissions:
+        if ledger.remaining()["submissions"] <= 0:
             return _compact(
                 {"error": "no submissions left"},
                 "NOT submitted: a policy was already submitted. "
@@ -804,6 +802,8 @@ def create_tools(
             )
         policy_hash = _policy_hash(policy_dir)
         run_id = ledger.next_run_id("final")
+        # Claim the test-set evaluation before running it, across all branches.
+        ledger.reserve(submissions=1)
         runs = run_policy(
             config=config,
             work_dir=Path(work_dir),
@@ -821,6 +821,7 @@ def create_tools(
         )
         if load_error:
             # Import fails before any test question is seen; it costs nothing.
+            ledger.refund(submissions=1)
             return _compact(
                 {"error": load_error}, f"NOT submitted: {load_error}", ledger
             )

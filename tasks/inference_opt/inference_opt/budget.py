@@ -28,7 +28,14 @@ __all__ = [
 LEDGER_RESOURCE = "inference_state"
 
 #: Usage counters that every limit in ``BudgetSpec`` is checked against.
-_COUNTERS = ("experiments", "debug_runs", "student_calls", "reveals", "probe_calls")
+_COUNTERS = (
+    "experiments",
+    "debug_runs",
+    "student_calls",
+    "reveals",
+    "probe_calls",
+    "submissions",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,7 +132,9 @@ class SharedLedger:
 
     def _load(self, seed: Mapping[str, Any]) -> dict[str, Any]:
         if self.path.is_file():
-            return json.loads(self.path.read_text(encoding="utf-8"))
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+            data["used"].setdefault("submissions", int(seed.get("submissions", 0)))
+            return data
         return {
             "used": {key: int(seed.get(key, 0)) for key in _COUNTERS},
             "revealed_ids": list(seed.get("revealed_ids") or []),
@@ -206,6 +215,7 @@ class StateLedger:
         calls: int = 0,
         reveals: int = 0,
         probe_calls: int = 0,
+        submissions: int = 0,
     ) -> None:
         wanted = {
             "experiments": experiments,
@@ -213,6 +223,7 @@ class StateLedger:
             "student_calls": calls,
             "reveals": reveals,
             "probe_calls": probe_calls,
+            "submissions": submissions,
         }
         limits = {
             "experiments": self.spec.max_experiments,
@@ -220,6 +231,7 @@ class StateLedger:
             "student_calls": self.spec.max_student_calls,
             "reveals": self.spec.max_reveals,
             "probe_calls": self.spec.max_probe_calls,
+            "submissions": self.spec.max_submissions,
         }
 
         def check(used: Mapping[str, Any], scope: str = "") -> dict[str, int]:
@@ -238,9 +250,21 @@ class StateLedger:
                 data["used"] = check(data["used"], " across all branches")
         self.state.update(own)
 
-    def refund(self, *, calls: int = 0, experiments: int = 0, debug_runs: int = 0) -> None:
+    def refund(
+        self,
+        *,
+        calls: int = 0,
+        experiments: int = 0,
+        debug_runs: int = 0,
+        submissions: int = 0,
+    ) -> None:
         """Give back what a run reserved but did not use."""
-        returned = {"student_calls": calls, "experiments": experiments, "debug_runs": debug_runs}
+        returned = {
+            "student_calls": calls,
+            "experiments": experiments,
+            "debug_runs": debug_runs,
+            "submissions": submissions,
+        }
         for key, amount in returned.items():
             self.state[key] = max(0, int(self.state[key]) - amount)
         if self.shared is not None:
@@ -282,6 +306,29 @@ class StateLedger:
             else None
         )
 
+    def claim_reveal(self, ordered_ids: list[str], count: int) -> list[str]:
+        """Reserve a reveal and select new examples atomically across branches."""
+        if self.shared is None:
+            self.reserve(reveals=1)
+            already = set(self.revealed_ids)
+            chosen = [item for item in ordered_ids if item not in already][:count]
+            self.mark_revealed(chosen)
+            return chosen
+        with self.shared.transaction(self.state) as data:
+            pooled = StateLedger(
+                {**data["used"], "revealed_ids": list(data["revealed_ids"])}, self.spec
+            )
+            pooled.reserve(reveals=1)
+            already = set(pooled.revealed_ids)
+            chosen = [item for item in ordered_ids if item not in already][:count]
+            data["used"]["reveals"] = pooled.state["reveals"]
+            data["revealed_ids"].extend(chosen)
+        self.state["reveals"] += 1
+        self.state["revealed_ids"].extend(
+            item for item in chosen if item not in self.state["revealed_ids"]
+        )
+        return chosen
+
     def mark_revealed(self, item_ids: list[str]) -> None:
         own = self.state["revealed_ids"]
         for item_id in item_ids:
@@ -300,7 +347,7 @@ class StateLedger:
             "student_calls": self.spec.max_student_calls - used["student_calls"],
             "reveals": self.spec.max_reveals - used["reveals"],
             "probe_calls": self.spec.max_probe_calls - used["probe_calls"],
-            "submissions": self.spec.max_submissions - int(self.state["submissions"]),
+            "submissions": self.spec.max_submissions - used["submissions"],
         }
 
     def snapshot(self) -> dict[str, Any]:
@@ -312,7 +359,7 @@ class StateLedger:
                 "student_calls": used["student_calls"],
                 "reveals": used["reveals"],
                 "probe_calls": used["probe_calls"],
-                "submissions": int(self.state["submissions"]),
+                "submissions": used["submissions"],
             },
             "limits": asdict(self.spec),
             "remaining": self.remaining(),

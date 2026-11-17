@@ -36,3 +36,5 @@ Do not repeat an existing child experiment from this checkpoint.
 Do not precompute tool actions.
 A bounded worker will choose up to {{max_actions}} listed-tool actions adaptively.
 Follow the task environment's public path contract for all output paths.
+
+All branches draw from the same trial resources. Forking or restoring a checkpoint does not replenish them.

@@ -15,3 +15,5 @@ Do not perform novelty search and do not assume access to anything outside the t
 When the experiments expose a meaningful task-internal scalar objective, define one `measured_metric` with its exact result-field name, direction, and unit.
 Use only quantities directly measured by the experiments.
 Leave the metric null when no defensible scalar exists.
+
+All branches draw from the same trial resources. Forking or restoring a checkpoint does not replenish them.

@@ -343,7 +343,7 @@ class QualitativeAnalysisEnvironment(Environment):
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self.shared_inventory = bool(kwargs.pop("shared_inventory", False))
+        self.shared_inventory = bool(kwargs.pop("shared_inventory", True))
         adapters = dict(kwargs.pop("resource_adapters", {}) or {})
         adapters.setdefault("wetlab", WetlabResourceAdapter())
         super().__init__(*args, resource_adapters=adapters, **kwargs)
@@ -501,6 +501,13 @@ class QualitativeAnalysisEnvironment(Environment):
                 if key != "work_dir":
                     prompt += f"- {key}: {value}\n"
 
+        if self.shared_inventory:
+            prompt += (
+                "\nAll exploration branches share one inventory of samples and products. "
+                "Branching does not replenish it. Check check_inventory for current "
+                "availability and use unique experiment labels across branches.\n"
+            )
+
         event(
             "DEBUG",
             "environment.prompt_generated",
@@ -541,7 +548,7 @@ def create_qualysis_environments(
     level: int = 2,
     subtask: bool = False,
     work_dir: str = "",
-    shared_inventory: bool = False,
+    shared_inventory: bool = True,
 ) -> dict[str, Environment]:
     """Create WetLab environments with optional per-execution scratch workspaces."""
     started = perf_counter()

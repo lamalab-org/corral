@@ -116,6 +116,7 @@ def test_loader_binds_wetlab_scratch_per_execution(tmp_path, monkeypatch) -> Non
     template = environments[task_id]
     assert template.base_work_dir == str(tmp_path)
     assert template.workspace_path is None
+    assert template.shared_inventory
     registry = RuntimeRegistry(agents={}, environments=environments)
     try:
         first = registry.environment(task_id, "trial-1")
@@ -123,6 +124,7 @@ def test_loader_binds_wetlab_scratch_per_execution(tmp_path, monkeypatch) -> Non
         assert first.workspace_path != second.workspace_path
         for environment in (first, second):
             assert isinstance(environment, QualitativeAnalysisEnvironment)
+            assert environment.shared_inventory
             assert Path(environment.workspace_path).parent == tmp_path
             assert environment.toolset.workspace_factory is None
             assert environment.tools.keys() == template.tools.keys()

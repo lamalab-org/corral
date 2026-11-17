@@ -195,9 +195,15 @@ class InferenceOptEnvironment(Environment):
     """One inference-optimization task; the budget ledger is a Corral resource."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.shared_budget = bool(kwargs.pop("shared_budget", True))
         adapters = dict(kwargs.pop("resource_adapters", {}) or {})
         adapters.setdefault(LEDGER_RESOURCE, InferenceLedgerAdapter())
         super().__init__(*args, resource_adapters=adapters, **kwargs)
+
+    def for_task(self, task_execution_id: str, **kwargs: Any) -> Environment:
+        bound = super().for_task(task_execution_id, **kwargs)
+        bound.shared_budget = self.shared_budget
+        return bound
 
 
 def create_environments(
@@ -206,7 +212,7 @@ def create_environments(
     level: int = 1,
     task_type: str = "task",
     work_dir: str = BASE_WORK_DIR,
-    shared_budget: bool = False,
+    shared_budget: bool = True,
 ) -> dict[str, Environment]:
     """Create the inference-optimization environments for one level.
 
@@ -236,6 +242,7 @@ def create_environments(
             task_id: InferenceOptEnvironment(
                 task_id=task_id,
                 task=task,
+                shared_budget=shared_budget,
                 base_work_dir=work_dir,
                 component_id=name,
                 resource_states={LEDGER_RESOURCE: _initial_ledger(task)},
