@@ -5,6 +5,7 @@ import json
 import anyio
 import pytest
 from anyio.from_thread import BlockingPortal
+from pydantic import TypeAdapter
 
 from corral.agents import AIScientistAgent
 from corral.agents.ai_scientist.agent import _BranchSessionRegistry
@@ -41,7 +42,8 @@ async def test_child_imports_scientist_branch_without_repeating_completed_tool(
             assert kind == "agent"
             agent, (host, port, token, handle, snapshot) = payload
             remote = RemoteSession(host, port, token, handle, snapshot)
-            return anyio.run(agent.run_session, remote).model_dump(mode="json")
+            outcome = anyio.run(agent.run_session, remote)
+            return TypeAdapter(AgentOutcome).dump_python(outcome, mode="json")
 
         monkeypatch.setattr(agent_worker.permissions, "run_worker", run_worker)
 

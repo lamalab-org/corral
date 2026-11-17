@@ -49,6 +49,7 @@ _METHODS = frozenset(
         "inspect_subagent",
         "import_subagent_context",
         "fork_branch",
+        "checkpoint_environment",
         "checkpoint_branch",
         "restore_branch_state",
         "promote_artifacts",
