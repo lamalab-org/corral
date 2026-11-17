@@ -135,10 +135,10 @@ def main() -> None:
         writer.writerows(rows)
     for level in (1, 2):
         group = [row for row in rows if row["level"] == level]
-        print(
+        sys.stdout.write(
             f"L{level}: {sum(r['old_score'] for r in group):g} -> "
             f"{sum(r['new_score'] for r in group):g}/{len(group)}; "
-            f"{sum(r['rescored'] for r in group)} answers rescored"
+            f"{sum(r['rescored'] for r in group)} answers rescored\n"
         )
     if args.write:
         for path, data in reports:

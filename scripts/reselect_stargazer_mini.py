@@ -6,6 +6,7 @@ import argparse
 import csv
 import hashlib
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -76,7 +77,7 @@ def main() -> None:
     (args.audit_dir / "mini-selection.json").write_text(
         json.dumps(rows, indent=2) + "\n"
     )
-    print(json.dumps(rows, indent=2))
+    sys.stdout.write(json.dumps(rows, indent=2) + "\n")
     if args.write:
         source = {}
         for name in ("runs", "trials"):
