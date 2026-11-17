@@ -58,6 +58,7 @@ from corral.observability import record_commit_safely
 from corral.persistence import CommitConflictError
 from corral.persistence.artifacts import iter_blob_refs
 from corral.runtime import permissions
+from corral.runtime.evaluation_awareness import prepend_evaluation_notice
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -422,6 +423,8 @@ class AgentSession:
             if isinstance(prompt, str | list)
             else self.environment.get_task_prompt(self.state)
         )
+        if self.state.task.scaffold.get("evaluation_awareness", "off") == "on":
+            resolved = prepend_evaluation_notice(resolved, self.iteration_limit)
         handoff = self._context.agent_run.handoff
         if handoff is None:
             return resolved

@@ -272,8 +272,11 @@ class RunTaskInput:
     agent_runtime: AgentRuntimeDefinition | None = None
     environment_runtime: EnvironmentRuntimeDefinition | None = None
     continuation: ContinuationSource | None = None
+    evaluation_awareness: str = "off"
 
     def __post_init__(self) -> None:
+        if self.evaluation_awareness not in ("on", "off"):
+            raise ValueError("evaluation_awareness must be 'on' or 'off'")
         if not self.execution_id:
             raise ValueError("execution_id cannot be empty")
         if self.trial_index < 0:
@@ -362,8 +365,11 @@ class BenchmarkInput:
         default_factory=dict
     )
     continuation_by_task: dict[str, ContinuationSource] = field(default_factory=dict)
+    evaluation_awareness: str = "off"
 
     def __post_init__(self) -> None:
+        if self.evaluation_awareness not in ("on", "off"):
+            raise ValueError("evaluation_awareness must be 'on' or 'off'")
         if not self.benchmark_run_id:
             raise ValueError("benchmark_run_id cannot be empty")
         if not self.task_ids:

@@ -78,6 +78,11 @@ import json
 import os
 from pathlib import Path
 root = Path('/corral-state')
+request = json.loads((root / 'request.json').read_text())
+if request.get('evaluation_awareness', 'off') != 'off':
+    from corral.orchestration.models import RunTaskInput
+    if 'evaluation_awareness' not in RunTaskInput.__dataclass_fields__:
+        raise RuntimeError('Docker image lacks evaluation-awareness support; rebuild the image')
 missing = json.loads((root / 'checkpoint-import.json').read_text())['missing_sidecars']
 for name in ('commits.sqlite3-wal', 'commits.sqlite3-shm'):
     if name in missing:
@@ -184,6 +189,7 @@ class LocalTaskLauncher:
         scaffold_metadata: dict[str, Any] = {
             "name": type(agent).__name__,
             "enable_surrender": request.enable_surrender,
+            "evaluation_awareness": request.evaluation_awareness,
             "sandbox": self.scaffold_sandbox,
         }
         if request.sandbox.docker is not None:

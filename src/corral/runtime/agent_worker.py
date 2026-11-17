@@ -78,7 +78,8 @@ _ARGUMENTS = {
 
 
 def _json(value: Any) -> Any:
-    return TypeAdapter(type(value)).dump_python(value, mode="json")
+    # Immutable projection containers are list/dict subclasses, not Pydantic schemas.
+    return TypeAdapter(Any).dump_python(value, mode="json")
 
 
 def _snapshot(session: AgentSession) -> dict[str, Any]:

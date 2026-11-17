@@ -35,6 +35,7 @@ from corral.orchestration.models import (
 )
 from corral.report.logging import event, exception_fields, log_context
 from corral.report.projection import normalise_k_values, project_benchmark_result
+from corral.runtime.evaluation_awareness import awareness_metadata
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterable, Mapping
@@ -380,6 +381,7 @@ def _report_metadata(
                 request.max_parallel_evaluations_by_environment
             ),
             "enable_surrender": request.enable_surrender,
+            **awareness_metadata(request.evaluation_awareness),
             "evaluate": request.evaluate,
             "retry_policy": asdict(request.retry_policy),
             "sandbox": asdict(request.sandbox),
@@ -449,6 +451,7 @@ class CorralRunner:
         max_parallel_by_environment: Mapping[str, int] | None = None,
         max_parallel_evaluations_by_environment: Mapping[str, int] | None = None,
         enable_surrender: bool = False,
+        evaluation_awareness: str = "off",
         evaluate: bool = True,
         retry_policy: RetryPolicy | None = None,
         include_dependencies: bool = True,
@@ -519,6 +522,7 @@ class CorralRunner:
                 max_parallel_evaluations_by_environment or {}
             ),
             enable_surrender=enable_surrender,
+            evaluation_awareness=evaluation_awareness,
             evaluate=evaluate,
             retry_policy=retry_policy or RetryPolicy(),
             sandbox=sandbox,
@@ -626,6 +630,7 @@ class CorralRunner:
                             max_iterations=request.max_iterations_by_task.get(task_id),
                             model=model,
                             enable_surrender=request.enable_surrender,
+                            evaluation_awareness=request.evaluation_awareness,
                             sandbox=request.sandbox,
                             agent_runtime=request.agent_runtime_by_task.get(task_id),
                             environment_runtime=request.environment_runtime_by_task.get(
@@ -782,6 +787,7 @@ class CorralRunner:
         max_parallel_by_environment: Mapping[str, int] | None = None,
         max_parallel_evaluations_by_environment: Mapping[str, int] | None = None,
         enable_surrender: bool = False,
+        evaluation_awareness: str = "off",
         evaluate: bool = True,
         retry_policy: RetryPolicy | None = None,
         include_dependencies: bool = True,
@@ -806,6 +812,7 @@ class CorralRunner:
                 max_parallel_evaluations_by_environment
             ),
             enable_surrender=enable_surrender,
+            evaluation_awareness=evaluation_awareness,
             evaluate=evaluate,
             retry_policy=retry_policy,
             include_dependencies=include_dependencies,

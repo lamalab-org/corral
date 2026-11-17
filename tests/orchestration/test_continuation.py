@@ -31,8 +31,10 @@ def anyio_backend():
 class CheckpointAgent:
     def __init__(self):
         self.seen = []
+        self.prompts = []
 
     async def run_session(self, session):
+        self.prompts.append(session.prompt)
         if session.state.runtime.metadata.get("lineage"):
             self.seen.append((session.state, session.messages, session.workspace))
             assert session.previous_state is None
@@ -65,7 +67,8 @@ class CheckpointAgent:
 
 
 @pytest.fixture
-async def trial(tmp_path):
+async def trial(tmp_path, request):
+    parent_mode = getattr(request, "param", "off")
     setup_calls = []
 
     def setup(_environment, _state):
@@ -95,6 +98,7 @@ async def trial(tmp_path):
     )
     request = RunTaskInput(
         execution_id="parent",
+        evaluation_awareness=parent_mode,
         task_id="task",
         environment_id="task",
         agent_id="agent",
@@ -605,3 +609,31 @@ async def test_cli_rejects_overlapping_source_and_output_before_writing(
     with pytest.raises(ValueError, match="report path must be outside"):
         await cli.run_benchmark(args)
     assert fingerprints(Path(source.trial)) == before
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("trial", ["off", "on"], indirect=True)
+async def test_continuation_selects_its_own_awareness_mode(trial):
+    store, registry, agent, request, source, _ = trial
+    child_mode = "off" if request.evaluation_awareness == "on" else "on"
+    result = await execute_task(
+        task=replace(
+            request,
+            execution_id="awareness-child",
+            continuation=source,
+            evaluation_awareness=child_mode,
+        ),
+        state_store=store,
+        registry=registry,
+        observer=NoOpObserver(),
+    )
+    assert result.error is None
+    state = agent.seen[-1][0]
+    assert state.task.scaffold["evaluation_awareness"] == child_mode
+    assert ("Evaluation notice:" in agent.prompts[0]) == (
+        request.evaluation_awareness == "on"
+    )
+    assert ("Evaluation notice:" in agent.prompts[-1]) == (child_mode == "on")
+    if child_mode == "on":
+        assert agent.prompts[-1].count("Evaluation notice:") == 1
+        assert "iteration limit is 10." in agent.prompts[-1]

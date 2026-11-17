@@ -622,6 +622,7 @@ async def run_benchmark(
                 args, "max_parallel_evaluations_by_environment", None
             ),
             enable_surrender=args.enable_surrender,
+            evaluation_awareness=getattr(args, "evaluation_awareness", "off"),
             evaluate=not args.no_evaluate,
             verbose=args.verbose,
             retry_policy=_retry_policy(args),
@@ -772,6 +773,7 @@ async def run_task(args: argparse.Namespace) -> int:
                     args.max_iterations, canonical_agent
                 ),
                 enable_surrender=args.enable_surrender,
+                evaluation_awareness=getattr(args, "evaluation_awareness", "off"),
             ),
         )
     finally:
@@ -836,6 +838,12 @@ def _add_agent_arguments(parser: argparse.ArgumentParser) -> None:
         help=(
             "Per-task trial budget; default: 100 for AI Scientist, 50 for other agents."
         ),
+    )
+    agent.add_argument(
+        "--evaluation-awareness",
+        choices=("on", "off"),
+        default="off",
+        help="Prepend an evaluation notice and the iteration limit to task prompts; default: off.",
     )
     agent.add_argument(
         "--enable-surrender",
