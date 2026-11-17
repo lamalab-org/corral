@@ -135,6 +135,10 @@ class SharedLedger:
             data = json.loads(self.path.read_text(encoding="utf-8"))
             data["used"].setdefault("submissions", int(seed.get("submissions", 0)))
             return data
+        if checkpoint := seed.get("shared_ledger"):
+            data = copy.deepcopy(checkpoint)
+            data["used"].setdefault("submissions", int(seed.get("submissions", 0)))
+            return data
         return {
             "used": {key: int(seed.get(key, 0)) for key in _COUNTERS},
             "revealed_ids": list(seed.get("revealed_ids") or []),

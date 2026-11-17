@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
 from inference_opt import datasets
 from inference_opt.env import LEDGER_RESOURCE, create_environments
 
@@ -140,3 +141,33 @@ def test_parallel_branch_tools_share_the_default_trial_budget(tmp_path):
     assert budget["used"]["reveals"] == 4
     assert budget["remaining"]["reveals"] == 0
     assert budget["questions_revealed"] == 20
+
+
+@pytest.mark.parametrize("relocate", [False, True])
+def test_checkpoint_restores_branch_usage_with_zero_main_usage(tmp_path, relocate):
+    from inference_opt.api import BudgetExhausted
+    from inference_opt.tools import _shared_ledger
+
+    from corral.runtime.permissions import NODE_WORKSPACE_DIR
+
+    definition = create_environments(level=1, work_dir=str(tmp_path))["math_algebra_b"]
+    main = definition.for_task("original")
+    branch = definition.for_task(
+        "branch", workspace_path=str(Path(main.workspace_path) / NODE_WORKSPACE_DIR / "node")
+    )
+    seed = main.initial_event(execution_id="original").environment
+    state = _state(main, dict(seed))
+    for index in range(4):
+        _, state = _call(branch, state, "reveal_examples", {}, f"reveal-{index}")
+    checkpoint = main.capture_environment(seed)
+    assert checkpoint["resources"][LEDGER_RESOURCE]["reveals"] == 0
+    assert checkpoint["resources"][LEDGER_RESOURCE]["shared_ledger"]["used"]["reveals"] == 4
+
+    _shared_ledger(main.workspace_path).path.unlink()
+    recovered = definition.for_task("relocated") if relocate else main
+    result, restored = _call(recovered, _state(recovered, checkpoint), "get_budget", {}, "budget")
+    budget = json.loads(result.content.splitlines()[1])
+    assert budget["remaining"]["reveals"] == 0
+    assert budget["questions_revealed"] == 20
+    with pytest.raises(BudgetExhausted):
+        _call(recovered, restored, "reveal_examples", {}, "overdraw")

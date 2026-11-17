@@ -24,7 +24,7 @@ from inference_opt import datasets
 from inference_opt.budget import LEDGER_RESOURCE, BudgetSpec, StateLedger
 from inference_opt.score import StateScorer
 from inference_opt.task_prompts import task_prompt
-from inference_opt.tools import create_tools
+from inference_opt.tools import _shared_ledger, create_tools
 
 if TYPE_CHECKING:
     from corral.core.state import ExecutionState
@@ -195,9 +195,27 @@ class InferenceOptEnvironment(Environment):
     """One inference-optimization task; the budget ledger is a Corral resource."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.shared_budget = bool(kwargs.pop("shared_budget", True))
         adapters = dict(kwargs.pop("resource_adapters", {}) or {})
         adapters.setdefault(LEDGER_RESOURCE, InferenceLedgerAdapter())
         super().__init__(*args, resource_adapters=adapters, **kwargs)
+
+    def for_task(self, task_execution_id: str, **kwargs: Any) -> Environment:
+        bound = super().for_task(task_execution_id, **kwargs)
+        bound.shared_budget = self.shared_budget
+        return bound
+
+    def capture_environment(self, environment: Mapping[str, Any]) -> Mapping[str, Any]:
+        captured = dict(super().capture_environment(environment))
+        resources = dict(captured.get("resources", {}))
+        if self.shared_budget and self.workspace_path and LEDGER_RESOURCE in resources:
+            ledger = dict(resources[LEDGER_RESOURCE])
+            # Checkpoints must carry aggregate usage, even when the main
+            # session has made no resource-consuming calls of its own.
+            ledger["shared_ledger"] = _shared_ledger(self.workspace_path).read(ledger)
+            resources[LEDGER_RESOURCE] = ledger
+            captured["resources"] = resources
+        return captured
 
 
 def create_environments(
@@ -236,6 +254,7 @@ def create_environments(
             task_id: InferenceOptEnvironment(
                 task_id=task_id,
                 task=task,
+                shared_budget=shared_budget,
                 base_work_dir=work_dir,
                 component_id=name,
                 resource_states={LEDGER_RESOURCE: _initial_ledger(task)},

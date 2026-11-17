@@ -409,9 +409,13 @@ async def test_shared_inventory_limits_all_scientist_branches(tmp_path) -> None:
                 )
             )
         ).success
-        output = main.environment.get_task_output(await store.materialize("main"))
+        submitted = await store.materialize("main")
+        output = main.environment.get_task_output(submitted)
         assert output is not None
         assert output.metadata["wetlab"]["inventory"]["sample"]["volume"] == 0
+        # Reading a durable result must also work on an unbound definition.
+        assert environment.workspace_path is None
+        assert environment.get_task_output(submitted) == output
 
     downstream_task = replace(
         environment.current_task,

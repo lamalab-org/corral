@@ -802,8 +802,9 @@ def create_tools(
             )
         policy_hash = _policy_hash(policy_dir)
         run_id = ledger.next_run_id("final")
-        # Claim the test-set evaluation before running it, across all branches.
-        ledger.reserve(submissions=1)
+        receipt = Path(work_dir) / "submission.json"
+        if receipt.is_dir():
+            raise ValueError("submission.json must be a file, not a directory")
         runs = run_policy(
             config=config,
             work_dir=Path(work_dir),
@@ -812,6 +813,7 @@ def create_tools(
             split="test",
             models=models,
             budget_per_model=int(config["final_max_student_calls"]),
+            before_execution=lambda: ledger.reserve(submissions=1),
             examples=_examples(ledger),
             write_copy=False,
             save_private=_saver(corral_private_artifacts),
@@ -843,24 +845,32 @@ def create_tools(
             # Every branch's usage and runs, for the analysis: the main ledger
             # holds only what the main session did itself.
             ledger.state["shared_ledger"] = ledger.shared.read(ledger.state)
-        (Path(work_dir) / "submission.json").write_text(
-            json.dumps(
-                {
-                    "schema": 2,
-                    "policy_dir": policy_path,
-                    "policy_hash": policy_hash,
-                    "submission": used + 1,
-                    "rationale": rationale[:2000],
-                    "submitted_at": final["submitted_at"],
-                },
-                indent=2,
-                sort_keys=True,
-            ),
-            encoding="utf-8",
-        )
+        try:
+            receipt.write_text(
+                json.dumps(
+                    {
+                        "schema": 2,
+                        "policy_dir": policy_path,
+                        "policy_hash": policy_hash,
+                        "submission": used + 1,
+                        "rationale": rationale[:2000],
+                        "submitted_at": final["submitted_at"],
+                    },
+                    indent=2,
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            # Evaluation completed: commit its result even if the receipt fails.
+            # Retrying the evaluation would bypass the one-submission limit.
+            receipt_error = str(exc)
+        else:
+            receipt_error = ""
         return _compact(
             {
                 "submitted": True,
+                "receipt_error": receipt_error,
                 "policy_dir": policy_path,
                 "policy_hash": policy_hash[:12],
                 "submissions_left": spec.max_submissions - used - 1,
