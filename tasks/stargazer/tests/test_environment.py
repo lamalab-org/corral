@@ -110,6 +110,25 @@ def _submission_state(state):
     return state.environment.values["hidden_arguments"]["analysis"]
 
 
+def test_scoring_overrides_preserve_historical_criteria_and_change_identity(tmp_path):
+    def build(**kwargs):
+        environments = create_environments(
+            development_mode=True, work_dir=tmp_path, **kwargs
+        )
+        return next(iter(environments.values())).current_task
+
+    default = build()
+    historical = build(minimum_match_score=0.8, minimum_planet_score=None)
+    legacy = build(scorer="legacy")
+    assert historical.scoring_fn.criteria.minimum_match_score == 0.8
+    assert historical.scoring_fn.criteria.minimum_planet_score is None
+    assert historical.scoring_fn.criteria.require_complete_matching
+    assert legacy.scoring_fn.criteria.minimum_match_score == 0.8
+    assert legacy.scoring_fn.criteria.minimum_planet_score is None
+    assert not legacy.scoring_fn.criteria.require_complete_matching
+    assert len({t.execution_version for t in (default, historical, legacy)}) == 3
+
+
 def test_official_levels_have_fixed_reference_valid_synthetic_banks(tmp_path):
     levels = {
         level: create_environments(
@@ -142,6 +161,9 @@ def test_official_levels_have_fixed_reference_valid_synthetic_banks(tmp_path):
         assert set(rows) == set(environments)
         for environment in environments.values():
             task = environment.current_task.scoring_inputs["benchmark_task"]
+            criteria = environment.current_task.scoring_fn.criteria
+            assert criteria.minimum_match_score == 0.6
+            assert criteria.minimum_planet_score == 0.35
             source_counts[task.source] = source_counts.get(task.source, 0) + 1
             difficulty_counts[task.truth_difficulty] = (
                 difficulty_counts.get(task.truth_difficulty, 0) + 1

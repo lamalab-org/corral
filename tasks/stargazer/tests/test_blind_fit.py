@@ -64,7 +64,11 @@ def test_run2_candidates_close_all_six_incomplete_passes():
     for row in records:
         task = load_task(DEFAULT_DATA_ROOT / "synthetic" / f"{row['task_id']}.json")
         legacy = evaluate_submission(task, row["candidate"], LEGACY_CRITERIA)
-        strict = evaluate_submission(task, row["candidate"])
+        strict = evaluate_submission(
+            task,
+            row["candidate"],
+            EvaluationCriteria(minimum_match_score=0.8, minimum_planet_score=None),
+        )
         public = validate_fit(task.public_fit_context(), row["candidate"])
         assert legacy.success == row["success"]
         assert legacy.match_score == pytest.approx(row["match_score"])
@@ -167,13 +171,13 @@ def test_optional_per_planet_gate_prevents_mean_masking(
         "stargazer.score._match_planets",
         lambda *_a: (0.802, tuple((i, i, d) for i, d in enumerate(distances))),
     )
-    result = evaluate_submission(task, payload)
+    result = evaluate_submission(
+        task, payload, EvaluationCriteria(minimum_planet_score=None)
+    )
     assert result.ok_complete_matching
     assert result.ok_match
     assert result.ok_individual_matches
-    strict = evaluate_submission(
-        task, payload, EvaluationCriteria(minimum_planet_score=0.8)
-    )
+    strict = evaluate_submission(task, payload)
     assert not strict.ok_individual_matches
     assert not strict.success
 

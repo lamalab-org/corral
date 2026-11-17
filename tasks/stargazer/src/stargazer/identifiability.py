@@ -55,7 +55,10 @@ class BankRules:
     def criteria(self):
         from stargazer.score import EvaluationCriteria
 
-        return EvaluationCriteria(minimum_match_score=self.minimum_recovery_match)
+        # Recovery-v2 manifests pin the historical mean-only scoring thresholds.
+        return EvaluationCriteria(
+            minimum_match_score=self.minimum_recovery_match, minimum_planet_score=None
+        )
 
 
 def _candidate(theta: np.ndarray, mass: float) -> CandidateSubmission:

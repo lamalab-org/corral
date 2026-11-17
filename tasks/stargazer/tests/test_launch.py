@@ -1,12 +1,10 @@
 import json
-from dataclasses import asdict
 
 import pytest
 from stargazer.bank import generate_bank
 from stargazer.env import DATA_ROOT
 from stargazer.launch import verify_launch
 from stargazer.protocol import ASSISTED_PROTOCOL
-from stargazer.score import EvaluationCriteria
 
 
 @pytest.fixture
@@ -23,7 +21,7 @@ def frozen_launch(tmp_path, monkeypatch):
     config = {
         "bank_hash": manifest["bank_hash"],
         "calibration_hash": manifest["calibration_hash"],
-        "criteria": asdict(EvaluationCriteria()),
+        "criteria": manifest["criteria"],
         "protocol": ASSISTED_PROTOCOL,
         "level": 1,
         "task_count": 10,
@@ -36,6 +34,8 @@ def test_launch_resolves_exact_bank_and_execution_identity(frozen_launch):
     result = verify_launch(config, root)
     assert result["task_count"] == 10
     assert result["bank_hash"] == config["bank_hash"]
+    assert result["criteria"]["minimum_match_score"] == 0.8
+    assert result["criteria"]["minimum_planet_score"] is None
     assert result["execution_version"].startswith(ASSISTED_PROTOCOL + ":")
     selector = json.loads((root / "selectors/level_1.json").read_text())
     assert set(result["task_ids"]) == set(selector[0]["task_ids"])

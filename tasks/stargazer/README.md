@@ -109,12 +109,23 @@ The complete scorer requires:
 
 1. Positive BIC improvement per observation over the constant model.
 2. Residual RMS at most 1.5 times the median measurement uncertainty.
-3. Mean physical match score at least 0.8.
+3. Mean physical match score at least 0.60.
 4. Correct planet count and complete matching, with no unmatched planets.
+5. Each matched planet's physical match score at least 0.35.
 
-There is no additional individual-planet score threshold in the default scorer.
-The legacy scorer is available for offline comparisons. Hidden-feedback
-`submit_action` is no longer part of the agent interface.
+The 0.60 mean cutoff and 0.35 per-planet floor were set through synthetic-data calibration to improve task solvability while limiting acceptance of incorrect planetary systems.
+
+The legacy scorer preserves the original upstream behavior for reproducing
+historical results: a default mean cutoff of 0.8, task-specific threshold
+overrides, and no per-planet floor or complete-matching requirement. It can
+therefore accept a correct-count solution with unmatched planets. The complete
+scorer above is the default for new evaluations.
+
+> **Warning:** Use the legacy scorer only for offline compatibility checks and
+> historical result reproduction. Do not use it for benchmark evaluation; use
+> the default complete scorer with a 0.60 mean cutoff and 0.35 per-planet floor.
+
+Hidden-feedback `submit_action` is no longer part of the agent interface.
 
 The inherited jitter/BIC conventions remain: omitted jitter is estimated from
 residuals, the null model uses zero jitter, and jitter is not charged an extra
@@ -157,7 +168,8 @@ and bootstrap checks. Candidates passing these checks receive 50 fresh noise
 realizations at their original timestamps and uncertainties. Each is fitted
 using observations only: neither injected periods nor the reference count
 initialize or select fits. All candidates are graded privately with the exact
-benchmark criteria; the lowest observed-data BIC selects the count.
+criteria pinned by the recovery bank (0.8 mean cutoff and no per-planet floor
+for recovery-v2); the lowest observed-data BIC selects the count.
 
 Acceptance requires at least 45/50 resolved full passes. This is a screening
 rule, not a 90% population guarantee. The audit records seeds, solver budgets,
