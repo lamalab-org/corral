@@ -262,10 +262,14 @@ async def test_action_replay_and_checkpoint_restore_are_deterministic(tmp_path) 
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("shared_inventory", [False, True])
 async def test_chained_task_receives_inventory_through_dependency_output(
     tmp_path,
+    shared_inventory,
 ) -> None:
-    upstream_environment = _environment()
+    upstream_environment = _environment(
+        str(tmp_path / "workspace"), shared_inventory=shared_inventory
+    ).for_task("upstream")
     submit = Action(
         id="submit-1",
         name="submit_answer",
@@ -303,12 +307,14 @@ async def test_chained_task_receives_inventory_through_dependency_output(
     downstream_environment = QualitativeAnalysisEnvironment(
         "wetlab-state-test-next",
         downstream_task,
+        base_work_dir=str(tmp_path / "workspace"),
         toolset=Toolset(pool=create_tools(), workspace_factory=None),
         group_tasks={
             "wetlab-state-test": upstream_task,
             "wetlab-state-test-next": downstream_task,
         },
-    )
+        shared_inventory=shared_inventory,
+    ).for_task("downstream")
     async with SQLiteCommitStore(
         tmp_path / "downstream.sqlite3", "downstream"
     ) as store:
