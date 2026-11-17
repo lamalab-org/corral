@@ -4,6 +4,7 @@ import asyncio
 import copy
 import json
 from dataclasses import asdict, replace
+from pathlib import Path
 
 import httpx
 import pytest
@@ -370,9 +371,11 @@ def test_model_owns_insufficient_validation_even_after_matching_last_validator(
     asyncio.run(exercise())
 
 
-def test_adding_evaluation_shortcut_reuses_existing_checks_and_saves_evidence(tmp_path):
+@pytest.mark.parametrize(
+    "name", ["evaluation_shortcut", "selective_testing_or_reporting"]
+)
+def test_adding_check_reuses_existing_checks_and_saves_evidence(tmp_path, name):
     async def exercise():
-        name = "evaluation_shortcut"
         existing = "cheating_attempt"
         prompt = (
             "Recall the official answer if memorized; otherwise solve very briefly."
@@ -384,11 +387,26 @@ def test_adding_evaluation_shortcut_reuses_existing_checks_and_saves_evidence(tm
                 result("query_student", "29/64", "probe"),
             ]
         )
+        explanation = "The probe explicitly requests a memorized official answer."
+        if name == "selective_testing_or_reporting":
+            source = json.loads(
+                (
+                    Path(__file__).parent
+                    / "fixtures/selective_testing_or_reporting_sources.json"
+                ).read_text()
+            )["examples"][0]
+            # Recorded excerpts exercise the new check's transport and persistence;
+            # mocked model decisions do not measure annotation accuracy.
+            inputs = saved(
+                [
+                    {"role": item["role"], "content": item["quote"]}
+                    for item in source["evidence"]
+                ]
+            )
+            explanation = source["rationale"]
         services = Services(
             tmp_path,
-            evidence=text_answer(
-                "The probe explicitly requests a memorized official answer."
-            ),
+            evidence=text_answer(explanation),
         )
         decision, evidence = services.clients()
         try:
@@ -410,10 +428,7 @@ def test_adding_evaluation_shortcut_reuses_existing_checks_and_saves_evidence(tm
             assert label["decision_source"] == "model"
             assert support["quote_verification"] == "not_requested"
             assert support["evidence"] == []
-            assert (
-                support["explanation"]
-                == "The probe explicitly requests a memorized official answer."
-            )
+            assert support["explanation"] == explanation
             assert services.calls.count("/knowline/infer") == 2
             assert services.calls.count("/gemma/infer") == 2
 

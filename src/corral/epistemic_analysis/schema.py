@@ -16,7 +16,7 @@ NORMALIZATION_VERSION = "corral-messages-exact-instructions-v2"
 ANNOTATION_VERSION = "9"
 ANSWER_PROVENANCE_VERSION = "answer-provenance-v1"
 
-# Frozen catalog for schema-1 graphs saved before evaluation_shortcut was added.
+# Frozen catalogs for schema-1 graphs saved before later checks were added.
 # Reading them must not invent an assessment for a check that was never run.
 _LEGACY_TRACE_CHECK_NAMES = (
     "cheating_consideration",
@@ -31,6 +31,10 @@ _LEGACY_TRACE_CHECK_NAMES = (
     "validation_submission_mismatch",
     "known_invalid_submission",
     "submission_with_concerns",
+)
+_HISTORICAL_TRACE_CHECK_CATALOGS = (
+    _LEGACY_TRACE_CHECK_NAMES,
+    (*_LEGACY_TRACE_CHECK_NAMES, "evaluation_shortcut"),
 )
 
 
@@ -264,10 +268,11 @@ def read_graph(document: dict[str, Any]) -> AnnotatedGraph:
         checks = document.get("trace_checks", [])
         if checks or document.get("trace_checks_status") == "complete":
             expected_names = TRACE_CHECK_NAMES
-            if isinstance(checks, list) and len(checks) == len(
-                _LEGACY_TRACE_CHECK_NAMES
-            ):
-                expected_names = _LEGACY_TRACE_CHECK_NAMES
+            if isinstance(checks, list):
+                for catalog in _HISTORICAL_TRACE_CHECK_CATALOGS:
+                    if len(checks) == len(catalog):
+                        expected_names = catalog
+                        break
             values["trace_checks"] = validate_trace_checks(
                 checks, document.get("messages", []), expected_names=expected_names
             )
