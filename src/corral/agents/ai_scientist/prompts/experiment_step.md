@@ -28,5 +28,5 @@ Return `decision="act"` with exactly one listed tool, its JSON object-string arg
 Return `decision="finish"`, no action fields, and a brief evidence-grounded conclusion when the experiment is complete or no useful action remains.
 The node's branch workspace (`branch_workspace` above) contains its starting files and follows the task environment's public path contract.
 Other nodes' directories and the main agent's files are not accessible from your tools.
-Leave the final answer to the main assistant; do not call `submit_answer` or final policy-submission tools such as `submit_policy`.
+Leave final submissions to the main assistant; do not call submission tools.
 For branch-local state, unless the experiment node says `physical_state_inherited=true`, parent results are scientific context only: establish the state/configuration needed for this experiment using the listed tools.
