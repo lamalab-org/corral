@@ -269,6 +269,9 @@ class LangfuseObserver:
         self._tool_origins: dict[tuple[str, str], tuple[str, str]] = {}
         self._step_pending: dict[int, set[tuple[str, str]]] = {}
         self._closed_steps: dict[int, tuple[Any, datetime]] = {}
+        self._denario_runs: set[tuple[str, str]] = set()
+        self._denario_phases: dict[tuple[str, str], str] = {}
+        self._denario_logs: dict[tuple[str, str], Any] = {}
 
     def start(self, observation: Observation) -> ObservationSpan:
         if observation.name == "task.evaluate":
@@ -344,7 +347,10 @@ class LangfuseObserver:
         generation = self._generations.pop(key, None)
         if generation is not None:
             span, output, ended_at = generation
-            span.update(output=self._mask(data=output))
+            span.update(
+                output=self._mask(data=output),
+                level="ERROR" if output.get("is_error") else "DEFAULT",
+            )
             span.end(end_time=int(ended_at.timestamp() * 1e9))
         step = self._steps.pop(key, None)
         if step is not None:
@@ -529,8 +535,11 @@ class LangfuseObserver:
         duration_ms: float | None = None,
         failed: bool = False,
         incomplete: bool = False,
+        denario_phase: str | None = None,
     ) -> None:
         key = (commit.execution_id, run_id)
+        denario = key in self._denario_runs
+        phase = denario_phase or self._denario_phases.get(key, "setup")
         if self._restoring:
             if set_trace_input:
                 self._last_times[commit.execution_id] = commit.occurred_at
@@ -549,10 +558,13 @@ class LangfuseObserver:
                         "run_id": run_id,
                         "input_messages": input_messages,
                         "usage": usage,
+                        "denario_phase": phase if denario else None,
                     },
                     self._step_numbers.get(key, 0) + 1,
                 )
-            if key not in self._restored_steps:
+            if key not in self._restored_steps and (
+                not denario or as_type == "generation"
+            ):
                 self._step_numbers[key] = self._step_numbers.get(key, 0) + 1
                 self._restored_steps.add(key)
             if as_type == "tool":
@@ -591,6 +603,8 @@ class LangfuseObserver:
             self._last_times[commit.execution_id] = commit.occurred_at
         if set_trace_input:
             return
+        if denario:
+            metadata["denario_phase"] = phase
         if as_type == "generation":
             metadata["commit_hash"] = commit.hash
             self._end_step(key)
@@ -599,13 +613,23 @@ class LangfuseObserver:
             if as_type == "tool"
             else None
         )
-        if key not in self._steps and tool_parent is None:
+        if (
+            key not in self._steps
+            and tool_parent is None
+            and (not denario or as_type == "generation")
+        ):
             if key not in self._restored_steps:
                 self._step_numbers[key] = self._step_numbers.get(key, 0) + 1
             self._restored_steps.discard(key)
             self._steps[key] = self._start_span(
                 context,
-                name=f"Step {self._step_numbers[key]:02d}",
+                name=(
+                    f"Call {self._step_numbers[key]:02d} · "
+                    f"{phase} · "
+                    f"{name.removeprefix('denario.')}"
+                    if denario
+                    else f"Step {self._step_numbers[key]:02d}"
+                ),
                 as_type="span",
                 parent=root,
                 started_at=self._last_times.get(key, commit.occurred_at),
@@ -656,11 +680,26 @@ class LangfuseObserver:
         if as_type == "generation":
             args["model"] = self._models.get(commit.execution_id)
             args["usage_details"] = _usage_details(usage) if usage is not None else None
+        parent = tool_parent or self._steps.get(key) or root
+        if denario and as_type == "span":
+            # Handoffs and request envelopes are audit events, not extra model
+            # turns. Keep them accessible without interleaving the call tree.
+            if key not in self._denario_logs:
+                self._denario_logs[key] = self._start_span(
+                    context,
+                    name="SDK messages and routing",
+                    as_type="span",
+                    parent=root,
+                    started_at=self._task_starts.get(
+                        commit.execution_id, commit.occurred_at
+                    ),
+                )
+            parent = self._denario_logs[key]
         span = self._start_span(
             context,
             name=name,
             as_type=as_type,
-            parent=tool_parent or self._steps[key],
+            parent=parent,
             started_at=started_at,
             input=self._mask(data=input_messages),
             metadata=self._mask(data=metadata),
@@ -697,6 +736,32 @@ class LangfuseObserver:
             return
         key = (commit.execution_id, commit.author.run_id)
         messages = [dict(message) for message in event.messages]
+        if any(
+            str(message.get("name", "")).startswith("denario.")
+            or message.get("sdk_event", {}).get("sdk") == "denario"
+            for message in messages
+        ):
+            self._denario_runs.add(key)
+        ordinary_messages = []
+        for message in messages:
+            sdk_event = message.get("sdk_event")
+            if sdk_event is None:
+                ordinary_messages.append(message)
+                continue
+            if sdk_event.get("sdk") == "denario" and sdk_event.get("type") == "phase":
+                self._denario_phases[key] = sdk_event.get("phase", "unknown")
+            self._record_delta(
+                commit,
+                context,
+                name=str(message.get("name") or "sdk.event"),
+                as_type="span",
+                output=sdk_event,
+                run_id=commit.author.run_id,
+                failed=bool(sdk_event.get("is_error")),
+            )
+        messages = ordinary_messages
+        if not messages:
+            return
         for message in messages:
             if not message.get("sdk_native"):
                 continue
@@ -737,7 +802,34 @@ class LangfuseObserver:
             *messages[:output_index],
         ]
         output = messages[output_index]
+        model_backed = "model_input" in output or "model_output" in output
+        # Native multi-agent harnesses have separate contexts. Their actual
+        # request is more accurate than concatenating every agent's history.
+        if "model_input" in output:
+            inputs = output.pop("model_input")
+        if "model_output" in output:
+            # Preserve every proposed tool call, even if execution was stopped
+            # before Corral could author an action for it.
+            output.update(output.pop("model_output"))
         trailing = messages[output_index + 1 :]
+        if (
+            key in self._denario_runs
+            and not model_backed
+            and event.usage_delta.llm_calls == 0
+        ):
+            self._record_delta(
+                commit,
+                context,
+                name=str(output.get("name") or "denario.tool_dispatch"),
+                as_type="span",
+                output=output,
+                run_id=commit.author.run_id,
+            )
+            for message in messages:
+                if message.get("sdk_native"):
+                    for call in message.get("tool_calls", ()):
+                        self._bind_tool_parent(commit, commit.author.run_id, call["id"])
+            return
         if (
             event.usage_delta.llm_calls == 0
             and event.actions
@@ -773,6 +865,7 @@ class LangfuseObserver:
             output=output,
             run_id=commit.author.run_id,
             usage=event.usage_delta,
+            failed=bool(output.get("is_error")),
         )
         for message in messages:
             if message.get("sdk_native"):
@@ -997,6 +1090,11 @@ class LangfuseObserver:
                     )
                     self._closed_steps.pop(step_id)
             root = self._roots.pop(commit.execution_id, None)
+            for key in list(self._denario_logs):
+                if key[0] == commit.execution_id:
+                    self._denario_logs.pop(key).end(
+                        end_time=int(commit.occurred_at.timestamp() * 1e9)
+                    )
             if root is not None:
                 if isinstance(commit_event, ExecutionFailed):
                     root.update(
