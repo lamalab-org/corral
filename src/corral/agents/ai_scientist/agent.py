@@ -23,6 +23,7 @@ from corral.agents.ai_scientist.tools.execution_pool import (
     ReplayEquivalence,
 )
 from corral.agents.ai_scientist.workers.base import (
+    WORKER_TRANSCRIPT_SOURCE,
     LiteLLMStructuredModel,
     LLMBudgetExceeded,
     StructuredModel,
@@ -62,6 +63,24 @@ _SCIENTIST_SURRENDER_INSTRUCTIONS = (
 _TRACE_NODE_ID = re.compile(r"node_\d+")
 _TRACE_LABEL_HYPOTHESIS_CHARS = 96
 _SCIENTIST_STATE_NAMESPACE = "ai_scientist"
+
+# Recognize worker turns written before explicit transcript provenance was
+# added, including prompts and JSON-correction feedback, not just replies.
+_LEGACY_WORKER_NAME = re.compile(
+    r"(?:task_formulation|final_synthesis|scientific_worker"
+    r"|experiment_node_\d+_step_\d+|evaluate_(?:visual_)?node_\d+"
+    r"|(?:plan|manage|evaluate|select_best)_"
+    r"(?:preliminary|tuning|research|verification)(?:_\w+)?)\Z"
+)
+
+
+def _is_worker_transcript(message: Mapping[str, Any]) -> bool:
+    metadata = message.get("metadata") or {}
+    return metadata.get("context_source") == WORKER_TRANSCRIPT_SOURCE or (
+        message.get("role") != "tool"
+        and not message.get("tool_calls")
+        and _LEGACY_WORKER_NAME.fullmatch(str(message.get("name", ""))) is not None
+    )
 
 
 @dataclass(slots=True)
@@ -337,7 +356,16 @@ class AIScientistAgent(BaseAgent):
             if isinstance(prompt_value, str)
             else json.dumps(prompt_value, ensure_ascii=False)
         )
-        prompt = prompt_with_state_history(prompt, session.messages)
+        saved = session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}
+        saved_search = saved.get("search")
+        history = session.messages
+        if isinstance(saved_search, Mapping):
+            # The restored tree/journal supply scientific memory through each
+            # worker's prompt_view. Raw worker turns contain step rationales
+            # and can recursively embed earlier transcripts on every resume.
+            # Keep external conversation in context and all turns in storage.
+            history = tuple(m for m in history if not _is_worker_transcript(m))
+        prompt = prompt_with_state_history(prompt, history)
         tools = self._search_tools(session)
         tool_payload = {"tools": tools}
         tools = tool_payload.get("tools", [])
@@ -362,8 +390,6 @@ class AIScientistAgent(BaseAgent):
         )
         initial_llm_calls = gateway.call_count
         initial_llm_tokens = getattr(gateway, "token_count", 0)
-        saved = session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}
-        saved_search = saved.get("search")
         if isinstance(saved_search, Mapping):
             if saved.get("checkpoint_version") != 1:
                 raise ValueError(

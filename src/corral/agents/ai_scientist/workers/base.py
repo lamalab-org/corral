@@ -17,6 +17,10 @@ from corral.report.logging import logger
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
 
+# Transcript-only provenance, never sent to the provider. Restored searches
+# use their tree and journal instead of replaying these internal worker turns.
+WORKER_TRANSCRIPT_SOURCE = "ai_scientist_worker"
+
 
 class LLMBudgetExceeded(RuntimeError):
     """Raised before a physical request exceeds the local LLM-call budget."""
@@ -312,21 +316,26 @@ class LiteLLMStructuredModel:
         # turns can be grouped without inference from adjacency. These are
         # copies made *after* the provider request: the API-bound `messages`
         # above remain untouched and contain no trace-only fields.
-        recorded_messages: list[LiteLLMMessage] = []
+        recorded_messages: list[dict[str, Any]] = []
         for message in messages:
-            recorded_message = message.copy()
+            recorded_message = dict(message)
             recorded_message["name"] = purpose
+            recorded_message["metadata"] = {
+                **(recorded_message.get("metadata") or {}),
+                "context_source": WORKER_TRANSCRIPT_SOURCE,
+            }
             recorded_messages.append(recorded_message)
         with self._state_lock:
             self.owner.messages.extend(
                 [
                     *recorded_messages,
-                    LiteLLMMessage(
-                        role="assistant",
-                        content=response.content or "",
-                        id=getattr(response, "id", None),
-                        name=purpose,
-                    ),
+                    {
+                        "role": "assistant",
+                        "content": response.content or "",
+                        "id": getattr(response, "id", None),
+                        "name": purpose,
+                        "metadata": {"context_source": WORKER_TRANSCRIPT_SOURCE},
+                    },
                 ]
             )
             if response.usage:
