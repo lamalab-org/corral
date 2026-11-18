@@ -351,17 +351,18 @@ def test_parallel_workers_keep_correction_contexts_separate():
     assert len(model.owner.turn_usages) == 4
 
 
-def test_refusal_raises_without_requesting_a_correction():
+@pytest.mark.parametrize("finish_reason", ["content_filter", "refusal"])
+def test_refusal_raises_without_requesting_a_correction(finish_reason):
     @dataclass
     class Refused(FakeResponse):
         content: str = ""
-        finish_reason: str = "content_filter"
+        finish_reason: str = ""
 
     calls = []
 
     def refuse(**kwargs):
         calls.append(kwargs)
-        return Refused()
+        return Refused(finish_reason=finish_reason)
 
     model = gateway(max_calls=4, completion_runner=refuse)
 

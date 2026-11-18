@@ -35,7 +35,7 @@ class FinalSynthesizer:
             task_prompt=task_prompt,
             journal=journal_context[: self.max_journal_chars],
             best_nodes=json.dumps(
-                [node.model_dump(mode="json") for node in best_nodes],
+                [node.prompt_view() for node in best_nodes],
                 indent=2,
                 ensure_ascii=False,
             ),

@@ -22,8 +22,13 @@ class LLMBudgetExceeded(RuntimeError):
     """Raised before a physical request exceeds the local LLM-call budget."""
 
 
+# LiteLLM reports provider refusals as ``content_filter``; some routes pass the
+# provider's ``refusal`` stop reason through. Other Corral agents accept both.
+_REFUSAL_FINISH_REASONS = frozenset({"content_filter", "refusal"})
+
+
 class ModelRefusal(RuntimeError):
-    """The provider refused the request (finish_reason ``content_filter``).
+    """The provider refused the request (finish reason ``content_filter`` or ``refusal``).
 
     A refusal is not malformed output: asking again for a correction resends
     the same request plus the refusal and is refused again, which drains the
@@ -205,7 +210,7 @@ class LiteLLMStructuredModel:
             content = response.content or ""
             # Invalid completions still consumed tokens and a model turn.
             self._record_response(messages, response, purpose=purpose)
-            if getattr(response, "finish_reason", None) == "content_filter":
+            if getattr(response, "finish_reason", None) in _REFUSAL_FINISH_REASONS:
                 raise ModelRefusal(f"The model provider refused {purpose}.")
             try:
                 try:

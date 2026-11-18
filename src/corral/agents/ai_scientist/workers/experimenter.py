@@ -15,13 +15,6 @@ from corral.agents.ai_scientist.state import TaskFormulation
 from corral.agents.ai_scientist.tools.corral_executor import CorralExecutor
 from corral.agents.ai_scientist.workers.base import ModelRefusal, StructuredModel
 
-# Earlier decisions are replayed without their rationale. Feeding the model a
-# running log of its own reasoning triggers Anthropic `reasoning_extraction`
-# refusals on later steps. Each step's purpose, tool, arguments, expected
-# information and observation stay in the prompt; the rationale stays in the
-# saved trajectory.
-_PRIVATE_STEP_FIELDS = {"decision": {"rationale"}}
-
 
 class Experimenter:
     """Observe, choose one action, execute it, and repeat within one node."""
@@ -95,7 +88,9 @@ class Experimenter:
                 )
             except ModelRefusal:
                 # End this experiment with what it has observed so far rather
-                # than asking again; the search continues with other nodes.
+                # than asking again. The selector never auto-continues a
+                # refused checkpoint; its observations still reach the critic
+                # and journal.
                 node.termination_reason = ExperimentTermination.MODEL_REFUSED
                 break
             action = decision.as_action()
@@ -172,8 +167,7 @@ class Experimenter:
             task_prompt=task_prompt,
             formulation=formulation.model_dump_json(indent=2),
             node=json.dumps(
-                node.model_dump(
-                    mode="json",
+                node.prompt_view(
                     include={
                         "id",
                         "stage",
@@ -190,8 +184,7 @@ class Experimenter:
             ),
             prior_checkpoint=(
                 json.dumps(
-                    previous_node.model_dump(
-                        mode="json",
+                    previous_node.prompt_view(
                         include={
                             "id",
                             "hypothesis",
@@ -202,7 +195,6 @@ class Experimenter:
                             "worker_conclusion",
                             "termination_reason",
                         },
-                        exclude={"trajectory": {"__all__": _PRIVATE_STEP_FIELDS}},
                     ),
                     indent=2,
                     ensure_ascii=False,
@@ -211,10 +203,7 @@ class Experimenter:
                 else "No prior partial checkpoint; this is a new experiment."
             ),
             trajectory=json.dumps(
-                [
-                    step.model_dump(mode="json", exclude=_PRIVATE_STEP_FIELDS)
-                    for step in node.trajectory
-                ],
+                [step.prompt_view() for step in node.trajectory],
                 indent=2,
                 ensure_ascii=False,
             ),
