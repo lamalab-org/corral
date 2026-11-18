@@ -8,6 +8,7 @@ from corral.agents.ai_scientist.search.nodes import ExperimentDecision
 from corral.agents.ai_scientist.workers.base import (
     LiteLLMStructuredModel,
     LLMBudgetExceeded,
+    ModelRefusal,
 )
 from corral.agents.ai_scientist.workers.synthesizer import FinalAnswer
 from corral.agents.schema import BudgetExhaustedError
@@ -348,3 +349,26 @@ def test_parallel_workers_keep_correction_contexts_separate():
     assert model.call_count == 4
     assert model.token_count == 4
     assert len(model.owner.turn_usages) == 4
+
+
+def test_refusal_raises_without_requesting_a_correction():
+    @dataclass
+    class Refused(FakeResponse):
+        content: str = ""
+        finish_reason: str = "content_filter"
+
+    calls = []
+
+    def refuse(**kwargs):
+        calls.append(kwargs)
+        return Refused()
+
+    model = gateway(max_calls=4, completion_runner=refuse)
+
+    with pytest.raises(ModelRefusal, match="refused decide"):
+        model.generate("prompt", ExperimentDecision, purpose="decide")
+
+    assert len(calls) == 1
+    assert model.call_count == 1
+    # The refused turn stays visible in the transcript.
+    assert model.owner.messages[-1]["role"] == "assistant"

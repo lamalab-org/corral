@@ -3,6 +3,7 @@
 from corral.agents.ai_scientist.workers.base import (
     LiteLLMStructuredModel,
     LLMBudgetExceeded,
+    ModelRefusal,
     StructuredModel,
 )
 from corral.agents.ai_scientist.workers.critic import ScientificCritic
@@ -15,6 +16,7 @@ __all__ = [
     "FinalSynthesizer",
     "LLMBudgetExceeded",
     "LiteLLMStructuredModel",
+    "ModelRefusal",
     "NodePlanner",
     "ScientificCritic",
     "StructuredModel",

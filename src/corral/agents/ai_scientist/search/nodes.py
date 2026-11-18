@@ -55,6 +55,7 @@ class ExperimentTermination(str, Enum):
     ACTION_BUDGET_EXHAUSTED = "action_budget_exhausted"
     TOOL_BUDGET_EXHAUSTED = "tool_budget_exhausted"
     ACTION_FAILED = "action_failed"
+    MODEL_REFUSED = "model_refused"
 
 
 class Recommendation(str, Enum):

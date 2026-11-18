@@ -22,6 +22,15 @@ class LLMBudgetExceeded(RuntimeError):
     """Raised before a physical request exceeds the local LLM-call budget."""
 
 
+class ModelRefusal(RuntimeError):
+    """The provider refused the request (finish_reason ``content_filter``).
+
+    A refusal is not malformed output: asking again for a correction resends
+    the same request plus the refusal and is refused again, which drains the
+    LLM-call budget. Callers decide how to stop instead.
+    """
+
+
 class StructuredModel(Protocol):
     call_count: int
 
@@ -196,6 +205,8 @@ class LiteLLMStructuredModel:
             content = response.content or ""
             # Invalid completions still consumed tokens and a model turn.
             self._record_response(messages, response, purpose=purpose)
+            if getattr(response, "finish_reason", None) == "content_filter":
+                raise ModelRefusal(f"The model provider refused {purpose}.")
             try:
                 try:
                     return response_model.model_validate_json(content.strip())
