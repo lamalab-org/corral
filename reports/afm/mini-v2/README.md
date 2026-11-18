@@ -1,8 +1,9 @@
-# AFM reports: corral-mini v2 — Claude batch
+# AFM reports: corral-mini v2 — Claude and GPT batches
 
-12 runs (three Opus models × Claude Code/ReAct × two levels), with three tasks
-per level × five trials: **180 trials, 145 passes**. This is the Claude batch
-only (12 of the planned 36 runs); GPT and Kimi results are not included.
+24 runs (six models × native agent/ReAct × two levels), with three tasks per
+level × five trials: **360 trials, 274 passes**. This includes the Claude batch
+(180 trials, 145 passes) and GPT batch (180 trials, 129 passes): 24 of the planned
+36 runs. Kimi results are not included.
 Layout follows [`../../README.md`](../../README.md), matching the other mini-v2 collections.
 
 [Run index](runs.csv) · [Trial index with derived Langfuse links](trials.csv)
@@ -12,7 +13,7 @@ Layout follows [`../../README.md`](../../README.md), matching the other mini-v2 
 | Level | Tasks | Origin |
 |---|---|---|
 | 1 | 1, 4, 10 | New mini-v2 runs |
-| 2 | 5, 6, 10 | Reused mini-v1 runs; the selected task IDs are identical in v2 |
+| 2 | 5, 6, 10 | Seven reused mini-v1 runs and five mini-v2 runs; the task IDs match |
 
 ## Results
 
@@ -28,25 +29,32 @@ across the three tasks; Pass^5 and token counts are available in the run index.
 | claude-opus-4-5-20251101 | claude-code | 14 | 0.9999 | 10 | 0.8907 |
 | claude-opus-4-5-20251101 | react | 13 | 0.9966 | 11 | 0.9740 |
 
+| gpt-6.1-sol | codex | 15 | 1.0000 | 15 | 1.0000 |
+| gpt-6.1-sol | react | 15 | 1.0000 | 15 | 1.0000 |
+| gpt-5.6-sol | codex | 15 | 1.0000 | 14 | 0.9999 |
+| gpt-5.6-sol | react | 15 | 1.0000 | 14 | 0.9999 |
+| gpt-5-2025-08-07 | codex | 4 | 0.5540 | 0 | 0.0000 |
+| gpt-5-2025-08-07 | react | 3 | 0.3299 | 4 | 0.3332 |
+
 ## Settings and provenance
 
 The saved configuration records 50 iterations, medium reasoning, surrender off,
 verbose reports, five trials per task, one parallel trial, and a local sandbox.
-These are Windows Nanosurf AFM runs using the direct Anthropic route.
+These are Windows Nanosurf AFM runs using direct Anthropic and OpenAI routes.
 **Local instrument access is an exception to the shared Docker benchmark setup:**
 Docker CPU, memory and PID limits do not apply. Thread environment settings and
 Langfuse export success cannot be established from the supplied report files.
 
 Reports and launcher metadata were imported from the supplied
-`corral-mini-result/data` folder without changing their bytes (reports use
+`corral-mini-result/data` (Claude) and `corral-mini-result/data_gpt` (GPT) folders without changing their bytes (reports use
 lossless gzip compression). No trials were rescored, replaced or excluded.
 Per-run `provenance.json` records source folder names, SHA-256 hashes, original
 subset versions and the target v2 manifest hash. Source Git commits were not
 recorded in the supplied files and are left unknown.
 
-The 90 Level 2 trials retain their original v1 launcher metadata and run IDs.
-Their task coverage matches v2 exactly; the 90 Level 1 trials explicitly record
-v2 in launcher metadata. This reuse does not rename trials or invent new sessions.
+The 105 reused Level 2 trials (all six Claude runs plus GPT-6.1-Sol/Codex)
+retain their original v1 launcher metadata and run IDs. Their task coverage
+matches v2 exactly. The other 255 trials record v2 in launcher metadata. This reuse does not rename trials or invent new sessions.
 
 Original execution IDs and run IDs are preserved. The index builder derives
 Langfuse trace/session links using its configured host and project. These links
@@ -57,12 +65,14 @@ traces. This GitHub update has not been uploaded to Hugging Face.
 
 One terminal error is preserved: Claude Code / Opus 5.5 / Level 1 task 10,
 trial index 1, finished without calling `submit_answer`. Its score remains zero.
-The other 34 zero scores have no saved terminal error. They are retained as
+The other 85 zero scores have no saved terminal error. They are retained as
 reported; individual scoring outcomes have not been independently audited.
+GPT-5/Codex Level 2 has zero passes out of 15, with no saved terminal errors;
+these outcomes are preserved, not treated as missing data.
 
 ## Validation
 
-Verified source hashes and decompressed byte equality, 180 unique execution IDs,
+Verified source hashes and decompressed byte equality, 360 unique execution IDs,
 three exact v2 task IDs per run, five trials per task, and index reconstruction
 using the repository's report checker. Full AFM reports remain unchanged.
 

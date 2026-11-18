@@ -3,7 +3,7 @@
 14 runs, each covering 10 tasks × 5 trials: 700 trials total.
 The Level 1 AI Scientist report combines the separate tasks 1–5 and 6–10 runs.
 
-Claude-batch corral-mini v2 results (12 runs / 180 trials) are in
+Claude and GPT corral-mini v2 results (24 runs / 360 trials) are in
 [`mini-v2/`](mini-v2/). The full-benchmark results below are retained.
 
 Layout and indexes follow [`../README.md`](../README.md).
