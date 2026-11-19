@@ -148,7 +148,7 @@ async def run_task_from_files(request_file: str | Path, result_file: str | Path)
         # host-owned artifact directory cannot be chmodded during resume.
         _set_checkpoint_ownership(checkpoint_root, 0, 0)
         checkpoint_root.chmod(0o700)
-        permissions.configure(checkpoint_root)
+        permissions.configure(checkpoint_root, guardrails=docker.guardrails == "on")
         workspace_snapshots = checkpoint_root / "workspace-snapshots"
         legacy_snapshots = checkpoint_root / "snapshots"
         if (

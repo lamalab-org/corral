@@ -166,6 +166,29 @@ image is missing, resolves it to an immutable image ID before scheduling any
 trial, and applies these defaults: 2 CPUs, 4 GiB memory, 256 PIDs, a read-only
 root filesystem, and Docker's `bridge` network so the container has outbound
 network access. Pass `--sandbox-network none` for fully network-isolated trials.
+The image includes `curl`, `wget`, and `git`; outbound access is available with
+`--sandbox-network bridge` in either guardrail mode, except for protected tools
+explicitly declared with `network_access="none"`.
+
+For isolation ablations, keep Docker and toggle its internal guardrails:
+
+```bash
+corral bench ... --sandbox docker --sandbox-guardrails on   # default
+corral bench ... --sandbox docker --sandbox-guardrails off  # ablation
+```
+
+`off` disables Corral's controller/worker isolation and native agent SDK
+sandboxing and approval checks. Native tools still share the task workspace and
+their workspace changes are checkpointed. Agents can read task source, scoring
+data, checkpoints, and other files present in the container or its mounts.
+Docker resource limits, networking, read-only root filesystem, and read-only
+input mounts remain in place. Both conditions use the same image and installed
+utilities; this toggle does not grant arbitrary host filesystem access. The
+setting is recorded in run configuration, trial sandbox metadata, and execution
+scaffold metadata. Python callers can use `DockerSandboxSpec(guardrails="off")`.
+Rebuild trial images after upgrading to this runtime protocol; older images are
+rejected. `--sandbox-guardrails off` requires `--sandbox docker`.
+
 Use `--sandbox local` only for local debugging; `corral run` remains
 local and never contacts Docker.
 

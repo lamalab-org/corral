@@ -376,23 +376,32 @@ def test_codex_file_guidance_defers_to_the_task_path_contract():
 
 
 @pytest.mark.anyio
-async def test_codex_uses_and_preserves_corral_workspace(monkeypatch, tmp_path):
+@pytest.mark.parametrize("guardrails", ["on", "off"])
+async def test_codex_uses_and_preserves_corral_workspace(
+    monkeypatch, tmp_path, guardrails
+):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
     def fake_turn(self, *, workspace, codex_home, run, **kwargs):
         assert workspace == tmp_path
         assert codex_home != workspace
-        assert run.metadata["sandbox"] == "externalSandbox"
+        assert run.metadata["sandbox"] == (
+            "externalSandbox" if guardrails == "on" else "dangerFullAccess"
+        )
+        assert run.native_sandbox_disabled == (guardrails == "off")
         (workspace / "native.txt").write_text("native output")
         return "42"
 
     monkeypatch.setattr(CodexAgent, "_execute_codex_turn", fake_turn)
     session = Session()
     session.native_tool_workspace = str(tmp_path)
+    session.native_sandbox_disabled = guardrails == "off"
     outcome = await CodexAgent(system_prompt="system").run_session(session)
     assert outcome.status == "completed"
     assert (tmp_path / "native.txt").read_text() == "native output"
-    assert outcome.metadata["workspace_access"] == "corral_sandbox"
+    assert outcome.metadata["workspace_access"] == (
+        "corral_sandbox" if guardrails == "on" else "docker_unrestricted"
+    )
     assert outcome.metadata["codex_cwd_is_execution_workspace"] is True
 
 
@@ -604,3 +613,48 @@ async def test_codex_cancellation_drains_worker_before_closing_session(monkeypat
     with pytest.raises(asyncio.CancelledError):
         await task
     assert session.messages[-1]["content"] == "last event"
+
+
+@pytest.mark.parametrize("guardrails", ["on", "off"])
+def test_codex_turn_uses_explicit_sdk_policy(monkeypatch, tmp_path, guardrails):
+    from unittest.mock import Mock
+
+    from openai_codex import ApprovalMode, Sandbox
+
+    from corral.agents import codex as module
+
+    disabled = guardrails == "off"
+    run = _RunState(
+        native_workspace=str(tmp_path),
+        native_sandbox_disabled=disabled,
+        metadata={"max_model_calls": 1},
+    )
+    thread = Mock()
+    turn = Mock()
+
+    def stream():
+        yield SimpleNamespace(
+            method="turn/completed",
+            payload=SimpleNamespace(
+                turn=SimpleNamespace(status=SimpleNamespace(value="completed"))
+            ),
+        )
+
+    turn.stream.side_effect = stream
+    thread.turn.return_value = turn
+    monkeypatch.setattr(module, "TurnHandle", lambda *_: turn)
+    agent = CodexAgent(system_prompt="system")
+    agent._drive_turn(thread, "solve", run)
+    if disabled:
+        thread.turn.assert_called_once_with(
+            "solve",
+            effort=agent.reasoning_effort,
+            sandbox=Sandbox.full_access,
+            approval_mode=ApprovalMode.deny_all,
+        )
+        thread._client.turn_start.assert_not_called()
+    else:
+        thread.turn.assert_not_called()
+        params = thread._client.turn_start.call_args.kwargs["params"]
+        assert params["sandboxPolicy"]["type"] == "externalSandbox"
+        assert params["approvalsReviewer"] == "auto_review"

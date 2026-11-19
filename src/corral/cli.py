@@ -376,6 +376,8 @@ def _sandbox_profile(
     # whose Namespace predates the explicit sandbox options. Local execution
     # remains available only through an explicit `--sandbox local` selection.
     if getattr(args, "sandbox", "docker") == "local":
+        if getattr(args, "sandbox_guardrails", "on") != "on":
+            raise ValueError("--sandbox-guardrails off requires --sandbox docker")
         return orchestration.SandboxProfile.local()
     spec = orchestration.DockerSandboxSpec(
         image=getattr(args, "sandbox_image", None) or default_image,
@@ -384,6 +386,7 @@ def _sandbox_profile(
         pids_limit=getattr(args, "sandbox_pids_limit", 256),
         gpus=getattr(args, "sandbox_gpus", None),
         network=getattr(args, "sandbox_network", "bridge"),
+        guardrails=getattr(args, "sandbox_guardrails", "on"),
         private_directories=tuple(
             str(Path(path).expanduser().resolve())
             for path in getattr(args, "sandbox_private_directory", ())
@@ -942,6 +945,12 @@ def _add_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
         choices=("docker", "local"),
         default="docker",
         help="Trial isolation mode; default: docker.",
+    )
+    sandbox.add_argument(
+        "--sandbox-guardrails",
+        choices=("on", "off"),
+        default="on",
+        help="Docker worker isolation and agent sandboxing; off grants container-wide access. Default: on.",
     )
     sandbox.add_argument(
         "--sandbox-image",

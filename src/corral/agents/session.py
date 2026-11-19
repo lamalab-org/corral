@@ -482,13 +482,16 @@ class AgentSession:
         return self.execution_workspace
 
     @property
-    def native_tool_workspace(self) -> str | None:
-        """Workspace exposed to native tools inside Corral's enforced sandbox.
+    def native_sandbox_disabled(self) -> bool:
+        """Explicit Docker ablation policy; local execution keeps SDK defaults."""
+        return permissions.guardrails_disabled()
 
-        Local adapters retain their SDK isolation. Only the trusted Docker
-        runtime grants this capability and translates it to the worker mount.
-        """
-        if permissions.enabled() and self.capabilities.native_workspace:
+    @property
+    def native_tool_workspace(self) -> str | None:
+        """Shared task workspace for native tools in either Docker policy."""
+        if (
+            permissions.enabled() or self.native_sandbox_disabled
+        ) and self.capabilities.native_workspace:
             return self.workspace
         return None
 

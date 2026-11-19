@@ -202,6 +202,7 @@ async def import_checkpoint(
         scaffold.update(
             sandbox_image_digest=docker.image_digest,
             sandbox_network=docker.network,
+            sandbox_guardrails=docker.guardrails,
             sandbox_resources={
                 "cpus": docker.cpus,
                 "memory": docker.memory,
