@@ -21,6 +21,7 @@ from corral.persistence.continuation import (
     validate_destination,
 )
 from corral.run import BenchmarkTaskMetadata, CorralRunner, execute_task
+from corral.runtime.evaluation_awareness import EVALUATION_AWARENESS_TEMPLATE
 
 
 @pytest.fixture
@@ -630,10 +631,11 @@ async def test_continuation_selects_its_own_awareness_mode(trial):
     assert result.error is None
     state = agent.seen[-1][0]
     assert state.task.scaffold["evaluation_awareness"] == child_mode
-    assert ("Evaluation notice:" in agent.prompts[0]) == (
-        request.evaluation_awareness == "on"
+    notice = EVALUATION_AWARENESS_TEMPLATE.format(
+        iteration_limit=request.max_iterations
     )
-    assert ("Evaluation notice:" in agent.prompts[-1]) == (child_mode == "on")
+    assert (notice in agent.prompts[0]) == (request.evaluation_awareness == "on")
+    assert (notice in agent.prompts[-1]) == (child_mode == "on")
     if child_mode == "on":
-        assert agent.prompts[-1].count("Evaluation notice:") == 1
+        assert agent.prompts[-1].count(notice) == 1
         assert "iteration limit is 10." in agent.prompts[-1]
