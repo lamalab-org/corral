@@ -18,6 +18,7 @@ from corral.core.tool_catalog import state_tool_policy
 from corral.persistence.artifacts import LocalArtifactStore, iter_blob_refs
 from corral.persistence.base import CommitConflictError
 from corral.persistence.sqlite import SQLiteCommitStore
+from corral.runtime.evaluation_awareness import awareness_metadata
 
 if TYPE_CHECKING:
     from corral.orchestration.models import ContinuationSource, RunTaskInput
@@ -189,6 +190,7 @@ async def import_checkpoint(
             model["reasoning_effort"] = request.agent_runtime.reasoning_effort
     scaffold = {
         "sandbox": request.sandbox.mode,
+        **awareness_metadata(request.evaluation_awareness, request.max_iterations),
         **(
             {"max_iterations": request.max_iterations}
             if request.max_iterations is not None

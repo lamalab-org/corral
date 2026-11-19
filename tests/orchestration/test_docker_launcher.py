@@ -827,6 +827,33 @@ async def test_container_uses_configured_observer_and_flushes_on_exit(
     registry.close.assert_called_once_with()
 
 
+@pytest.mark.parametrize("mode", ["off", "on"])
+@pytest.mark.parametrize("supports_awareness", [False, True])
+def test_bootstrap_rejects_images_that_would_ignore_awareness(
+    tmp_path, monkeypatch, mode, supports_awareness
+):
+    from corral.orchestration import models
+
+    (tmp_path / "request.json").write_text(json.dumps({"evaluation_awareness": mode}))
+    (tmp_path / "checkpoint-import.json").write_text(
+        json.dumps({"missing_sidecars": []})
+    )
+    if not supports_awareness:
+        monkeypatch.setattr(
+            models, "RunTaskInput", SimpleNamespace(__dataclass_fields__={})
+        )
+    execute = Mock()
+    monkeypatch.setattr(os, "execvp", execute)
+    bootstrap = launchers._DOCKER_BOOTSTRAP.replace("/corral-state", str(tmp_path))
+    if mode == "on" and not supports_awareness:
+        with pytest.raises(RuntimeError, match="rebuild the image"):
+            exec(bootstrap, {})
+        execute.assert_not_called()
+    else:
+        exec(bootstrap, {})
+        execute.assert_called_once()
+
+
 def _docker_request(execution_id: str) -> RunTaskInput:
     return RunTaskInput(
         execution_id=execution_id,

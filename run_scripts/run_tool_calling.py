@@ -142,6 +142,9 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="JSON",
         help="JSON object mapping environment names or IDs to evaluation limits.",
     )
+    execution.add_argument(
+        "--evaluation-awareness", choices=("on", "off"), default="off"
+    )
     execution.add_argument("--no-evaluate", action="store_true")
     execution.add_argument("--sandbox", choices=("docker", "local"))
     execution.add_argument("--sandbox-image")

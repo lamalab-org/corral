@@ -282,6 +282,32 @@ def test_benchmark_parser_has_safe_docker_defaults():
     assert args.max_parallel_evaluations is None
     assert args.max_parallel_total is None
     assert args.max_parallel_evaluations_by_environment == {}
+    assert args.evaluation_awareness == "off"
+
+
+@pytest.mark.parametrize(
+    ("command", "extra"),
+    [
+        ("bench", []),
+        ("run", ["--task", "task1"]),
+        ("continue", ["--source-trial", "/tmp/source", "--commit", "a" * 64]),
+    ],
+)
+@pytest.mark.parametrize("mode", ["off", "on"])
+def test_evaluation_awareness_parser(command, extra, mode):
+    args = cli.build_parser().parse_args(
+        [
+            command,
+            "--agent",
+            "react",
+            "--environment",
+            "samplemath",
+            *extra,
+            "--evaluation-awareness",
+            mode,
+        ]
+    )
+    assert args.evaluation_awareness == mode
 
 
 def test_legacy_benchmark_namespace_also_defaults_to_docker():

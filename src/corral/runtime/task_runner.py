@@ -39,6 +39,7 @@ from corral.observability import (
     restore_commit_safely,
     update_safely,
 )
+from corral.runtime.evaluation_awareness import awareness_metadata
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -219,6 +220,9 @@ class TaskRuntime:
         )
         session_capabilities = agent_session_capabilities(agent)
 
+        policy = awareness_metadata(
+            (scaffold_metadata or {}).get("evaluation_awareness", "off"), max_iterations
+        )
         head = await store.head(branch_id)
         if head is None:
             initial_event = await asyncio.to_thread(
@@ -229,6 +233,7 @@ class TaskRuntime:
                 model_metadata=model_metadata,
                 scaffold_metadata={
                     **dict(scaffold_metadata or {}),
+                    **policy,
                     "max_iterations": max_iterations,
                     "previous_evaluation": last_score,
                 },
@@ -251,6 +256,13 @@ class TaskRuntime:
             async for commit in store.iter_commits(branch_id):
                 restore_commit_safely(self.observer, commit, context=context)
         current = await store.materialize(branch_id)
+        if (
+            current.task.scaffold.get("evaluation_awareness", "off")
+            != policy["evaluation_awareness"]
+        ):
+            raise ValueError(
+                "evaluation_awareness differs from the saved trial; start a new trial or continuation"
+            )
         environment.validate_state_tool_catalog(current)
         if current.runtime.metadata.get("lineage"):
             source_version = current.task.metadata.get("execution_version")
