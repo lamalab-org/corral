@@ -116,7 +116,8 @@ class BudgetProbe:
 
     async def run_session(self, session):
         prompt = session.prompt
-        assert prompt.count("Evaluation notice:") == 1
+        notice = EVALUATION_AWARENESS_TEMPLATE.format(iteration_limit=self.expected)
+        assert prompt.count(notice) == 1
         assert f"iteration limit is {self.expected}." in prompt
         if self.child:
             assert "Subagent handoff:" in prompt
@@ -214,10 +215,11 @@ class DockerAwarenessProbe:
         prompt = session.prompt
         assert isinstance(prompt, list)
         assert prompt[-1]["type"] == "image_url"
+        notice = EVALUATION_AWARENESS_TEMPLATE.format(iteration_limit=11)
         notices = [
             part
             for part in prompt
-            if part.get("type") == "text" and "Evaluation notice:" in part["text"]
+            if part.get("type") == "text" and notice in part["text"]
         ]
         assert len(notices) == (1 if self.mode == "on" else 0)
         if notices:
