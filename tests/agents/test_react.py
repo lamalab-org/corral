@@ -178,3 +178,75 @@ async def test_malformed_action_name_is_not_sent_as_a_message_name(monkeypatch, 
     assert len(observations) == 2
     assert "name" not in observations[0]
     assert observations[1]["name"] == "PythonREPL"
+
+
+class _RecordingSession:
+    prompt = "solve"
+    surrender_allowed = False
+    tools = ()
+    examples = ()
+    initial_state = SimpleNamespace(messages=(), metadata=SimpleNamespace(scaffold={}))
+
+    def __init__(self, iteration_limit):
+        self.iteration_limit = iteration_limit
+        self.messages = []
+        self.recorded_usage = []
+
+    def final_messages(self):
+        return tuple(self.messages)
+
+    async def record_message(self, message, **_kwargs):
+        self.messages.append(message)
+
+    async def record_messages(self, messages, *, usage=None, **_kwargs):
+        self.messages.extend(messages)
+        self.recorded_usage.append(usage)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("finish_reason", ["content_filter", "refusal"])
+@pytest.mark.parametrize("content", ["", "I can't help with that."])
+async def test_provider_refusal_ends_the_run_like_claude_code(
+    monkeypatch, agent, finish_reason, content
+):
+    """A refusal must not be mistaken for a turn without an action.
+
+    Before the fix the empty refusal was nudged with "No valid action" and the
+    provider refused every retry until the interaction budget was spent.
+    """
+    refused = SimpleNamespace(
+        content=content,
+        usage={"prompt_tokens": 7, "completion_tokens": 0},
+        id=None,
+        finish_reason=finish_reason,
+    )
+    model_call = AsyncMock(return_value=refused)
+    monkeypatch.setattr("corral.agents.base_agent.llm_call", model_call)
+    session = _RecordingSession(iteration_limit=50)
+
+    outcome = await agent.run_session(session)
+
+    assert outcome.status == "agent_failure"
+    assert "refused" in outcome.error
+    assert repr(finish_reason) in outcome.error
+    model_call.assert_awaited_once()
+    assert session.recorded_usage == [refused.usage]
+    assert [m["content"] for m in session.messages] == ([content] if content else [])
+    assert not any("No valid action" in str(m.get("content")) for m in session.messages)
+
+
+@pytest.mark.anyio
+async def test_empty_response_without_refusal_is_still_nudged(monkeypatch, agent):
+    model_call = AsyncMock(
+        return_value=SimpleNamespace(
+            content="", usage=None, id=None, finish_reason="stop"
+        )
+    )
+    monkeypatch.setattr("corral.agents.base_agent.llm_call", model_call)
+    session = _RecordingSession(iteration_limit=2)
+
+    outcome = await agent.run_session(session)
+
+    assert outcome.status == "iteration_limit"
+    assert model_call.await_count == 2
+    assert any("No valid action" in str(m.get("content")) for m in session.messages)
