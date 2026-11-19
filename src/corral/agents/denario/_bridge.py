@@ -7,6 +7,7 @@ It is not an agent loop: Denario still chooses every request and next action.
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import json
 import os
@@ -117,28 +118,6 @@ class Bridge:
         self.provider = config.get("provider", "openai")
         self.client_model = config["model"] if self.provider == "openai" else "gpt-4o"
         self.token = secrets.token_urlsafe(32)
-        defaults = {
-            "openai": (
-                "OPENAI_API_KEY",
-                "OPENAI_BASE_URL",
-                "https://api.openai.com/v1",
-            ),
-            "anthropic": (
-                "ANTHROPIC_API_KEY",
-                "ANTHROPIC_BASE_URL",
-                "https://api.anthropic.com/v1",
-            ),
-            "openrouter": (
-                "OPENROUTER_API_KEY",
-                "OPENROUTER_BASE_URL",
-                "https://openrouter.ai/api/v1",
-            ),
-        }
-        key_var, url_var, default_url = defaults[self.provider]
-        self.upstream = (
-            config.get("api_endpoint") or os.environ.get(url_var) or default_url
-        ).rstrip("/")
-        self.api_key = os.environ.get(key_var, "")
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), self._handler())
         self.url = f"http://127.0.0.1:{self.server.server_port}"
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -263,7 +242,13 @@ class Bridge:
         agent = self.agent or self.phase
         responses = (
             self.provider == "openai"
-            and body["model"].startswith("gpt-6")
+            and (
+                body["model"].startswith("gpt-6")
+                or (
+                    body["model"].startswith("gpt-5.6-sol")
+                    and body.get("reasoning_effort", "none") != "none"
+                )
+            )
             and (
                 bool(body.get("tools"))
                 or any(
@@ -293,79 +278,10 @@ class Bridge:
                 **request,
                 "messages": [attributed_message(m) for m in request["messages"]],
             }
-        headers = {"Authorization": f"Bearer {self.api_key}"}
-        if self.provider == "anthropic" and os.environ.get("ANTHROPIC_WORKSPACE_ID"):
-            headers["anthropic-workspace-id"] = os.environ["ANTHROPIC_WORKSPACE_ID"]
-        self.rpc(
+        reply = self.rpc(
             "model_start", id=call_id, agent=agent, request=request, endpoint=endpoint
         )
-        try:
-            with httpx.Client(timeout=1200) as client:
-                response = client.post(
-                    f"{self.upstream}/{endpoint}",
-                    json=request,
-                    headers=headers,
-                )
-            error_code = None
-            provider_response = None
-            content_type = response.headers.get("content-type", "application/json")
-            content = response.content
-            failed = not response.is_success
-            if response.is_success:
-                try:
-                    if responses:
-                        provider_response = response.json()
-                        if provider_response.get("error"):
-                            raise ValueError(str(provider_response["error"]))
-                        completion = self.responses.completion(provider_response)
-                        content_type, content = encode_completion(
-                            completion, streaming=bool(body.get("stream"))
-                        )
-                    if self.provider == "openrouter":
-                        provider_response = response.json()
-                        if provider_response.get("error"):
-                            raise ValueError(str(provider_response["error"]))
-                        message, usage = completion_event(content, streaming=False)
-                        for call in message.get("tool_calls") or []:
-                            self.chat_messages[call["id"]] = message
-                        content_type, content = encode_completion(
-                            provider_response, streaming=streaming
-                        )
-                    else:
-                        message, usage = completion_event(content, streaming=streaming)
-                except (ValueError, KeyError, TypeError) as exc:
-                    failed = True
-                    message = {
-                        "role": "assistant",
-                        "content": f"Invalid provider response: {type(exc).__name__}: {exc}",
-                    }
-                    usage = {}
-            else:
-                usage = {}
-                message = {
-                    "role": "assistant",
-                    "content": f"Provider HTTP {response.status_code}: {response.text}",
-                }
-                with contextlib.suppress(ValueError, AttributeError):
-                    error_code = response.json().get("error", {}).get("code")
-            self.rpc(
-                "model_end",
-                id=call_id,
-                agent=agent,
-                input=request.get("input", request.get("messages", body["messages"])),
-                message=message,
-                usage=usage,
-                error_code=error_code,
-                is_error=failed,
-                status_code=response.status_code,
-                provider_response=provider_response,
-            )
-            return (
-                response.status_code,
-                content_type,
-                content,
-            )
-        except httpx.HTTPError as exc:
+        if "transport_error" in reply:
             self.rpc(
                 "model_end",
                 id=call_id,
@@ -373,7 +289,7 @@ class Bridge:
                 input=request.get("input", request.get("messages", body["messages"])),
                 message={
                     "role": "assistant",
-                    "content": f"Provider transport failed: {type(exc).__name__}",
+                    "content": f"Provider transport failed: {reply['transport_error']}",
                 },
                 usage={},
                 is_error=True,
@@ -381,15 +297,72 @@ class Bridge:
             return (
                 502,
                 "application/json",
-                json.dumps(
-                    {
-                        "error": {
-                            "message": "Upstream transport failed",
-                            "type": "api_error",
-                        }
-                    }
-                ).encode(),
+                b'{"error":{"message":"Upstream transport failed","type":"api_error"}}',
             )
+        response = httpx.Response(
+            reply["status"],
+            headers={"content-type": reply["content_type"]},
+            content=base64.b64decode(reply["body"]),
+        )
+        error_code = None
+        provider_response = None
+        content_type = response.headers.get("content-type", "application/json")
+        content = response.content
+        failed = not response.is_success
+        if response.is_success:
+            try:
+                if responses:
+                    provider_response = response.json()
+                    if provider_response.get("error"):
+                        raise ValueError(str(provider_response["error"]))
+                    completion = self.responses.completion(provider_response)
+                    content_type, content = encode_completion(
+                        completion, streaming=bool(body.get("stream"))
+                    )
+                if self.provider == "openrouter":
+                    provider_response = response.json()
+                    if provider_response.get("error"):
+                        raise ValueError(str(provider_response["error"]))
+                    message, usage = completion_event(content, streaming=False)
+                    for call in message.get("tool_calls") or []:
+                        self.chat_messages[call["id"]] = message
+                    content_type, content = encode_completion(
+                        provider_response, streaming=streaming
+                    )
+                else:
+                    message, usage = completion_event(content, streaming=streaming)
+            except (ValueError, KeyError, TypeError) as exc:
+                failed = True
+                message = {
+                    "role": "assistant",
+                    "content": f"Invalid provider response: {type(exc).__name__}: {exc}",
+                }
+                usage = {}
+        else:
+            usage = {}
+            message = {
+                "role": "assistant",
+                "content": f"Provider HTTP {response.status_code}: {response.text}",
+            }
+            with contextlib.suppress(ValueError, AttributeError):
+                error_code = response.json().get("error", {}).get("code")
+        self.rpc(
+            "model_end",
+            id=call_id,
+            agent=agent,
+            input=request.get("input", request.get("messages", body["messages"])),
+            message=message,
+            usage=usage,
+            error_code=error_code,
+            is_error=failed,
+            status_code=response.status_code,
+            provider_response=provider_response,
+        )
+        return (
+            response.status_code,
+            content_type,
+            content,
+        )
 
     def _restore_chat_message(self, message):
         """Replay provider reasoning alongside the unchanged tool-call turn."""

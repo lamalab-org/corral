@@ -239,8 +239,10 @@ execution, and retries. Corral exposes the benchmark's tools directly to the
 engineer and researcher for observations and nonterminal `propose_answer` calls.
 The final researcher step must confirm the candidate answer. The adapter submits
 it only after native control completes the plan and `get_results()` saves a
-nonempty `input_files/results.md`. Denario's native code executor handles Python
-calculations and file generation.
+nonempty `input_files/results.md`. Corral runs Denario’s code blocks with its
+native executor in a separate restricted worker sharing the task workspace.
+The Corral adapter authenticates upstream model requests. The Denario SDK
+receives a per-run loopback token, and generated code receives neither credential.
 
 The `Task` section contains the environment's task text directly, including its
 inputs, constraints and required answer format. Corral's system, user and surrender

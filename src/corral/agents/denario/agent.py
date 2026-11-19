@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import json
 import os
@@ -13,6 +14,8 @@ from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+import httpx
+
 from corral.agents._transcript import event_clock
 from corral.agents.base_agent import BaseAgent, _UsageAccumulator
 from corral.agents.denario._workflow import completed_context
@@ -21,6 +24,7 @@ from corral.agents.session import AgentSessionCapabilities
 from corral.core.action import Action
 from corral.core.errors import concise_error_message
 from corral.report.logging import logger
+from corral.runtime.permissions import public_worker_environment
 
 if TYPE_CHECKING:
     from corral.agents.session import AgentSession
@@ -33,6 +37,29 @@ _WORKER_FILES = {
     name: Path(__file__).with_name(name).read_text(encoding="utf-8")
     for name in ("_worker.py", "_bridge.py", "_responses.py", "_workflow.py")
 }
+
+
+class DenarioCodeExecutor:
+    """Run a batch of Denario code blocks inside Corral's restricted tool worker."""
+
+    @staticmethod
+    def execute(*, blocks, work_dir, timeout, execution_policies):
+        from autogen.coding import CodeBlock, LocalCommandLineCodeExecutor
+
+        root = Path.cwd()
+        directory = (root / work_dir).resolve()
+        if not directory.is_relative_to(root):
+            raise ValueError("Denario execution directory must be inside the workspace")
+        executor = LocalCommandLineCodeExecutor(
+            work_dir=directory, timeout=timeout, execution_policies=execution_policies
+        )
+        try:
+            result = executor.execute_code_blocks(
+                [CodeBlock(**block) for block in blocks]
+            )
+        except Exception as exc:
+            return {"error": f"{type(exc).__name__}: {exc}"}
+        return result.model_dump()
 
 
 class DenarioAgent(BaseAgent):
@@ -135,10 +162,41 @@ class DenarioAgent(BaseAgent):
         # some dependencies install stdout log handlers during import.
         return [
             sys.executable,
+            "-P",
             "-c",
             "import os; writer = os.fdopen(os.dup(1), 'w'); os.dup2(2, 1); "
             "from corral.agents.denario._worker import main; main(writer=writer)",
         ]
+
+    async def _request_model(self, endpoint: str, request: dict) -> dict:
+        """Authenticate upstream in the Corral adapter after admitting the request."""
+        if endpoint not in {"chat/completions", "responses"}:
+            raise ValueError("Unknown Denario model endpoint")
+        default_url = {
+            "openai": "https://api.openai.com/v1",
+            "anthropic": "https://api.anthropic.com/v1",
+            "openrouter": "https://openrouter.ai/api/v1",
+        }[self.provider]
+        prefix = self.provider.upper()
+        upstream = (
+            self.api_endpoint or os.environ.get(f"{prefix}_BASE_URL") or default_url
+        )
+        api_key = os.environ.get(f"{prefix}_API_KEY", "")
+        headers = {"Authorization": f"Bearer {api_key}"}
+        if self.provider == "anthropic" and os.environ.get("ANTHROPIC_WORKSPACE_ID"):
+            headers["anthropic-workspace-id"] = os.environ["ANTHROPIC_WORKSPACE_ID"]
+        try:
+            async with httpx.AsyncClient(timeout=1200) as client:
+                result = await client.post(
+                    f"{upstream.rstrip('/')}/{endpoint}", json=request, headers=headers
+                )
+        except httpx.HTTPError as exc:
+            return {"transport_error": type(exc).__name__}
+        return {
+            "status": result.status_code,
+            "content_type": result.headers.get("content-type", "application/json"),
+            "body": base64.b64encode(result.content).decode("ascii"),
+        }
 
     async def run_session(self, session: AgentSession) -> AgentOutcome:
         usage = _UsageAccumulator()
@@ -196,7 +254,6 @@ class DenarioAgent(BaseAgent):
             "provider": self.provider,
             "openrouter_zdr": self.openrouter_zdr,
             "openrouter_provider": self.openrouter_provider,
-            "api_endpoint": self.api_endpoint,
             "model_settings": {**self.kwargs, "temperature": self.temperature},
             "denario_iterations": self.denario_iterations,
             "max_plan_steps": self.max_plan_steps,
@@ -270,6 +327,17 @@ class DenarioAgent(BaseAgent):
                     await record_event(
                         {"type": "model_request", **pending[event["id"]]}, llm_calls=1
                     )
+                    response = await self._request_model(
+                        pending[event["id"]]["endpoint"],
+                        pending[event["id"]]["request"],
+                    )
+                elif kind == "execute_code":
+                    try:
+                        response = await session.execute_denario_code(
+                            arguments=event["arguments"]
+                        )
+                    except Exception as exc:
+                        response = {"error": f"{type(exc).__name__}: {exc}"}
                 elif kind == "model_end":
                     if event["id"] not in pending:
                         raise ValueError("Unmatched Denario model response")
@@ -442,7 +510,7 @@ class DenarioAgent(BaseAgent):
             process = await asyncio.create_subprocess_exec(
                 *self._worker_command(),
                 cwd=workspace,
-                env={**os.environ, "PYTHONPATH": runtime.name},
+                env={**public_worker_environment(), "PYTHONPATH": runtime.name},
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

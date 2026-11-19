@@ -14,6 +14,7 @@ import time
 import traceback
 from contextvars import ContextVar
 from functools import wraps
+from pathlib import Path
 from uuid import uuid4
 
 from corral.agents.denario._bridge import Bridge
@@ -39,6 +40,7 @@ def install_native_hooks(bridge: Bridge):
     """Connect environment tools and observe the SDK without replacing its loop."""
     from autogen import ConversableAgent, GroupChat, GroupChatManager
     from autogen.coding import LocalCommandLineCodeExecutor
+    from autogen.coding.base import CommandLineCodeResult
 
     cmb = importlib.import_module("cmbagent.cmbagent")
     utils = importlib.import_module("cmbagent.utils")
@@ -235,26 +237,31 @@ def install_native_hooks(bridge: Bridge):
             call_context.reset(token)
 
     ConversableAgent.a_execute_function = a_execute_function
-    original_code = LocalCommandLineCodeExecutor.execute_code_blocks
 
-    @wraps(original_code)
+    @wraps(LocalCommandLineCodeExecutor.execute_code_blocks)
     def execute_code(executor, code_blocks):
         call_id = str(uuid4())
+        blocks = [block.model_dump() for block in code_blocks]
         func_call = {
             "name": "denario.execute_code",
-            "arguments": json.dumps(
-                {
-                    "blocks": [
-                        {"language": block.language, "code": block.code}
-                        for block in code_blocks
-                    ]
-                }
-            ),
+            "arguments": json.dumps({"blocks": blocks}),
         }
         native_start("denario.executor", func_call, call_id)
         started = time.monotonic()
         try:
-            result = original_code(executor, code_blocks)
+            workspace = Path(bridge.config["project_dir"]).parent
+            reply = bridge.rpc(
+                "execute_code",
+                arguments={
+                    "blocks": blocks,
+                    "work_dir": str(executor.work_dir.resolve().relative_to(workspace)),
+                    "timeout": executor.timeout,
+                    "execution_policies": executor.execution_policies,
+                },
+            )
+            if "error" in reply:
+                raise RuntimeError(reply["error"])
+            result = CommandLineCodeResult(**reply)
         except Exception as exc:
             native_result(
                 func_call, call_id, f"{type(exc).__name__}: {exc}", False, started

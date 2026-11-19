@@ -9,10 +9,13 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import threading
+from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import StringIO
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -31,6 +34,8 @@ from corral.agents.tool_calling import ToolCallingAgent
 from corral.core.environment import Environment, Toolset
 from corral.core.task import TaskDefinition
 from corral.core.tool import tool
+from corral.runtime import permissions
+from corral.runtime.agent_worker import RemoteSession, run_agent
 
 
 @pytest.fixture
@@ -67,7 +72,9 @@ async def make_session(agent, limit=50):
             submission_format={"answer": "string"},
             resolve_answer=False,
         ),
-        toolset=Toolset(pool={"measure": tool(measure)}, workspace_factory=None),
+        toolset=Toolset(
+            pool={"measure": tool(trusted=True)(measure)}, workspace_factory=None
+        ),
     )
     return await start_session(
         environment, max_iterations=limit, agent=agent
@@ -75,6 +82,7 @@ async def make_session(agent, limit=50):
 
 
 def fake_worker(monkeypatch, agent, program):
+    monkeypatch.setattr(agent, "_request_model", AsyncMock(return_value={}))
     prelude = """
 import json, sys
 config = json.loads(sys.stdin.readline())
@@ -92,6 +100,30 @@ def model(i):
         "_worker_command",
         lambda: [sys.executable, "-u", "-c", prelude + program],
     )
+
+
+def mock_provider_rpc(monkeypatch, bridge, events, respond):
+    agent = DenarioAgent(
+        model=f"{bridge.provider}/{bridge.config['model']}",
+        api_endpoint=bridge.config.get("api_endpoint"),
+    )
+    client = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kwargs: client(transport=httpx.MockTransport(respond), **kwargs),
+    )
+
+    def rpc(kind, **fields):
+        events.append((kind, fields))
+        if kind == "model_start":
+            return asyncio.run(
+                agent._request_model(fields["endpoint"], fields["request"])
+            )
+
+        return None
+
+    monkeypatch.setattr(bridge, "rpc", rpc)
 
 
 def test_cli_is_lazy_and_uses_one_model(monkeypatch):
@@ -158,9 +190,6 @@ def test_openrouter_enforces_zdr_and_preserves_reasoning(monkeypatch, streaming)
         StringIO(),
     )
     events, requests = [], []
-    monkeypatch.setattr(
-        bridge, "rpc", lambda kind, **fields: events.append((kind, fields))
-    )
     message = {
         "role": "assistant",
         "content": None,
@@ -200,11 +229,7 @@ def test_openrouter_enforces_zdr_and_preserves_reasoning(monkeypatch, streaming)
         requests.append(data)
         return httpx.Response(200, json=completion)
 
-    client_class = httpx.Client
-    monkeypatch.setattr(
-        "corral.agents.denario._bridge.httpx.Client",
-        lambda **kw: client_class(transport=httpx.MockTransport(respond), **kw),
-    )
+    mock_provider_rpc(monkeypatch, bridge, events, respond)
     try:
         body = {
             "model": "gpt-4o",
@@ -232,6 +257,8 @@ async def test_requires_sandbox():
     result = await agent.run_session(session)
     assert result.status == "harness_failure"
     assert "Docker" in result.error
+    with pytest.raises(PermissionError, match="native workspace"):
+        await session.execute_denario_code(arguments={})
 
 
 @pytest.mark.parametrize(
@@ -249,9 +276,6 @@ def test_forced_tool_compatibility(monkeypatch, provider, model):
         StringIO(),
     )
     events = []
-    monkeypatch.setattr(
-        bridge, "rpc", lambda kind, **fields: events.append((kind, fields))
-    )
     choice = {"type": "function", "function": {"name": "record_plan_constraints"}}
     body = {
         "messages": [{"role": "user", "content": "Set constraints."}],
@@ -283,11 +307,7 @@ def test_forced_tool_compatibility(monkeypatch, provider, model):
             json={"choices": [{"message": {"role": "assistant", "content": "done"}}]},
         )
 
-    client_class = httpx.Client
-    monkeypatch.setattr(
-        "corral.agents.denario._bridge.httpx.Client",
-        lambda **kw: client_class(transport=httpx.MockTransport(respond), **kw),
-    )
+    mock_provider_rpc(monkeypatch, bridge, events, respond)
     try:
         assert bridge.model(body)[0] == 200
     finally:
@@ -330,9 +350,6 @@ def test_kimi_parallel_hint_with_strict_zdr_routing(
         StringIO(),
     )
     events, requests = [], []
-    monkeypatch.setattr(
-        bridge, "rpc", lambda kind, **fields: events.append((kind, fields))
-    )
     choice = {"type": "function", "function": {"name": "measure"}} if kimi else "auto"
     body = {
         "messages": [{"role": "user", "content": "Measure a."}],
@@ -392,11 +409,7 @@ def test_kimi_parallel_hint_with_strict_zdr_routing(
             },
         )
 
-    client_class = httpx.Client
-    monkeypatch.setattr(
-        "corral.agents.denario._bridge.httpx.Client",
-        lambda **kw: client_class(transport=httpx.MockTransport(respond), **kw),
-    )
+    mock_provider_rpc(monkeypatch, bridge, events, respond)
     try:
         status, _, content = bridge.model(body)
         assert status == 200
@@ -430,13 +443,19 @@ async def test_worker_receives_task_text_without_corral_prompt_templates(
         user_prompt="CORRAL_USER_WRAPPER {{task_guide}}",
         surrender_prompt="CORRAL_SURRENDER_WRAPPER",
     )
+    for provider in ("OPENAI", "ANTHROPIC", "OPENROUTER"):
+        monkeypatch.setenv(f"{provider}_API_KEY", "provider-secret")
+    monkeypatch.setenv("UNRELATED_SECRET", "other-secret")
     task = 'Measure \u03b1.\nKeep this literal input: {"sample": "a"}.\nReturn a SMILES string.'
     monkeypatch.setattr(AgentSession, "prompt", property(lambda _self: task))
     fake_worker(
         monkeypatch,
         agent,
         """
+import os
 from pathlib import Path
+assert all(k not in os.environ for k in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "UNRELATED_SECRET"))
+assert "api_endpoint" not in config
 assert isinstance(config["task"], str)
 Path(config["project_dir"], "task.txt").write_text(config["task"])
 rpc("done")
@@ -761,11 +780,12 @@ def test_streamed_function_call_and_reasoning_usage():
     assert usage["reasoning_tokens"] == 2
 
 
-def test_gateway_preserves_schemas_and_explicit_model_settings(monkeypatch):
+@pytest.mark.parametrize("model", ["gpt-5.6-sol", "gpt-6.1-sol"])
+def test_gateway_preserves_schemas_and_explicit_model_settings(monkeypatch, model):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     bridge = Bridge(
         {
-            "model": "gpt-6.1-sol",
+            "model": model,
             "api_endpoint": "https://provider.invalid/v1",
             "model_settings": {
                 "temperature": None,
@@ -777,9 +797,6 @@ def test_gateway_preserves_schemas_and_explicit_model_settings(monkeypatch):
         StringIO(),
     )
     events = []
-    monkeypatch.setattr(
-        bridge, "rpc", lambda kind, **fields: events.append((kind, fields))
-    )
     schema = {
         "type": "json_schema",
         "json_schema": {"name": "test", "schema": {"type": "object"}},
@@ -795,7 +812,7 @@ def test_gateway_preserves_schemas_and_explicit_model_settings(monkeypatch):
         assert str(request.url) == "https://provider.invalid/v1/responses"
         assert request.headers["Authorization"] == "Bearer sk-test"
         body = json.loads(request.content)
-        assert body["model"] == "gpt-6.1-sol"
+        assert body["model"] == model
         assert body["text"]["format"] == {
             "type": "json_schema",
             **schema["json_schema"],
@@ -811,7 +828,7 @@ def test_gateway_preserves_schemas_and_explicit_model_settings(monkeypatch):
             200,
             json={
                 "id": "resp-test",
-                "model": "gpt-6.1-sol",
+                "model": model,
                 "status": "completed",
                 "output": [
                     {
@@ -824,11 +841,7 @@ def test_gateway_preserves_schemas_and_explicit_model_settings(monkeypatch):
             },
         )
 
-    client_class = httpx.Client
-    monkeypatch.setattr(
-        "corral.agents.denario._bridge.httpx.Client",
-        lambda **kwargs: client_class(transport=httpx.MockTransport(respond), **kwargs),
-    )
+    mock_provider_rpc(monkeypatch, bridge, events, respond)
     try:
         status, _, _ = bridge.model(
             {
@@ -938,9 +951,6 @@ def test_gateway_records_failed_requests(monkeypatch, failure):
         StringIO(),
     )
     events = []
-    monkeypatch.setattr(
-        bridge, "rpc", lambda kind, **fields: events.append((kind, fields))
-    )
 
     def respond(request):
         # The input was acknowledged by Corral before contacting the provider.
@@ -951,11 +961,7 @@ def test_gateway_records_failed_requests(monkeypatch, failure):
             return httpx.Response(200, content=b"invalid provider response")
         return httpx.Response(429, json={"error": {"code": "insufficient_quota"}})
 
-    client_class = httpx.Client
-    monkeypatch.setattr(
-        "corral.agents.denario._bridge.httpx.Client",
-        lambda **kwargs: client_class(transport=httpx.MockTransport(respond), **kwargs),
-    )
+    mock_provider_rpc(monkeypatch, bridge, events, respond)
     try:
         bridge.model({"messages": [{"role": "user", "content": "task"}]})
     finally:
@@ -1067,9 +1073,53 @@ time.sleep(120)
         assert "State:\tZ" in Path(f"/proc/{pid}/status").read_text()
 
 
+@pytest.mark.anyio
+async def test_timeout_reaps_brokered_code_worker(monkeypatch, sandbox_workspace):
+    agent = DenarioAgent(wall_clock_timeout_s=1)
+    fake_worker(monkeypatch, agent, 'rpc("execute_code", arguments={})')
+    session, _ = await make_session(agent)
+    session.execution_workspace = str(sandbox_workspace)
+    stopped = threading.Event()
+
+    def run_worker(
+        kind,
+        payload,
+        workspace,
+        *,
+        cancel,
+        workspace_access,
+        share_workspace_outputs=False,
+    ):
+        if kind == "agent":
+            adapter, connection = payload
+            remote = RemoteSession(*connection)
+            remote.native_tool_workspace = workspace  # stand in for the Docker mount
+            return asdict(asyncio.run(adapter.run_session(remote)))
+        assert kind == "tool"
+        assert workspace_access == "read_write"
+        assert share_workspace_outputs
+        assert workspace == str(sandbox_workspace)
+        assert cancel.wait(5), "controller left the executor running"
+        stopped.set()
+        return {"content": {}}
+
+    monkeypatch.setattr(permissions, "run_worker", run_worker)
+    outcome = await asyncio.wait_for(run_agent(agent, session), timeout=4)
+    assert outcome.status == "timeout"
+    assert stopped.is_set()
+
+
 PLAN = "\n- Step 1:\n\t* sub-task: Measure and analyze\n\t* agent in charge: engineer\n\t* instructions:\n\t\t- Measure sample a and analyze the observation.\n- Step 2:\n\t* sub-task: Interpret and report\n\t* agent in charge: researcher\n\t* instructions:\n\t\t- Check the result, propose the final answer, and write the results.\n"
 REPORT = "# Results\nSample a was measured with the environment tool: measured:42. Python confirmed 6 * 7 = 42."
-CODE = "import importlib.util\nassert importlib.util.find_spec('corral.core') is None\nfrom pathlib import Path\nPath('analysis.txt').write_text(str(6 * 7))\nprint(6 * 7)\n"
+CODE = """import importlib.util
+import os
+from pathlib import Path
+assert os.getuid() != 0
+assert importlib.util.find_spec("corral") is None
+assert all(key not in os.environ for key in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "OPENAI_BASE_URL"))
+Path("analysis.txt").write_text(str(6 * 7))
+print(6 * 7)
+"""
 
 
 def test_native_sdk_records_functions_and_executor_failures(tmp_path):
@@ -1081,18 +1131,33 @@ def test_native_sdk_records_functions_and_executor_failures(tmp_path):
     # Hooks are process-local. Exercise real AG2 methods without replacing the
     # provider or polluting the test runner's SDK classes with permanent hooks.
     program = r"""
-import asyncio, json, sys
+import asyncio, json, sys, tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from autogen import ConversableAgent
 from autogen.coding import CodeBlock, LocalCommandLineCodeExecutor
 from corral.agents.denario._worker import install_native_hooks
+from corral.agents.session import AgentSession
+from corral.runtime import permissions
+
+permissions.configure(Path(tempfile.mkdtemp()))
+workspace = Path(tempfile.mkdtemp(dir="/workspace"))
+work_dir = workspace / "experiment"
+work_dir.mkdir()
 
 events = []
+def rpc(kind, **fields):
+    events.append({"kind": kind, **fields})
+    if kind == "execute_code":
+        args = fields["arguments"]
+        assert args["work_dir"] == "experiment"
+        assert args["timeout"] == 60
+        session = SimpleNamespace(native_tool_workspace=str(workspace))
+        return asyncio.run(AgentSession.execute_denario_code(session, arguments=args))
 bridge = SimpleNamespace(
-    config={"model": "gpt-6.1-sol", "tools": []}, token="test", url="http://127.0.0.1:1", agent="",
+    config={"model": "gpt-6.1-sol", "tools": [], "project_dir": str(work_dir)}, token="test", url="http://127.0.0.1:1", agent="",
     client_model="gpt-6.1-sol",
-    rpc=lambda kind, **fields: events.append({"kind":kind, **fields}),
+    rpc=rpc,
     event=lambda kind, **fields: events.append({"kind":kind, **fields}),
 )
 install_native_hooks(bridge)
@@ -1121,13 +1186,24 @@ async def succeed():
 agent.register_function({"fail":fail, "succeed":succeed})
 assert agent.execute_function({"name":"fail", "arguments":"{}"})[0] is False
 assert asyncio.run(agent.a_execute_function({"name":"succeed", "arguments":"{}"}))[0] is True
-executor = LocalCommandLineCodeExecutor(work_dir=sys.argv[1])
-assert executor.execute_code_blocks([CodeBlock(language="python", code="raise ValueError('code failed')")]).exit_code != 0
+executor = LocalCommandLineCodeExecutor(work_dir=work_dir)
+code = '''# filename: failed.py
+from pathlib import Path
+from tempfile import NamedTemporaryFile
+with NamedTemporaryFile(dir=".", delete=False) as f:
+    f.write(b"42")
+Path(f.name).rename("analysis.txt")
+raise ValueError("code failed")
+'''
+result = executor.execute_code_blocks([CodeBlock(language="python", code=code)])
+assert result.exit_code == 1 and result.code_file == "/workspace/experiment/failed.py"
+output = (work_dir / "analysis.txt").stat()
+assert output.st_gid == workspace.stat().st_gid and output.st_mode & 0o777 == 0o660
 # A missing parent directory raises before the subprocess can start.
 try:
     executor.execute_code_blocks([CodeBlock(language="python", code="# filename: missing/subdir/test.py\nprint(1)")])
-except FileNotFoundError:
-    pass
+except RuntimeError as exc:
+    assert "FileNotFoundError" in str(exc)
 else:
     raise AssertionError("expected code executor exception")
 Path(sys.argv[1], "events.json").write_text(json.dumps(events))
@@ -1430,7 +1506,7 @@ class NativeResponses:
     ],
 )
 async def test_full_native_sdk_with_mock_provider(
-    monkeypatch, sandbox_workspace, model, scenario
+    monkeypatch, tmp_path, model, scenario
 ):
     if (
         not os.getenv("CORRAL_TEST_DENARIO_NATIVE")
@@ -1439,11 +1515,17 @@ async def test_full_native_sdk_with_mock_provider(
         pytest.skip("Run with CORRAL_TEST_DENARIO_NATIVE=1 in the Denario Docker image")
     from corral.persistence import SQLiteCommitStore
 
+    checkpoints = tmp_path / "checkpoints"
+    checkpoints.mkdir(mode=0o700)
+    monkeypatch.setattr(permissions, "_enabled", False)
+    permissions.configure(checkpoints)
+    workspace = Path(tempfile.mkdtemp(dir="/workspace"))
+
     # Use on-disk commits so the final assertions also exercise persistence.
     monkeypatch.setattr(
         "tests.agents.commit_session.SQLiteCommitStore",
         lambda _path, execution_id: SQLiteCommitStore(
-            str(sandbox_workspace / "commits.sqlite"), execution_id
+            str(tmp_path / "commits.sqlite"), execution_id
         ),
     )
     provider, native_model = model.split("/", 1)
@@ -1610,13 +1692,15 @@ async def test_full_native_sdk_with_mock_provider(
         wall_clock_timeout_s=180,
     )
     session, measurements = await make_session(agent)
+    session.execution_workspace = str(workspace)
     try:
-        result = await agent.run_session(session)
+        result = await run_agent(agent, session)
     finally:
         server.shutdown()
         server.server_close()
         thread.join()
-    log = Path(result.metadata["project_dir"]) / "denario-worker.log"
+    project = workspace / Path(result.metadata["project_dir"]).relative_to("/workspace")
+    log = project / "denario-worker.log"
     recovery = [
         m["sdk_event"]
         for m in session.messages
@@ -1644,9 +1728,7 @@ async def test_full_native_sdk_with_mock_provider(
         f"{result.error}\n{errors}\n{log.read_text()[-12000:]}"
     )
     assert not errors
-    description = (
-        Path(result.metadata["project_dir"]) / "input_files" / "data_description.md"
-    ).read_text()
+    description = (project / "input_files" / "data_description.md").read_text()
     task_text = description.split("\nTask:\n", 1)[1].split(
         "\nAvailable environment tools (JSON schemas):\n", 1
     )[0]
@@ -1673,13 +1755,15 @@ async def test_full_native_sdk_with_mock_provider(
     assert any(
         "[Speaker: researcher]" in json.dumps(request) for request in responses.requests
     )
-    report = Path(result.metadata["project_dir"]) / "input_files" / "results.md"
+    report = project / "input_files" / "results.md"
     assert report.read_text() == REPORT
     submissions = [
         a.action for a in session.state.actions.values() if a.action.is_submission
     ]
     assert len(submissions) == 1
-    assert submissions[0].metadata["denario_results"] == str(report)
+    assert submissions[0].metadata["denario_results"] == str(
+        Path("/workspace") / report.relative_to(workspace)
+    )
     finished = next(
         i for i, m in enumerate(session.messages) if m.get("name") == "denario.finished"
     )
@@ -1712,7 +1796,7 @@ async def test_full_native_sdk_with_mock_provider(
         for message in session.messages
         for call in message.get("tool_calls", [])
     )
-    analysis = list(Path(result.metadata["project_dir"]).rglob("analysis.txt"))
+    analysis = list(project.rglob("analysis.txt"))
     assert len(analysis) == 1
     assert analysis[0].read_text() == "42"
     assert any(
@@ -1725,7 +1809,7 @@ async def test_full_native_sdk_with_mock_provider(
     # every request/response at the provider boundary, including all tool IDs.
     await session._test_commit_store.aclose()
     async with SQLiteCommitStore(
-        str(sandbox_workspace / "commits.sqlite"), session.execution_id
+        str(tmp_path / "commits.sqlite"), session.execution_id
     ) as reopened:
         state = await reopened.materialize("main")
     messages = state.conversations[session.actor.run_id]
