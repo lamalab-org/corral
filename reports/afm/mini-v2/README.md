@@ -28,14 +28,12 @@ across the three tasks; Pass^5 and token counts are available in the run index.
 | claude-opus-4-7 | react | 15 | 1.0000 | 14 | 0.9999 |
 | claude-opus-4-5-20251101 | claude-code | 14 | 0.9999 | 10 | 0.8907 |
 | claude-opus-4-5-20251101 | react | 13 | 0.9966 | 11 | 0.9740 |
-
 | gpt-6.1-sol | codex | 15 | 1.0000 | 15 | 1.0000 |
 | gpt-6.1-sol | react | 15 | 1.0000 | 15 | 1.0000 |
 | gpt-5.6-sol | codex | 15 | 1.0000 | 14 | 0.9999 |
 | gpt-5.6-sol | react | 15 | 1.0000 | 14 | 0.9999 |
 | gpt-5-2025-08-07 | codex | 4 | 0.5540 | 0 | 0.0000 |
 | gpt-5-2025-08-07 | react | 3 | 0.3299 | 4 | 0.3332 |
-
 | kimi-k3.1-pro | openhands | 15 | 1.0000 | 15 | 1.0000 |
 | kimi-k3.1-pro | react | 15 | 1.0000 | 4 | 0.7556 |
 | kimi-k2.5 | openhands | 0 | 0.0000 | 2 | 0.4482 |
@@ -99,4 +97,5 @@ using the repository's report checker. Full AFM reports remain unchanged.
 ```bash
 python reports/build_index.py reports/afm/mini-v2
 python reports/check_reports.py
+python reports/find_infra_failures.py afm --mini-v2
 ```

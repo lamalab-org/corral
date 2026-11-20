@@ -222,7 +222,12 @@ are rerun candidates:
 python reports/find_infra_failures.py [<environment> ...] [--csv findings.csv]
 ```
 
-On a pull request, comment `/infra-failures [lfs] [<environment> ...]` or add
+Use `python reports/find_infra_failures.py afm --mini-v2` to scan mini-v2
+reports with the expected 18 agent/model pairs per level. Full reports remain
+the default. Git LFS index pointers are reported as unscanned, with unknown
+trial counts; download them to include the affected environment.
+
+On a pull request, comment `/infra-failures [lfs] [mini-v2] [<environment> ...]` or add
 the `infra-failures` label to have the `Infra failures` workflow
 (`.github/workflows/infra-failures.yaml`) post the result as a comment; `lfs`
 also scans the reports stored in Git LFS. It can also be run from the Actions

@@ -3,7 +3,7 @@ name: Infra failures
 # Runs reports/find_infra_failures.py on demand and posts the tables on the PR.
 #
 # Triggers:
-# - comment `/infra-failures [lfs] [<environment> ...]` on a pull request
+# - comment `/infra-failures [lfs] [mini-v2] [<environment> ...]` on a pull request
 #   (members and collaborators only)
 # - add the `infra-failures` label to a pull request
 # - run it from the Actions tab (workflow_dispatch)
@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       environments:
-        description: "Environments to scan, space-separated (default: all)"
+        description: "Environments to scan, space-separated (default: all); add mini-v2 for mini runs"
         required: false
         default: ""
       lfs:
@@ -62,6 +62,7 @@ jobs:
           PR_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           lfs=false
+          mini_v2=false
           envs=""
           case "$EVENT" in
             issue_comment)
@@ -85,6 +86,8 @@ jobs:
           for word in $words; do
             if [ "$word" = "lfs" ]; then
               lfs=true
+            elif [ "$word" = "mini-v2" ]; then
+              mini_v2=true
             elif printf '%s' "$word" | grep -Eq '^[a-z0-9_]+$'; then
               envs="$envs $word"
             else
@@ -92,6 +95,9 @@ jobs:
               exit 1
             fi
           done
+          if [ "$mini_v2" = true ]; then
+            envs="--mini-v2 $envs"
+          fi
           {
             echo "number=$number"
             echo "ref=$ref"
@@ -143,7 +149,7 @@ jobs:
             cat infra-failures.md
             echo
             echo "[Workflow run and CSV of every finding]($RUN_URL)" \
-              "· rerun with \`/infra-failures [lfs] [<environment> ...]\`"
+              "· rerun with \`/infra-failures [lfs] [mini-v2] [<environment> ...]\`"
           } > comment.md
           cat comment.md >> "$GITHUB_STEP_SUMMARY"
 
