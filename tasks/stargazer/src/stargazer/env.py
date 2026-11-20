@@ -6,9 +6,9 @@ import argparse
 import hashlib
 import json
 import os
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from loguru import logger
@@ -272,7 +272,8 @@ def load_tasks_from_json(
     data_root: str | Path = DATA_ROOT,
     development_mode: bool = False,
     scorer: str = "complete",
-    minimum_planet_score: float | None = None,
+    minimum_match_score: float | None = None,
+    minimum_planet_score: float | None | Literal["default"] = "default",
     analysis_assistance: bool = True,
 ) -> dict[str, TaskDefinition]:
     """Expand task-bank selectors into Corral task definitions."""
@@ -280,13 +281,20 @@ def load_tasks_from_json(
     protocol = protocol_version(analysis_assistance)
     if scorer not in {"legacy", "complete"}:
         raise ValueError("scorer must be legacy or complete")
-    criteria = (
-        LEGACY_CRITERIA
-        if scorer == "legacy"
-        else EvaluationCriteria(minimum_planet_score=minimum_planet_score)
-    )
-    if scorer == "legacy" and minimum_planet_score is not None:
-        raise ValueError("Per-planet thresholds require the complete scorer")
+    if scorer == "legacy":
+        if minimum_match_score is not None or minimum_planet_score not in (
+            None,
+            "default",
+        ):
+            raise ValueError("Threshold overrides require the complete scorer")
+        criteria = LEGACY_CRITERIA
+    else:
+        criteria = EvaluationCriteria()
+        if minimum_match_score is not None:
+            criteria = replace(criteria, minimum_match_score=minimum_match_score)
+        # Explicit None disables the floor; omission uses the calibrated default.
+        if minimum_planet_score != "default":
+            criteria = replace(criteria, minimum_planet_score=minimum_planet_score)
     root = Path(data_root)
     bank_files = sorted(root.glob("synthetic/*.json"))
     bank_hash = hashlib.sha256(
@@ -372,7 +380,8 @@ def create_environments(
     data_root: str | Path = DATA_ROOT,
     development_mode: bool = False,
     scorer: str = "complete",
-    minimum_planet_score: float | None = None,
+    minimum_match_score: float | None = None,
+    minimum_planet_score: float | None | Literal["default"] = "default",
     analysis_assistance: bool = True,
 ) -> dict[str, Environment]:
     """Create one of the two scored Stargazer benchmark levels."""
@@ -393,6 +402,7 @@ def create_environments(
         data_root=data_root,
         development_mode=development_mode,
         scorer=scorer,
+        minimum_match_score=minimum_match_score,
         minimum_planet_score=minimum_planet_score,
         analysis_assistance=analysis_assistance,
     )

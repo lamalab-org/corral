@@ -14,7 +14,6 @@ from stargazer.env import create_environments
 from stargazer.experiment import bank_identity, provenance
 from stargazer.identifiability import AUDIT_VERSION, BankRules
 from stargazer.protocol import ASSISTED_PROTOCOL
-from stargazer.score import EvaluationCriteria
 
 DATA_ROOT = Path("/corral-private/0")
 
@@ -27,11 +26,10 @@ def verify_launch(config: dict, data_root: Path = DATA_ROOT) -> dict:
     for key in ("bank_hash", "calibration_hash"):
         if manifest[key] != config[key]:
             raise ValueError(f"Launch {key} mismatch")
-    criteria = asdict(EvaluationCriteria())
+    frozen_criteria = BankRules(**manifest["rules"]).criteria()
+    criteria = asdict(frozen_criteria)
     if config["criteria"] != criteria or manifest.get("criteria") != criteria:
         raise ValueError("Launch scorer criteria mismatch")
-    if asdict(BankRules(**manifest["rules"]).criteria()) != criteria:
-        raise ValueError("Recovery audit and launch criteria differ")
     if config["protocol"] != ASSISTED_PROTOCOL:
         raise ValueError("Launch protocol mismatch")
     if config["level"] != 1 or config["task_count"] != 10:
@@ -43,6 +41,8 @@ def verify_launch(config: dict, data_root: Path = DATA_ROOT) -> dict:
         work_dir="/workspace/workspaces/level-1",
         development_mode=False,
         scorer="complete",
+        minimum_match_score=frozen_criteria.minimum_match_score,
+        minimum_planet_score=frozen_criteria.minimum_planet_score,
         analysis_assistance=True,
     )
     membership = manifest["membership"]["1"]
@@ -56,7 +56,7 @@ def verify_launch(config: dict, data_root: Path = DATA_ROOT) -> dict:
         task = environment.current_task
         if (
             task.scoring_fn.bank_hash != identity
-            or task.scoring_fn.criteria != EvaluationCriteria()
+            or task.scoring_fn.criteria != frozen_criteria
         ):
             raise ValueError("Execution bank or scorer mismatch")
         if not task.execution_version.startswith(config["protocol"] + ":"):
@@ -117,6 +117,8 @@ def main() -> int:
                     "development_mode": False,
                     "work_dir": "/workspace/workspaces/level-1",
                     "scorer": "complete",
+                    "minimum_match_score": summary["criteria"]["minimum_match_score"],
+                    "minimum_planet_score": summary["criteria"]["minimum_planet_score"],
                     "analysis_assistance": True,
                 }
             ),

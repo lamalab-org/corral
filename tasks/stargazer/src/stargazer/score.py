@@ -34,10 +34,10 @@ class EvaluationCriteria:
 
     minimum_delta_bic_per_point: float = 0.0
     maximum_rms_factor: float = 1.5
-    minimum_match_score: float = 0.8
+    minimum_match_score: float = 0.6
     require_count_match: bool = True
     require_complete_matching: bool = True
-    minimum_planet_score: float | None = None
+    minimum_planet_score: float | None = 0.35
     use_task_hints: bool = False
 
     def __post_init__(self):
@@ -49,7 +49,10 @@ class EvaluationCriteria:
 
 
 LEGACY_CRITERIA = EvaluationCriteria(
-    require_complete_matching=False, use_task_hints=True
+    minimum_match_score=0.8,
+    minimum_planet_score=None,
+    require_complete_matching=False,
+    use_task_hints=True,
 )
 
 

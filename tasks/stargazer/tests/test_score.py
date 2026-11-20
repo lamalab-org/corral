@@ -41,6 +41,54 @@ def test_missing_planet_fails_count_gate(simple_task):
     assert result.count_difference == -1
 
 
+@pytest.mark.parametrize(
+    ("pair_scores", "ok_mean", "ok_floor"),
+    [
+        ((0.6, 0.6), True, True),
+        ((0.59, 0.59), False, True),
+        ((0.85, 0.35 + 1e-9), True, True),
+        ((0.9, 0.35 - 1e-9), True, False),
+    ],
+)
+def test_calibrated_mean_and_floor_are_both_required(
+    simple_task, monkeypatch, pair_scores, ok_mean, ok_floor
+):
+    truth = (
+        simple_task.truth_planets[0],
+        replace(simple_task.truth_planets[0], P_days=43.0),
+    )
+    task = replace(
+        simple_task,
+        truth_planets=truth,
+        observations=replace(
+            simple_task.observations,
+            rvs_ms=tuple(
+                simulate_keplerian_rv(
+                    truth,
+                    np.asarray(simple_task.observations.times_days),
+                    simple_task.star_mass_sun,
+                )
+            ),
+        ),
+    )
+    payload = {"planets": [asdict(p) for p in truth], "noise_jitter_ms": 0.1}
+    monkeypatch.setattr(
+        "stargazer.score._match_planets",
+        lambda *_args: (
+            float(np.mean(pair_scores)),
+            tuple((i, i, -float(np.log(s))) for i, s in enumerate(pair_scores)),
+        ),
+    )
+    result = evaluate_submission(task, payload)
+    assert result.ok_delta_bic
+    assert result.ok_rms
+    assert result.ok_count
+    assert result.ok_complete_matching
+    assert result.ok_match == ok_mean
+    assert result.ok_individual_matches == ok_floor
+    assert result.success == (ok_mean and ok_floor)
+
+
 def test_matching_is_independent_of_submission_order(simple_task):
     second = PlanetParams(
         P_days=43.0,
