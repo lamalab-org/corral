@@ -1,6 +1,6 @@
 # Third-party notices
 
-This Corral environment adapts algorithms and all task records from the paper:
+This Corral environment uses algorithms and task data from the paper:
 
 - **Stargazer: A Scalable Model-Fitting Benchmark Environment for AI Agents
   under Astrophysical Constraints**
@@ -8,8 +8,10 @@ This Corral environment adapts algorithms and all task records from the paper:
 - Stargazer revision: `3f617667472061e253288c7b26f0e70f186f2dff`
 
 The upstream source code is distributed under the MIT License. The released
-benchmark task data is distributed under CC BY 4.0. Files under `data/synthetic`
-are adapted from the paper's benchmark and retain their Stargazer task IDs.
+benchmark task data is distributed under CC BY 4.0. The bundled records retain
+their Stargazer task IDs. Level 1 v4 also includes three new systems generated
+with Stargazer revision
+`7c59e572e15648aeb4965dd39d1f557036cb6b53`.
 Corral's adaptations include record-schema compatibility and RV-only
 coordinate normalization. `data/selection_manifest.json` records the paper
 attribution and official task membership.
