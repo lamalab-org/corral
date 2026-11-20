@@ -24,7 +24,7 @@ def test_committed_audit_is_deterministic_and_official_references_pass():
         2: 10,
     }
     assert set().union(*selected.values()) <= set(score_by_id)
-    assert report["summary"]["by_source"] == {"synthetic": {"passing": 28, "total": 28}}
+    assert report["summary"]["by_source"] == {"synthetic": {"passing": 32, "total": 32}}
     assert all(
         score_by_id[task_id] == 1.0
         for task_ids in selected.values()

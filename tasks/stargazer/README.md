@@ -7,22 +7,20 @@ scores, and planet counts are available only to the final scorer.
 
 ## Banks and historical results
 
-The bundled upstream bank has two fixed levels of ten tasks each.
+The bundled Stargazer bank has two fixed levels of ten tasks each.
 `create_environments` selects this bank by default. Level 1 contains two tasks
 at each upstream difficulty from 1 through 5: eight single-planet systems at
 difficulties 1–4 and two two-planet systems at difficulty 5. Level 2 retains its
 ten tasks at difficulties 8–10. The selection version is
-`stargazer-upstream-easy-l1-v3`; see
-[data/selection_manifest.json](data/selection_manifest.json) for exact membership.
+`stargazer-orbit-recovery-l1-v4`. Its four replacements passed observation-only
+fits at a minimum mean orbital match of 0.80. The [bank notes](data/README.md)
+give the task IDs, recovery results and data sources.
 
-The revised Level 1 replaces eight tasks from the original difficulties 5–7
-selection, lowering its mean planet count from 1.9 to 1.2. The new tasks come
-from the same pinned upstream revision. All reference answers pass the existing
-scorer, but that alone does not establish recovery from noisy data or a model's
-pass rate. The completed 1/10 result applies to the original selection, not this
-revision. Its records remain bundled; replay it with
-`selector_path="tasks/stargazer/data/selectors/level_1_original.json"` from the
-repository root. Record the selection and bank hash when comparing runs.
+The October agent results use the v3 bank. Replay its membership with
+`selector_path="tasks/stargazer/data/selectors/level_1_v3.json"` from the
+repository root. The earlier 1/10 result uses
+`tasks/stargazer/data/selectors/level_1_original.json`. Record the selector and
+bank hash when comparing runs.
 
 The separately versioned recovery bank uses the existing private RV generator,
 longer observation baselines, and white measurement noise. Its difficulty labels
