@@ -21,18 +21,10 @@ from corral.agents.denario._bridge import Bridge
 from corral.agents.denario._workflow import NativeWorkflow, completed_context
 
 ENVIRONMENT_INSTRUCTIONS = """
-Solve the supplied task and preserve its constraints. Obtain observations from
-the task environment; never fabricate data or infer hidden task state.
-The engineer and researcher can call the supplied environment tools directly.
-Use their published JSON schemas for exact tool names and arguments. Use your
-native code executor for Python calculations and file generation.
-Files submitted by path must be written under the task workspace.
-When an answer is ready, call propose_answer to record a candidate. You may
-replace it as the analysis develops. This does not end the workflow: complete
-the native plan, including the researcher's interpretation and final results.
-The final researcher must check and update the candidate against those results.
-After Denario finishes and saves its results, the adapter submits the latest
-candidate. A prose response alone does not propose an answer.
+Use the supplied environment tools to gather observations.
+In the final plan step, the researcher must call propose_answer with the
+best-supported answer in the requested format, even if an earlier step
+already proposed it.
 """
 
 
