@@ -4,7 +4,7 @@
 OpenAI and Kimi models, each with its native agent (Claude Code, Codex or
 OpenHands) and ReAct. These replace the corral-mini v1 reports (#469). Layout,
 names and index columns follow [`../../README.md`](../../README.md). The
-October full-benchmark runs are in [`../`](../).
+October full-benchmark runs are in [`../`](..).
 
 [Run index](runs.csv) · [Trial index with Langfuse links](trials.csv)
 
@@ -176,5 +176,5 @@ traces. All 360 traces were found (`build_index.py --verify`).
   time. No Kimi trial was rerun.
 - **Machine load.** Runs shared the machine and its GPUs with other pools, so
   wall-clock durations are not comparable with other runs.
-- **Comparison with the October runs.** The October runs in [`../`](../) cover
+- **Comparison with the October runs.** The October runs in [`../`](..) cover
   all tasks per level; compare per task only.

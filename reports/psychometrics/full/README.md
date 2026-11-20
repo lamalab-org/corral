@@ -1,8 +1,8 @@
 # Psychometrics reports
 
 These full-task Psychometrics reports replace the October full-task results with
-runs against the 20-task revision from PR #481. They are archived here because
-the root Psychometrics directory now contains corral-mini v1 reports.
+runs against the 20-task revision from PR #481. Full-benchmark results live in
+`full/`; the versioned mini subsets are separate sibling collections.
 
 It contains 14 runs (7 agent/model pairs × 2 levels), with all 10 tasks × 5
 trials at each level (700 trials total).

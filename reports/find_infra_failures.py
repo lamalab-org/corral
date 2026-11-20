@@ -3,6 +3,7 @@
 Run from the repository root:
     python reports/find_infra_failures.py                    # every environment
     python reports/find_infra_failures.py afm corral_md      # some environments
+    python reports/find_infra_failures.py afm --mini-v2      # mini-v2 only
     python reports/find_infra_failures.py --csv failures.csv # also write findings
     python reports/find_infra_failures.py --markdown out.md  # tables for a PR comment
 
@@ -54,6 +55,19 @@ EXPECTED_RUNS = (
     ("react", "claude-opus-5-5"),
     ("react", "gpt-5.6-sol"),
     ("react", "kimi-k3"),
+)
+MINI_V2_RUNS = tuple(
+    (agent, model)
+    for native, models in (
+        (
+            "claude-code",
+            ("claude-opus-5-5", "claude-opus-4-7", "claude-opus-4-5-20251101"),
+        ),
+        ("codex", ("gpt-6.1-sol", "gpt-5.6-sol", "gpt-5-2025-08-07")),
+        ("openhands", ("kimi-k3.1-pro", "kimi-k2.5", "kimi-k2-0905")),
+    )
+    for model in models
+    for agent in (native, "react")
 )
 # GitHub rejects comments over 65,536 characters.
 MARKDOWN_ROWS = 150
@@ -168,8 +182,9 @@ FIELDS = [
 ]
 
 
-def environments() -> list[Path]:
-    return sorted(p.parent for p in REPORTS_DIR.glob("*/trials.csv"))
+def environments(mini_v2: bool = False) -> list[Path]:
+    pattern = "*/mini-v2/trials.csv" if mini_v2 else "*/full/trials.csv"
+    return sorted(p.parent for p in REPORTS_DIR.glob(pattern))
 
 
 def is_lfs_pointer(path: Path) -> bool:
@@ -281,7 +296,9 @@ def missing_runs(env_dir: Path) -> list[str]:
     return [
         f"L{level} {agent} / {model}"
         for level in levels
-        for agent, model in EXPECTED_RUNS
+        for agent, model in (
+            MINI_V2_RUNS if env_dir.name == "mini-v2" else EXPECTED_RUNS
+        )
         if (level, agent, model) not in runs
     ]
 
@@ -348,7 +365,9 @@ def finding_table(rows: list[dict]) -> list[str]:
     return lines
 
 
-def markdown(results: list[tuple[str, int, list[dict], list[str], list[str]]]) -> str:
+def markdown(
+    results: list[tuple[str, int | str, list[dict], list[str], list[str]]],
+) -> str:
     """Render the findings as Markdown tables, e.g. for a PR comment."""
     lines = [
         "| Environment | Trials | Might need rerun | To review | Iteration limit "
@@ -357,6 +376,10 @@ def markdown(results: list[tuple[str, int, list[dict], list[str], list[str]]]) -
     ]
     reruns, reviews, skipped_all, missing_all = [], [], [], []
     for env, trials, rows, skipped, missing in results:
+        if trials == "unknown":
+            lines.append(f"| {env} | unknown | — | — | — | — | {len(skipped)} |")
+            skipped_all.extend(f"{env}/{s}" for s in skipped)
+            continue
         rerun = [r for r in rows if is_rerun(r)]
         review = [r for r in rows if is_review(r)]
         limits = {
@@ -385,7 +408,7 @@ def markdown(results: list[tuple[str, int, list[dict], list[str], list[str]]]) -
             "</details>",
         ]
     else:
-        lines += ["", "Might need rerun: none."]
+        lines += ["", "Might need rerun: none in the scanned reports."]
     if reviews:
         lines += [
             "",
@@ -419,7 +442,8 @@ def markdown(results: list[tuple[str, int, list[dict], list[str], list[str]]]) -
         "failed trials that ran out of iterations, turns or budget, or never "
         "submitted. These and context-window overflows count as failures, not "
         "reruns. Missing runs: agent, model and level combinations of the "
-        "standard seven agent and model pairs with no run in the environment.",
+        "standard seven agent and model pairs (18 for mini-v2) with no run "
+        "in the environment.",
     ]
     return "\n".join(lines) + "\n"
 
@@ -431,13 +455,16 @@ def main() -> int:
     )
     parser.add_argument("--csv", type=Path, help="write every finding to this CSV")
     parser.add_argument(
+        "--mini-v2", action="store_true", help="scan mini-v2 instead of full reports"
+    )
+    parser.add_argument(
         "--markdown", type=Path, help="write summary tables to this Markdown file"
     )
     args = parser.parse_args()
 
-    env_dirs = environments()
+    env_dirs = environments(args.mini_v2)
     if args.environments:
-        known = {p.name: p for p in env_dirs}
+        known = {p.parent.name: p for p in env_dirs}
         unknown = sorted(set(args.environments) - set(known))
         if unknown:
             sys.stderr.write(f"unknown environments: {', '.join(unknown)}\n")
@@ -449,15 +476,30 @@ def main() -> int:
     )
     all_rows, results = [], []
     for env_dir in env_dirs:
+        name = env_dir.relative_to(REPORTS_DIR).as_posix()
+        index_pointers = [
+            filename
+            for filename in ("trials.csv", "runs.csv")
+            if is_lfs_pointer(env_dir / filename)
+        ]
+        if index_pointers:
+            sys.stdout.write(
+                f"\n{name}: not scanned (Git LFS index: "
+                f"{', '.join(index_pointers)}); run `git lfs pull` or use "
+                "`/infra-failures lfs` to include these trials.\n"
+            )
+            # Unknown coverage must not be presented as zero infrastructure failures.
+            results.append((name, "unknown", [], index_pointers, []))
+            continue
         rows, skipped = scan(env_dir)
         with (env_dir / "trials.csv").open(newline="", encoding="utf-8") as f:
             trials = sum(1 for _ in csv.DictReader(f))
         missing = missing_runs(env_dir)
-        summarize(env_dir.name, rows, trials, skipped)
+        summarize(name, rows, trials, skipped)
         for run in missing:
             sys.stdout.write(f"  missing run: {run}\n")
         all_rows.extend(rows)
-        results.append((env_dir.name, trials, rows, skipped, missing))
+        results.append((name, trials, rows, skipped, missing))
 
     if args.markdown:
         args.markdown.write_text(markdown(results), encoding="utf-8")

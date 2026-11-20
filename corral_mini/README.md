@@ -72,7 +72,7 @@ The October retrosynthesis reports contained trials that ran against reaction
 database v1, whose only template for `make_1` had the wrong product, and against
 the old buyables and budgets. `make_1`, `make_5`, `make_6`, `make_7` and
 `make_8` were rerun at both levels (351 trials; aggregate passes 315 -> 397/700;
-see [`reports/retrosynthesis/README.md`](../reports/retrosynthesis/README.md)).
+see [`reports/retrosynthesis/README.md`](../reports/retrosynthesis/full/README.md)).
 
 | Level | Before | After |
 |---|---|---|
@@ -117,7 +117,7 @@ Reproduce the manifest with:
 python scripts/build_corral_mini.py --version 2 --output PATH \
   --revision 6d8dc71d6bcc3a3c6c76a28609f4f4a510ea2dd8 \
   --local-reports retrosynthesis --local-reports corral_md \
-  --local-reports psychometrics=reports/psychometrics/archive/october-full \
+  --local-reports psychometrics=reports/psychometrics/full \
   --exclude-task inference_opt/math_number_theory_a \
   --exclude-task inference_opt/math_counting_probability_a \
   --exclude-task inference_opt/math_geometry_a \
@@ -126,7 +126,7 @@ python scripts/build_corral_mini.py --version 2 --output PATH \
 
 ## Psychometrics correction (2026-11-16)
 
-Psychometrics uses the [revised full reports](../reports/psychometrics/archive/october-full/README.md):
+Psychometrics uses the [revised full reports](../reports/psychometrics/full/README.md):
 700 trials across seven agent/model pairs, including corrected AI Scientist runs.
 The manifest records the selected tasks and source hashes. The same v2 method
 selects three unsaturated tasks per level, with Spearman 1.000 (L1) and 0.991

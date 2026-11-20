@@ -74,7 +74,7 @@ def main() -> None:
         action="append",
         default=[],
         metavar="ENVIRONMENT[=REPORTS_DIR]",
-        help="take scores from reports/<environment>/trials.csv or the supplied "
+        help="take scores from reports/<environment>/full/trials.csv or the supplied "
         "repository-relative directory instead of the dataset revision (repeatable)",
     )
     parser.add_argument(
@@ -101,8 +101,8 @@ def main() -> None:
     )
     afm_source = None
     if args.score_metric == "pass_hat_5":
-        trials_csv = REPOSITORY / "reports/afm/trials.csv"
-        runs_csv = REPOSITORY / "reports/afm/runs.csv"
+        trials_csv = REPOSITORY / "reports/afm/full/trials.csv"
+        runs_csv = REPOSITORY / "reports/afm/full/runs.csv"
         strata.update(load_afm_strata(trials_csv, args.prices, agents))
         afm_source = {
             "runs_csv": str(runs_csv.relative_to(REPOSITORY)),
@@ -116,7 +116,7 @@ def main() -> None:
         trials_csv = (
             REPOSITORY / reports_dir
             if separator
-            else REPOSITORY / "reports" / environment
+            else REPOSITORY / "reports" / environment / "full"
         ) / "trials.csv"
         runs_csv = trials_csv.with_name("runs.csv")
         replaced = {key for key in strata if key[0] == environment}
