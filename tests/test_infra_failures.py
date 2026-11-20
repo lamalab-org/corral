@@ -24,7 +24,7 @@ def write_csv(path, rows):
 
 def test_lfs_indexes_do_not_abort_other_environments(tmp_path, monkeypatch, capsys):
     for env, pointer in (("corral_md", "trials.csv"), ("inference_opt", "runs.csv")):
-        folder = tmp_path / env
+        folder = tmp_path / env / "full"
         write_csv(folder / "trials.csv", [{"execution_id": "unused"}])
         write_csv(
             folder / "runs.csv",
@@ -33,7 +33,7 @@ def test_lfs_indexes_do_not_abort_other_environments(tmp_path, monkeypatch, caps
         (folder / pointer).write_bytes(
             infra.LFS_POINTER + b"\noid sha256:abc\nsize 123\n"
         )
-    readable = tmp_path / "wetlab"
+    readable = tmp_path / "wetlab/full"
     write_csv(readable / "trials.csv", [{"execution_id": "readable"}])
     write_csv(
         readable / "runs.csv",
@@ -46,11 +46,11 @@ def test_lfs_indexes_do_not_abort_other_environments(tmp_path, monkeypatch, caps
     )
 
     assert infra.main() == 0
-    assert "wetlab: 1 trials" in capsys.readouterr().out
+    assert "wetlab/full: 1 trials" in capsys.readouterr().out
     report = markdown.read_text()
-    assert "| corral_md | unknown | — |" in report
-    assert "corral_md/trials.csv" in report
-    assert "inference_opt/runs.csv" in report
+    assert "| corral_md/full | unknown | — |" in report
+    assert "corral_md/full/trials.csv" in report
+    assert "inference_opt/full/runs.csv" in report
 
 
 def test_mini_v2_scan_uses_its_own_index_and_expected_pairs(
@@ -98,7 +98,7 @@ def test_mini_v2_scan_uses_its_own_index_and_expected_pairs(
             source,
         )
     # A full-run index must not be mixed into mini-v2 coverage.
-    write_csv(tmp_path / "afm/trials.csv", [{"execution_id": "full:task:0"}])
+    write_csv(tmp_path / "afm/full/trials.csv", [{"execution_id": "full:task:0"}])
     monkeypatch.setattr(infra, "REPORTS_DIR", tmp_path)
     monkeypatch.setattr("sys.argv", ["find_infra_failures.py", "afm", "--mini-v2"])
 

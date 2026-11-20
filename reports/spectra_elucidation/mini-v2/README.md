@@ -3,7 +3,7 @@
 36 runs (18 agent/model pairs × levels 1 and 2), 3 tasks per level × k = 5,
 540 trials. These replace the corral-mini v1 batch-1 reports. Layout, names and
 index columns follow [`../../README.md`](../../README.md). The October
-full-benchmark runs are in [`../`](../).
+full-benchmark runs are in [`../`](..).
 
 [Run index](runs.csv) · [Trial index with Langfuse links](trials.csv)
 

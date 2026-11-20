@@ -1,7 +1,7 @@
 """
 Push the standardized October benchmark reports to HuggingFace Hub.
 
-Reads the final reports under `reports/<environment>/` (see `reports/README.md`)
+Reads the final reports under `reports/<environment>/full/` (see `reports/README.md`)
 and pushes them to `jablonkagroup/corral-reports-october-runs-v1`:
 
 - one config per environment and level, e.g. `inference_opt-level_1`, with one
@@ -54,10 +54,12 @@ from loguru import logger
 
 WORKSPACE = Path(__file__).resolve().parent.parent
 REPORTS_DIR = WORKSPACE / "reports"
-# Every folder under reports/ with a runs.csv is an environment.
-ENVIRONMENTS = tuple(sorted(p.parent.name for p in REPORTS_DIR.glob("*/runs.csv")))
+# Every folder under reports/ with full/runs.csv is an environment.
+ENVIRONMENTS = tuple(
+    sorted(p.parent.parent.name for p in REPORTS_DIR.glob("*/full/runs.csv"))
+)
 # corral-mini runs of version vN live in reports/<env>/mini-vN/ next to the
-# full-benchmark runs in reports/<env>/; set by use_repo() for a mini repo.
+# full-benchmark runs in reports/<env>/full/; set by use_repo() for a mini repo.
 MINI: dict[str, str | None] = {"dir": None}
 
 load_dotenv(dotenv_path=WORKSPACE / ".env")
@@ -192,11 +194,9 @@ MINI_VERSION = re.compile(r"mini-(v\d+)")
 
 
 def report_dir(env: str) -> Path:
-    """The folder with env's runs: reports/<env>/mini-vN/ for a mini repo, if present."""
+    """Select full/ or the explicit mini-vN/ collection for the target dataset."""
     mini_dir = MINI["dir"]
-    if mini_dir and (REPORTS_DIR / env / mini_dir / "runs.csv").exists():
-        return REPORTS_DIR / env / mini_dir
-    return REPORTS_DIR / env
+    return REPORTS_DIR / env / (mini_dir or "full")
 
 
 def use_repo(repo: str) -> None:
@@ -253,7 +253,8 @@ def mini_environments(version: str | None = None) -> tuple[str, ...]:
     return tuple(
         env
         for env in ENVIRONMENTS
-        if any(
+        if (report_dir(env) / "runs.csv").exists()
+        and any(
             MINI_RUN_PREFIX in r["run_id"]
             and (version is None or mini_version(r["run_id"]) == version)
             for r in _read_csv(report_dir(env) / "runs.csv")

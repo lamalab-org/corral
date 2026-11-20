@@ -3,7 +3,7 @@
 36 runs (18 agent/model pairs × levels 2 and 3), 3 tasks per level × k = 5,
 540 trials. Layout, names and index columns follow
 [`../../README.md`](../../README.md). The October full-benchmark runs are in
-[`../`](../).
+[`../`](..).
 
 ## Tasks
 

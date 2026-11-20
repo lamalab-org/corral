@@ -1,3 +1,6 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:fc7e820c29901eb35e6eab1707a0cbd817514b22ac3ccb19e0bb400fc6991f3a
-size 14713
+# Corral Md reports
+
+[Full benchmark](full/) · [Mini v2](mini-v2/)
+
+Each collection has its own run and trial indexes. Full-benchmark and mini
+subset results are kept separate; mini version numbers identify subset releases.

@@ -183,7 +183,7 @@ FIELDS = [
 
 
 def environments(mini_v2: bool = False) -> list[Path]:
-    pattern = "*/mini-v2/trials.csv" if mini_v2 else "*/trials.csv"
+    pattern = "*/mini-v2/trials.csv" if mini_v2 else "*/full/trials.csv"
     return sorted(p.parent for p in REPORTS_DIR.glob(pattern))
 
 
@@ -464,7 +464,7 @@ def main() -> int:
 
     env_dirs = environments(args.mini_v2)
     if args.environments:
-        known = {(p.parent.name if args.mini_v2 else p.name): p for p in env_dirs}
+        known = {p.parent.name: p for p in env_dirs}
         unknown = sorted(set(args.environments) - set(known))
         if unknown:
             sys.stderr.write(f"unknown environments: {', '.join(unknown)}\n")

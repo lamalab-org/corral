@@ -4,7 +4,7 @@ All 36 runs (18 agent/model pairs × levels 1 and 2), k = 5, 540 trials:
 12 Claude, 12 OpenAI and 12 Kimi runs. These replace the corral-mini v1
 batch-1 reports.
 Layout, names and index columns follow [`../../README.md`](../../README.md). The
-October full-benchmark runs are in [`../`](../).
+October full-benchmark runs are in [`../`](..).
 
 [Run index](runs.csv) · [Trial index with Langfuse links](trials.csv)
 
@@ -179,5 +179,5 @@ trials that finished before about 2026-11-11 21:10 have no `benchmark_score`
   the other 9 are in these reports, and their durations include the pause.
 - **Machine load.** Runs shared the machine with other environments' pools,
   so wall-clock durations are not comparable with other runs.
-- **Comparison with the October runs.** The October runs in [`../`](../)
+- **Comparison with the October runs.** The October runs in [`../`](..)
   cover all tasks per level; compare per task only.

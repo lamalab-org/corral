@@ -3,7 +3,7 @@
 36 runs (18 agent/model pairs × levels 2 and 3), 3 tasks per level × k = 5,
 540 trials. Layout, names and index columns follow
 [`../../README.md`](../../README.md). The October full-benchmark runs are in
-[`../`](../).
+[`../`](..).
 
 [Run index](runs.csv) · [Trial index with Langfuse links](trials.csv)
 
@@ -64,7 +64,7 @@ context limit, and the provider rejected 1 kimi-k2-0905 request as invalid. The 
   `make_7_lvl3` and `make_8_lvl3` come from the 2026-11-12 rerun of the October
   full benchmark (same runner, images, database, settings and prompts; only the
   Langfuse session differs). They are part of the corrected October reports in
-  [`../`](../).
+  [`../`](..).
 - All other trials (370) were run for these picks on 2026-11-13.
 
 ## Settings

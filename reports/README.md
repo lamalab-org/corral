@@ -3,26 +3,29 @@
 Final benchmark reports, one folder per environment. Every environment uses the
 same layout, names and index files, so runs can be compared across them.
 
-| Environment | Folder | Branch | Runs | Trials |
-|---|---|---|---:|---:|
-| AFM (mini v2 in [`afm/mini-v2/`](afm/mini-v2/)) | [`afm/`](afm/) | `afm-reports-november-2026` | 14 | 700 |
-| Inference optimization (corral-mini v2 in [`inference_opt/mini-v2/`](inference_opt/mini-v2/)) | [`inference_opt/`](inference_opt/) | `ml_env_baseline` | 14 | 700 |
-| Psychometrics (mini v1; [mini v2](psychometrics/mini-v2/); full runs in `archive/`) | [`psychometrics/`](psychometrics/) | `mini-1-psychom` | 28 | 420 |
-| Resistor network (v4, Docker sandbox; corral-mini v2 in [`resistor_network/mini-v2/`](resistor_network/mini-v2/)) | [`resistor_network/`](resistor_network/) | `resistor-network-native-docker-reports` | 14 | 700 |
-| Corral MD (corral-mini v2 in [`corral_md/mini-v2/`](corral_md/mini-v2/)) | [`corral_md/`](corral_md/) | — | 14 | 700 |
-| Retrosynthesis (corral-mini v2 in [`retrosynthesis/mini-v2/`](retrosynthesis/mini-v2/)) | [`retrosynthesis/`](retrosynthesis/) | — | 14 | 700 |
-| Spectra elucidation (corral-mini v2 in [`spectra_elucidation/mini-v2/`](spectra_elucidation/mini-v2/)) | [`spectra_elucidation/`](spectra_elucidation/) | — | 14 | 1,400 |
-| Stargazer | [`stargazer/`](stargazer/) | — | 14 | 700 |
-| Wetlab (corral-mini v2 in [`wetlab/mini-v2/`](wetlab/mini-v2/)) | [`wetlab/`](wetlab/) | — | 14 | 700 |
+| Environment | Full runs | Runs | Trials |
+|---|---|---:|---:|
+| AFM | [afm/full/](afm/full/) | 14 | 700 |
+| Inference optimization | [inference_opt/full/](inference_opt/full/) | 14 | 700 |
+| Psychometrics | [psychometrics/full/](psychometrics/full/) | 14 | 700 |
+| Resistor network | [resistor_network/full/](resistor_network/full/) | 14 | 700 |
+| Corral MD | [corral_md/full/](corral_md/full/) | 14 | 700 |
+| Retrosynthesis | [retrosynthesis/full/](retrosynthesis/full/) | 14 | 700 |
+| Spectra elucidation | [spectra_elucidation/full/](spectra_elucidation/full/) | 14 | 1,400 |
+| Stargazer | [stargazer/full/](stargazer/full/) | 14 | 700 |
+| Wetlab | [wetlab/full/](wetlab/full/) | 14 | 700 |
 
-All nine environments together have **140 runs and 6,720 trials**. Each
-environment has its own indexes, with report paths relative to its folder. The
-`runs` and `trials` configs of the Hugging Face summary dataset combine them.
+The full benchmark has **126 runs and 7,000 trials** across nine environments.
+Each environment has a `full/` collection with its own indexes; report paths
+in each index are relative to that collection.
 
-Psychometrics holds the corral-mini v1 runs. corral-mini v2 runs sit next to
-the full-benchmark runs of their environment, in `<environment>/mini-v2/` with
-their own indexes (wetlab, retrosynthesis, spectra elucidation, resistor network,
-corral MD, psychometrics, inference optimization, AFM). The totals above exclude these mini v2 folders.
+Mini versions identify subset releases, separate from the full benchmark:
+`<environment>/mini-v1/` holds Psychometrics mini-v1 (28 runs / 420 trials).
+`<environment>/mini-v2/` holds 36 runs / 540 trials for each of AFM, Corral MD,
+inference optimization, Psychometrics, resistor network, retrosynthesis,
+spectra elucidation and wetlab. Stargazer mini-v2 reports are not yet present.
+Run dates and source commits belong in metadata and provenance, not collection names.
+
 Each mini version has its own Hugging Face datasets, not the October ones:
 `jablonkagroup/corral-reports-mini-v1` (psychometrics) and
 `jablonkagroup/corral-reports-mini-v2` (wetlab, retrosynthesis, spectra elucidation, resistor network,
@@ -47,6 +50,11 @@ The `report_audit` branch collects all environments. Add or update reports
 there, following [Adding or updating reports](#adding-or-updating-reports).
 
 ## Browse agent conversations
+
+The [published results dashboard](https://lamalab-org.github.io/corral/artifact/)
+shows full-benchmark runs only. Its builder reads
+`<environment>/full/trials.csv` for each environment.
+Mini-v1 and mini-v2 results remain separate from this dashboard.
 
 Start the local trace browser from the repository root (Python 3.9 or newer;
 no extra dependencies):
@@ -80,9 +88,10 @@ keeps separate agent sessions separate and labels missing results as unavailable
 Copied links preserve the selected stage and node. JSON downloads retain the
 original trial without adding or reordering data.
 
-The browser reads `*/trials.csv` indexes at startup and decompresses only the
+The browser reads `*/full/trials.csv` indexes by default at startup and decompresses only the
 selected trial's report on demand. Large reports can take a moment to scan;
-recently opened trials are cached in memory. Both `.json.gz` and `.json.xz`
+recently opened trials are cached in memory. Use `--collection mini-v2` (or
+`--collection mini-v1`) to browse a subset collection separately. Both `.json.gz` and `.json.xz`
 reports are supported. Git LFS pointers and missing reports appear in the list;
 download LFS reports with `git lfs pull` to inspect their messages. Restart the
 browser after rebuilding CSV indexes.
@@ -103,19 +112,26 @@ cannot be reconstructed.
 
 ```
 reports/<environment>/
-  README.md                         results and caveats for this environment
-  runs.csv                          one row per run
-  trials.csv                        one row per trial, with Langfuse links
-  level_<L>/<agent>__<model>/
-    report.json.gz                  final `corral bench` report (or report.json.xz)
-    run-metadata.json               run metadata, where available
-    langfuse-overrides.json         recorded exceptions to deterministic trace IDs, if any
-    langfuse.json                   verified session and trial IDs, where available
-    provenance.json                 source hashes and recovery details, where available
+  README.md                         links to available collections
+  full/                             full benchmark (formerly October runs)
+    README.md                       results and caveats
+    runs.csv                        one row per run
+    trials.csv                      one row per trial, with Langfuse links
+    level_<L>/<agent>__<model>/
+      report.json.gz                final report (or report.json.xz)
+      run-metadata.json             run metadata, where available
+      langfuse-overrides.json        recorded trace ID exceptions, if any
+      langfuse.json                 verified session/trial IDs, where available
+      provenance.json               source hashes and recovery details
+  mini-v1/                          version 1 subset, where available
+  mini-v2/                          version 2 subset, where available
 ```
 
+Every collection uses the same index and level/run layout. Moving a collection
+does not change report bytes, run IDs, execution IDs, scores, or trace IDs.
+
 AFM’s Level 1 AI Scientist report combines two runs covering tasks 1–5 and 6–10;
-see its environment README for provenance.
+see its full-collection README for provenance.
 
 Each full report holds exactly the trials that count: 10 tasks × 5 trials, or
 20 tasks × 5 trials for spectra elucidation. Where a
@@ -181,24 +197,24 @@ same execution ID, so the retry wrote into the same trace as the attempt it
 replaced. Such a trace can hold observations from both. This affects about 139
 inference optimization trials and some resistor trials (including native agent
 Docker retries and react Kimi K3 and react GPT L2 runs). The psychometrics reruns
-and separate-ID resistor technical reruns (`resistor_network/technical-reruns.csv`)
+and separate-ID resistor technical reruns (`resistor_network/full/technical-reruns.csv`)
 used new run IDs and are not affected. The report is authoritative for what the
 final attempt did. Future reruns should use a new run ID so each attempt gets
 its own trace.
 
 ## Adding or updating reports
 
-1. Put each final report at `reports/<environment>/level_<L>/<agent>__<model>/report.json.gz`
+1. Put each final report at `reports/<environment>/full/level_<L>/<agent>__<model>/report.json.gz`
    (`report.json.xz` if gzip is much larger). Remove superseded reports; only
    final ones belong here. Track reports over ~50 MB in Git LFS.
 2. Rebuild the index and check that every trace exists in Langfuse:
 
    ```bash
-   python reports/build_index.py reports/<environment>
-   python reports/build_index.py reports/<environment> --verify  # needs LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY
+   python reports/build_index.py reports/<environment>/full
+   python reports/build_index.py reports/<environment>/full --verify  # needs LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY
    ```
 
-3. Optionally, write or update `reports/<environment>/README.md` with results
+3. Optionally, write or update `reports/<environment>/full/README.md` with results
    and caveats.
 4. Push to Hugging Face (needs `HF_TOKEN`):
 
@@ -237,7 +253,7 @@ To tabulate pass@5 and pass^5 for every environment, agent, model and level
 from the `runs.csv` files:
 
 ```bash
-git lfs pull --include='reports/*/runs.csv' --exclude=''
+git lfs pull --include='reports/*/full/runs.csv' --exclude=''
 python reports/scores.py [<environment> ...] [--markdown scores.md]
 ```
 

@@ -1,7 +1,7 @@
 """
 Push a plotting-friendly summary of the October benchmark reports to HuggingFace Hub.
 
-Reads the final reports under `reports/<environment>/` (see `reports/README.md`)
+Reads the final reports under `reports/<environment>/full/` (see `reports/README.md`)
 and pushes three flat tables, without trial transcripts, to
 `jablonkagroup/corral-reports-october-runs-summary-v1`:
 

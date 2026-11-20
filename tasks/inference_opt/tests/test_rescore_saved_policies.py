@@ -13,7 +13,7 @@ def test_summary_keeps_missing_trials_and_rejects_infrastructure_errors(tmp_path
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     module.REPO = tmp_path
-    reports = tmp_path / "reports/inference_opt"
+    reports = tmp_path / "reports/inference_opt/full"
     reports.mkdir(parents=True)
     with (reports / "trials.csv").open("w", newline="") as stream:
         writer = csv.DictWriter(

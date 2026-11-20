@@ -1,7 +1,7 @@
 """Download every environment's trials.csv from the corral GitHub repository.
 
 The benchmark reports live on ``main``. This fetches
-``reports/<environment>/trials.csv`` for each environment there into a local
+``reports/<environment>/full/trials.csv`` for each environment there into a local
 folder with the same layout, so ``build_dashboard.py --reports <folder>`` can
 build the dashboard on a branch that does not carry the reports.
 
@@ -53,7 +53,7 @@ def main() -> None:
         "--dest",
         type=Path,
         required=True,
-        help="folder to write <environment>/trials.csv into",
+        help="folder to write <environment>/full/trials.csv into",
     )
     parser.add_argument(
         "--ref",
@@ -67,14 +67,14 @@ def main() -> None:
 
     fetched = 0
     for env in environments(args.repo, args.ref):
-        url = f"https://raw.githubusercontent.com/{args.repo}/{args.ref}/reports/{env}/trials.csv"
+        url = f"https://raw.githubusercontent.com/{args.repo}/{args.ref}/reports/{env}/full/trials.csv"
         try:
             data = get(url)
         except urllib.error.HTTPError as error:
             if error.code == 404:
                 continue  # a reports/ folder that is not an environment, such as figures/
             raise
-        target = args.dest / env / "trials.csv"
+        target = args.dest / env / "full/trials.csv"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
         fetched += 1
