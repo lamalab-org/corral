@@ -12,7 +12,10 @@ from corral.agents.ai_scientist.search.nodes import (
 )
 from corral.agents.ai_scientist.state import TaskFormulation
 from corral.agents.ai_scientist.tools import CorralExecutor
-from corral.agents.ai_scientist.workers.base import LiteLLMStructuredModel
+from corral.agents.ai_scientist.workers.base import (
+    LiteLLMStructuredModel,
+    ModelRefusal,
+)
 from corral.agents.ai_scientist.workers.experimenter import Experimenter
 from corral.core.action import Action
 
@@ -351,3 +354,103 @@ def test_experiment_worker_corrects_act_and_finish_without_repeating_tools():
     assert execute_action.calls == [{"value": 3}]
     assert len(result.trajectory) == 2
     assert "measured:3" in requests[-1]["messages"][1]["content"]
+
+
+class RationaleTrackingModel(AdaptiveModel):
+    """Gives each decision a unique rationale so prompts can be searched."""
+
+    def generate(self, prompt, response_model, *, model=None, purpose=None):
+        decision = super().generate(prompt, response_model, model=model)
+        return decision.model_copy(
+            update={"rationale": f"private-rationale-{self.call_count}"}
+        )
+
+
+def _research_node(node_id="node_0001"):
+    return ExperimentNode(
+        id=node_id,
+        stage=ResearchStage.RESEARCH,
+        node_type=NodeType.RESEARCH,
+        hypothesis="The second measurement should depend on the first",
+        rationale="An adaptive comparison is informative",
+        experiment_goal="make two conditional measurements",
+        success_criteria=["both measurements complete"],
+    )
+
+
+def _run(model, node, *, previous_node=None):
+    return Experimenter(
+        model,
+        max_actions_per_node=2,
+        max_journal_chars=2_000,
+        max_tool_schema_chars=2_000,
+    ).execute(
+        node,
+        CorralExecutor(
+            execute_action=AdaptiveActionExecutor(), tools=TOOLS, max_tool_calls=2
+        ),
+        task_prompt="Measure twice.",
+        formulation=TaskFormulation(
+            objective="measure adaptively", required_answer="two measurements"
+        ),
+        tools=TOOLS,
+        journal_context="{}",
+        previous_node=previous_node,
+    )
+
+
+def test_step_prompts_replay_earlier_decisions_without_their_rationale():
+    # A running log of the model's own reasoning triggers provider
+    # `reasoning_extraction` refusals; the decisions and observations stay.
+    model = RationaleTrackingModel()
+    result = _run(model, _research_node())
+
+    assert result.status == NodeStatus.SUCCESSFUL
+    later_prompts = model.prompts[1:]
+    assert all("measured:1" in prompt for prompt in later_prompts)
+    assert all('"purpose": "measure"' in prompt for prompt in later_prompts)
+    assert not any("private-rationale" in prompt for prompt in model.prompts)
+    # The saved trajectory keeps every rationale.
+    assert [step.decision.rationale for step in result.trajectory] == [
+        "private-rationale-1",
+        "private-rationale-2",
+        "private-rationale-3",
+    ]
+
+
+def test_prior_checkpoint_replays_its_trajectory_without_rationale():
+    previous = _run(RationaleTrackingModel(), _research_node("node_0001"))
+    model = AdaptiveModel()
+
+    _run(model, _research_node("node_0002"), previous_node=previous)
+
+    assert "measured:1" in model.prompts[0]
+    assert "private-rationale" not in model.prompts[0]
+
+
+class RefusingModel:
+    def __init__(self):
+        self.calls = 0
+
+    def generate(self, prompt, response_model, *, model=None, purpose=None):
+        self.calls += 1
+        if self.calls == 1:
+            return ExperimentDecision(
+                decision="act",
+                rationale="measure first",
+                purpose="measure",
+                tool_name="measure",
+                arguments={"value": 1},
+                expected_information="a measurement",
+            )
+        raise ModelRefusal("The model provider refused experiment_node_0001_step_2.")
+
+
+def test_refused_step_ends_the_experiment_as_partial():
+    model = RefusingModel()
+    result = _run(model, _research_node())
+
+    assert model.calls == 2
+    assert result.termination_reason == ExperimentTermination.MODEL_REFUSED
+    assert result.status == NodeStatus.PARTIAL
+    assert [o.result for o in result.observations] == ["measured:1"]

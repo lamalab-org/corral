@@ -10,6 +10,7 @@ from corral.agents.ai_scientist.search.evaluator import (
 )
 from corral.agents.ai_scientist.search.nodes import (
     ExperimentNode,
+    ExperimentTermination,
     NodeStatus,
     NodeType,
     Recommendation,
@@ -190,6 +191,7 @@ class TreeSelector:
             if allow_partial
             and node.status == NodeStatus.PARTIAL
             and not self._abandoned(node)
+            and not self._refused(node)
             and not any(
                 child.node_type == NodeType.CONTINUE
                 for child in tree.children(node.id)
@@ -303,6 +305,17 @@ class TreeSelector:
             child.stage == stage and not child.boundary_validation
             for child in tree.children(node.id)
         )
+
+    @staticmethod
+    def _refused(node: ExperimentNode) -> bool:
+        """A checkpoint the provider refused to continue.
+
+        Unlike an exhausted action budget, a refusal tends to recur on the
+        same context, and partial nodes are resumed before any alternative.
+        Such checkpoints are never auto-continued, so a refusal cannot turn
+        into a continuation loop; their observations stay in the journal.
+        """
+        return node.termination_reason == ExperimentTermination.MODEL_REFUSED
 
     @staticmethod
     def _abandoned(node: ExperimentNode) -> bool:

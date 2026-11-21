@@ -13,7 +13,7 @@ from corral.agents.ai_scientist.search.nodes import (
 )
 from corral.agents.ai_scientist.state import TaskFormulation
 from corral.agents.ai_scientist.tools.corral_executor import CorralExecutor
-from corral.agents.ai_scientist.workers.base import StructuredModel
+from corral.agents.ai_scientist.workers.base import ModelRefusal, StructuredModel
 
 
 class Experimenter:
@@ -75,16 +75,24 @@ class Experimenter:
             if remaining_actions > 0 and executor.remaining_calls <= 0:
                 node.termination_reason = ExperimentTermination.TOOL_BUDGET_EXHAUSTED
                 break
-            decision = self._decide(
-                node=node,
-                step_index=step_index,
-                remaining_actions=remaining_actions,
-                task_prompt=task_prompt,
-                formulation=formulation,
-                tools=tool_text,
-                journal_context=journal_context,
-                previous_node=previous_node,
-            )
+            try:
+                decision = self._decide(
+                    node=node,
+                    step_index=step_index,
+                    remaining_actions=remaining_actions,
+                    task_prompt=task_prompt,
+                    formulation=formulation,
+                    tools=tool_text,
+                    journal_context=journal_context,
+                    previous_node=previous_node,
+                )
+            except ModelRefusal:
+                # End this experiment with what it has observed so far rather
+                # than asking again. The selector never auto-continues a
+                # refused checkpoint; its observations still reach the critic
+                # and journal.
+                node.termination_reason = ExperimentTermination.MODEL_REFUSED
+                break
             action = decision.as_action()
             if action is None:
                 node.trajectory.append(
@@ -131,6 +139,7 @@ class Experimenter:
         if node.termination_reason in {
             ExperimentTermination.ACTION_BUDGET_EXHAUSTED,
             ExperimentTermination.TOOL_BUDGET_EXHAUSTED,
+            ExperimentTermination.MODEL_REFUSED,
         }:
             node.status = NodeStatus.PARTIAL
         elif node.observations and node.observations[-1].success:
@@ -158,8 +167,7 @@ class Experimenter:
             task_prompt=task_prompt,
             formulation=formulation.model_dump_json(indent=2),
             node=json.dumps(
-                node.model_dump(
-                    mode="json",
+                node.prompt_view(
                     include={
                         "id",
                         "stage",
@@ -176,8 +184,7 @@ class Experimenter:
             ),
             prior_checkpoint=(
                 json.dumps(
-                    previous_node.model_dump(
-                        mode="json",
+                    previous_node.prompt_view(
                         include={
                             "id",
                             "hypothesis",
@@ -196,7 +203,7 @@ class Experimenter:
                 else "No prior partial checkpoint; this is a new experiment."
             ),
             trajectory=json.dumps(
-                [step.model_dump(mode="json") for step in node.trajectory],
+                [step.prompt_view() for step in node.trajectory],
                 indent=2,
                 ensure_ascii=False,
             ),

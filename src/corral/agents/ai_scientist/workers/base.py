@@ -17,9 +17,27 @@ from corral.report.logging import logger
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
 
+# Transcript-only provenance, never sent to the provider. Restored searches
+# use their tree and journal instead of replaying these internal worker turns.
+WORKER_TRANSCRIPT_SOURCE = "ai_scientist_worker"
+
 
 class LLMBudgetExceeded(RuntimeError):
     """Raised before a physical request exceeds the local LLM-call budget."""
+
+
+# LiteLLM reports provider refusals as ``content_filter``; some routes pass the
+# provider's ``refusal`` stop reason through. Other Corral agents accept both.
+_REFUSAL_FINISH_REASONS = frozenset({"content_filter", "refusal"})
+
+
+class ModelRefusal(RuntimeError):
+    """The provider refused the request (finish reason ``content_filter`` or ``refusal``).
+
+    A refusal is not malformed output: asking again for a correction resends
+    the same request plus the refusal and is refused again, which drains the
+    LLM-call budget. Callers decide how to stop instead.
+    """
 
 
 class StructuredModel(Protocol):
@@ -196,6 +214,8 @@ class LiteLLMStructuredModel:
             content = response.content or ""
             # Invalid completions still consumed tokens and a model turn.
             self._record_response(messages, response, purpose=purpose)
+            if getattr(response, "finish_reason", None) in _REFUSAL_FINISH_REASONS:
+                raise ModelRefusal(f"The model provider refused {purpose}.")
             try:
                 try:
                     return response_model.model_validate_json(content.strip())
@@ -296,21 +316,26 @@ class LiteLLMStructuredModel:
         # turns can be grouped without inference from adjacency. These are
         # copies made *after* the provider request: the API-bound `messages`
         # above remain untouched and contain no trace-only fields.
-        recorded_messages: list[LiteLLMMessage] = []
+        recorded_messages: list[dict[str, Any]] = []
         for message in messages:
-            recorded_message = message.copy()
+            recorded_message = dict(message)
             recorded_message["name"] = purpose
+            recorded_message["metadata"] = {
+                **(recorded_message.get("metadata") or {}),
+                "context_source": WORKER_TRANSCRIPT_SOURCE,
+            }
             recorded_messages.append(recorded_message)
         with self._state_lock:
             self.owner.messages.extend(
                 [
                     *recorded_messages,
-                    LiteLLMMessage(
-                        role="assistant",
-                        content=response.content or "",
-                        id=getattr(response, "id", None),
-                        name=purpose,
-                    ),
+                    {
+                        "role": "assistant",
+                        "content": response.content or "",
+                        "id": getattr(response, "id", None),
+                        "name": purpose,
+                        "metadata": {"context_source": WORKER_TRANSCRIPT_SOURCE},
+                    },
                 ]
             )
             if response.usage:
