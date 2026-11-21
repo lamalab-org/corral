@@ -19,7 +19,12 @@ from corral.agents.schema import (
     BudgetExhaustedError,
     Thought,
 )
-from corral.agents.utils import LiteLLMMessage, convert_outermost_triple_quotes
+from corral.agents.utils import (
+    REFUSAL_FINISH_REASONS,
+    LiteLLMMessage,
+    convert_outermost_triple_quotes,
+    refusal_error,
+)
 from corral.core.action import (
     SUBMIT_ANSWER_TOOL_NAME,
     Action,
@@ -287,6 +292,7 @@ class ReActAgent(EpistemicSupport):
             refresh_feedback = True
             turn_usage = getattr(response, "usage", None) or {}
             content = getattr(response, "content", None) or ""
+            public = None
             if self.epistemic:
                 public = public_message(
                     {
@@ -296,24 +302,33 @@ class ReActAgent(EpistemicSupport):
                     }
                 )
                 content = public["content"] if public else ""
-                finish_reason = getattr(response, "finish_reason", None)
-                if finish_reason in {"content_filter", "refusal"}:
-                    consecutive_refusals += 1
-                    if _iteration + 1 < iteration_limit and self._should_retry_refusal(
-                        consecutive_refusals
-                    ):
-                        await session.record_messages((), usage=turn_usage)
-                        refresh_feedback = False
-                        continue
-                    await session.record_messages(
-                        (public,) if public else (), usage=turn_usage
-                    )
-                    return AgentOutcome(
-                        status="agent_failure",
-                        error=f"actor provider stopped the response (finish_reason={finish_reason!r})",
-                        usage=usage.outcome(),
-                    )
-                consecutive_refusals = 0
+            # A provider refusal (Anthropic `stop_reason="refusal"`, which LiteLLM
+            # maps to `content_filter`) usually arrives as an empty, zero-token
+            # response. Without this check it looks like a turn with no action, the
+            # agent is nudged to retry, and the provider refuses again until the
+            # interaction budget is spent. End the run as a refusal instead, as the
+            # Claude Code and tool-calling agents do; only epistemic mode retries.
+            finish_reason = getattr(response, "finish_reason", None)
+            if finish_reason in REFUSAL_FINISH_REASONS:
+                consecutive_refusals += 1
+                if _iteration + 1 < iteration_limit and self._should_retry_refusal(
+                    consecutive_refusals
+                ):
+                    await session.record_messages((), usage=turn_usage)
+                    refresh_feedback = False
+                    continue
+                if not self.epistemic and content.strip():
+                    public = {"role": "assistant", "content": content}
+                await session.record_messages(
+                    (public,) if public else (), usage=turn_usage
+                )
+                return AgentOutcome(
+                    status="agent_failure",
+                    error=refusal_error(finish_reason),
+                    usage=usage.outcome(),
+                )
+            consecutive_refusals = 0
+            if self.epistemic:
                 if public is None:
                     await session.record_messages((), usage=turn_usage)
                     refresh_feedback = False

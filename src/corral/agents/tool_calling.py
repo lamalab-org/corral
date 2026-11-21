@@ -17,7 +17,7 @@ from corral.agents.schema import (
     AgentOutcome,
     BudgetExhaustedError,
 )
-from corral.agents.utils import LiteLLMMessage
+from corral.agents.utils import REFUSAL_FINISH_REASONS, LiteLLMMessage, refusal_error
 from corral.core.action import SUBMIT_ANSWER_TOOL_NAME, Action
 from corral.core.errors import concise_error_message
 from corral.core.messages import EMPTY_RESPONSE_REMINDER, public_message
@@ -169,7 +169,7 @@ class ToolCallingAgent(EpistemicSupport):
                 }
             )
             finish_reason = getattr(response, "finish_reason", None)
-            if finish_reason in {"content_filter", "refusal"}:
+            if finish_reason in REFUSAL_FINISH_REASONS:
                 consecutive_refusals += 1
                 if _iteration + 1 < iteration_limit and self._should_retry_refusal(
                     consecutive_refusals
@@ -193,7 +193,7 @@ class ToolCallingAgent(EpistemicSupport):
                     await session.record_messages((), usage=turn_usage)
                 return AgentOutcome(
                     status="agent_failure",
-                    error=f"actor provider stopped the response (finish_reason={finish_reason!r})",
+                    error=refusal_error(finish_reason),
                     usage=usage.outcome(),
                 )
             consecutive_refusals = 0
