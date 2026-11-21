@@ -23,7 +23,9 @@ Mini versions identify subset releases, separate from the full benchmark:
 `<environment>/mini-v1/` holds Psychometrics mini-v1 (28 runs / 420 trials).
 `<environment>/mini-v2/` holds 36 runs / 540 trials for each of AFM, Corral MD,
 inference optimization, Psychometrics, resistor network, retrosynthesis,
-spectra elucidation and wetlab. Stargazer mini-v2 reports are not yet present.
+spectra elucidation and wetlab. AFM additionally includes two supplementary
+AI Scientist runs (30 trials), bringing its mini-v2 collection to 38 runs /
+570 trials. Stargazer mini-v2 reports are not yet present.
 Run dates and source commits belong in metadata and provenance, not collection names.
 
 Each mini version has its own Hugging Face datasets, not the October ones:
