@@ -28,7 +28,7 @@ def test_docker_dispatch_sends_only_public_data_and_opaque_checkpoint(
 
     environment = create_environments(
         level=1, work_dir=tmp_path, development_mode=True
-    )["seed15_diff5"].for_task("docker-dispatch")
+    )["seed611761_diff5"].for_task("docker-dispatch")
     task = environment.current_task.scoring_inputs["benchmark_task"]
     history = [
         validate_fit(task.public_fit_context(), {"planets": [], "noise_jitter_ms": 0.1})
