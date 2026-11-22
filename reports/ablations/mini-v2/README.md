@@ -35,16 +35,17 @@ Same arms and settings (Codex, `gpt-6.1-sol`, reasoning effort medium; images
 |---|---|---:|---:|---:|---:|
 | wetlab | 2 | 15 | 14 | 14 | 14 |
 | wetlab | 3 | 15 | 15 | 14 | 15 |
-| resistor_network | 1 | 15 | 15 | pending | pending |
-| resistor_network | 2 | 13 | 13 | pending | pending |
+| resistor_network | 1 | 15 | 15 | 14 | 14 |
+| resistor_network | 2 | 13 | 13 | 11 | 13 |
 | psychometrics | 1 | 14 | 9 | 14 | 10 |
 | psychometrics | 2 | 9 | 7 | 7 | 5 |
-| **Total (wetlab + psychometrics)** | | **53/60** | **45/60** | **49/60** | **44/60** |
+| **Total** | | **81/90** | **73/90** | **74/90** | **71/90** |
 
-Resistor `guardrails-off*` reports will be added after 4 reruns finish: 2 trials hit an infrastructure
-race (workspace snapshot vs. a concurrent `pip install` writing into the workspace, which guardrails-off
-allows) and 2 hung (Codex app-server idle, no wall-clock timeout). `eval-aware` wetlab/resistor is the
-earlier run at 2cdf27807.
+4 resistor `guardrails-off*` trials were rerun as infrastructure failures (originals kept outside the
+repo): 2 hit a race between the workspace snapshot and a still-running `pip install` writing into the
+workspace (allowed with guardrails off), and 2 hung (Codex app-server idle for 2 days, no wall-clock
+timeout). All 4 reruns completed normally (3 pass, 1 budget exhaustion; none used pip). `eval-aware`
+wetlab/resistor is the earlier run at 2cdf27807.
 
 ## Settings
 
