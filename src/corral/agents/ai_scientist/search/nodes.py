@@ -55,6 +55,7 @@ class ExperimentTermination(str, Enum):
     ACTION_BUDGET_EXHAUSTED = "action_budget_exhausted"
     TOOL_BUDGET_EXHAUSTED = "tool_budget_exhausted"
     ACTION_FAILED = "action_failed"
+    MODEL_REFUSED = "model_refused"
 
 
 class Recommendation(str, Enum):
@@ -160,6 +161,15 @@ class ExecutedAction(BaseModel):
     observation: Observation
 
 
+# Prompts carry experiment evidence without the per-step decision rationale.
+# Replaying a running log of the model's own reasoning back to it triggers
+# provider `reasoning_extraction` refusals (Anthropic). Design (hypothesis,
+# node rationale, goal), actions, observations, conclusions and evaluations
+# stay; saved traces and checkpoints keep the complete trajectory.
+_STEP_PROMPT_EXCLUDE: dict = {"decision": {"rationale"}}
+_NODE_PROMPT_EXCLUDE: dict = {"trajectory": {"__all__": _STEP_PROMPT_EXCLUDE}}
+
+
 class ExperimentStep(BaseModel):
     """A durable worker decision and, for actions, its resulting observation."""
 
@@ -168,6 +178,10 @@ class ExperimentStep(BaseModel):
     step_index: int = Field(ge=0)
     decision: ExperimentDecision
     observation: Observation | None = None
+
+    def prompt_view(self) -> dict[str, Any]:
+        """JSON-ready step for model prompts, without the decision rationale."""
+        return self.model_dump(mode="json", exclude=_STEP_PROMPT_EXCLUDE)
 
 
 class NodeEvaluation(BaseModel):
@@ -337,3 +351,13 @@ class ExperimentNode(BaseModel):
     depth: int = Field(default=0, ge=0)
     measured_outcome: MeasuredOutcome | None = None
     evaluation: NodeEvaluation | None = None
+
+    def prompt_view(self, include: set[str] | None = None) -> dict[str, Any]:
+        """JSON-ready node for model prompts.
+
+        Every worker prompt that shows a node uses this view, so step
+        rationales are left out consistently (see `_STEP_PROMPT_EXCLUDE`).
+        """
+        return self.model_dump(
+            mode="json", include=include, exclude=_NODE_PROMPT_EXCLUDE
+        )

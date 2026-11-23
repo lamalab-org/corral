@@ -2,6 +2,7 @@ from corral.agents.ai_scientist.journal import ResearchJournal
 from corral.agents.ai_scientist.search.evaluator import extract_measured_outcome
 from corral.agents.ai_scientist.search.nodes import (
     ExperimentNode,
+    ExperimentTermination,
     MeasuredMetric,
     MeasuredOutcome,
     NodeEvaluation,
@@ -383,3 +384,47 @@ def test_measured_outcome_anchors_tree_ranking_ahead_of_critic_scores():
 
     assert tree.best(limit=1) == [objective_winner]
     assert TreeSelector(exploration_weight=0).select(tree) == objective_winner
+
+
+def test_selector_does_not_continue_a_refused_checkpoint():
+    # Partial checkpoints are resumed before alternatives. A refused one would
+    # be resumed (and refused) again and again ahead of successful evidence.
+    tree = ExperimentTree()
+    refused = evaluated_node("refused", status=NodeStatus.PARTIAL)
+    refused.termination_reason = ExperimentTermination.MODEL_REFUSED
+    successful = evaluated_node("successful")
+    tree.add(refused)
+    tree.add(successful)
+
+    assert TreeSelector().select(tree).id == "successful"
+    assert [node.id for node in TreeSelector().select_batch(tree, limit=2)] == [
+        "successful",
+        "successful",
+    ]
+
+
+def test_selector_still_resumes_a_budget_exhausted_checkpoint_first():
+    tree = ExperimentTree()
+    partial = evaluated_node("partial", status=NodeStatus.PARTIAL)
+    partial.termination_reason = ExperimentTermination.ACTION_BUDGET_EXHAUSTED
+    tree.add(partial)
+    tree.add(evaluated_node("successful"))
+
+    assert TreeSelector().select(tree).id == "partial"
+
+
+def test_a_refused_continuation_is_not_continued_either():
+    tree = ExperimentTree()
+    first = evaluated_node("first", status=NodeStatus.PARTIAL)
+    first.termination_reason = ExperimentTermination.ACTION_BUDGET_EXHAUSTED
+    continuation = evaluated_node(
+        "continuation", status=NodeStatus.PARTIAL, parent_id="first"
+    )
+    continuation.node_type = NodeType.CONTINUE
+    continuation.depth = 1
+    continuation.termination_reason = ExperimentTermination.MODEL_REFUSED
+    tree.add(first)
+    tree.add(continuation)
+    tree.add(evaluated_node("successful"))
+
+    assert TreeSelector().select(tree).id == "successful"

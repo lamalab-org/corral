@@ -92,15 +92,14 @@ class NodePlanner:
             ResearchStage.VERIFICATION: "ablation",
         }[stage]
         parent_text = (
-            json.dumps(parent.model_dump(mode="json"), indent=2, ensure_ascii=False)
+            json.dumps(parent.prompt_view(), indent=2, ensure_ascii=False)
             if parent is not None
             else "No parent; create independent root approaches."
         )
         sibling_text = (
             json.dumps(
                 [
-                    sibling.model_dump(
-                        mode="json",
+                    sibling.prompt_view(
                         include={
                             "id",
                             "node_type",
@@ -173,15 +172,14 @@ class NodePlanner:
             formulation=formulation.model_dump_json(indent=2),
             stage=stage.value,
             seed=(
-                json.dumps(seed.model_dump(mode="json"), indent=2)
+                json.dumps(seed.prompt_view(), indent=2)
                 if seed is not None
                 else "No inherited seed in the preliminary stage."
             ),
             previous_substage=previous.model_dump_json(indent=2),
             stage_results=json.dumps(
                 [
-                    node.model_dump(
-                        mode="json",
+                    node.prompt_view(
                         include={
                             "id",
                             "substage_id",
