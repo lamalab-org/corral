@@ -24,12 +24,12 @@ async def test_offline_report_grades_only_final_answer_and_keeps_unfinished(
     tmp_path, initialized
 ):
     env = create_environments(work_dir=tmp_path / "work", development_mode=True)[
-        "seed15_diff5"
+        "seed611761_diff5"
     ]
     task = env.current_task.scoring_inputs["benchmark_task"]
     reference = reference_submission(
         task,
-        json.loads((DEFAULT_DATA_ROOT / "synthetic/seed15_diff5.json").read_text()),
+        json.loads((DEFAULT_DATA_ROOT / "synthetic/seed611761_diff5.json").read_text()),
     ).canonical_payload()
 
     class Driver:
@@ -60,7 +60,7 @@ async def test_offline_report_grades_only_final_answer_and_keeps_unfinished(
             )
     # A failed startup leaves a shard even when no events were committed.
     shards = ShardedCommitStore(tmp_path / "runs", benchmark_run_id="benchmark")
-    failed_id = "benchmark:seed15_diff5:2"
+    failed_id = "benchmark:seed611761_diff5:2"
     directory = shards.execution_dir(failed_id)
     if initialized:
         async with SQLiteCommitStore(directory / "commits.sqlite3", failed_id):
@@ -80,7 +80,7 @@ async def test_offline_report_grades_only_final_answer_and_keeps_unfinished(
     assert report["termination_counts"]["iteration_limit"] == 1
     assert report["termination_counts"]["no_commits"] == 1
     failed = next(row for row in report["records"] if row["execution_id"] == failed_id)
-    assert failed["task_id"] == "seed15_diff5"
+    assert failed["task_id"] == "seed611761_diff5"
     assert failed["status"] == "unfinished"
     assert failed["error"] == "Execution has no committed events"
     submitted = next(row for row in report["records"] if row["status"] == "submitted")
@@ -158,12 +158,12 @@ def test_prepared_arms_match_execution_fingerprints_and_effective_data(
     for arm, assisted in [("A", False), ("B", True)]:
         env = create_environments(
             work_dir=tmp_path / arm, analysis_assistance=assisted
-        )["seed15_diff5"]
+        )["seed611761_diff5"]
         assert (
             env.current_task.execution_version
             == manifest["arms"][arm]["execution_version"]
         )
-    task = load_task(DATA_ROOT / "synthetic/seed15_diff5.json")
+    task = load_task(DATA_ROOT / "synthetic/seed611761_diff5.json")
     expected = hashlib.sha256(
         json.dumps(
             asdict(task.public_fit_context()),

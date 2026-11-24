@@ -26,11 +26,11 @@ import corral.orchestration as orchestration
 from corral.observability.langfuse import langfuse_enabled
 from corral.orchestration.defaults import resolve_max_iterations
 from corral.persistence import ShardedCommitStore, SQLiteCommitStore
-from corral.run import CorralRunner, execute_task
 from corral.runtime.environment_loader import (
     ENVIRONMENT_NAMES,
     load_environment_group,
 )
+from corral.subsets import mini_task_ids, mini_versions
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +57,10 @@ AGENT_DEFINITIONS: Mapping[str, AgentDefinition] = MappingProxyType(
             "corral.agents.codex",
             "CodexAgent",
             extra="codex",
+        ),
+        "epistemic": AgentDefinition(
+            "corral.agents.epistemic",
+            "EpistemicAgent",
         ),
         "llm-planner": AgentDefinition(
             "corral.agents.llm_planner",
@@ -278,10 +282,13 @@ def _default_benchmark_run_id(
     task_ids: Sequence[str],
     trials: int,
     sandbox: str,
+    task_subset: str | None = None,
 ) -> str:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     nonce = uuid4().hex[:8]
-    if len(task_ids) <= 2:
+    if task_subset is not None:
+        tasks = _slug(task_subset)
+    elif len(task_ids) <= 2:
         tasks = "+".join(_slug(task_id)[:36] for task_id in task_ids)
     else:
         tasks = str(len(task_ids))
@@ -314,7 +321,13 @@ def _print_results(run_id: str, result: Any) -> None:
     lines = [f"Run {run_id} completed:"]
     for task_id, task_results in result.task_results.items():
         for trial in task_results.trials:
-            status = "failed" if trial.error_message else "completed"
+            status = (
+                "failed"
+                if trial.error_message
+                else "evaluation failed"
+                if trial.evaluation_error
+                else "completed"
+            )
             score = "-" if trial.score is None else f"{trial.score:g}"
             output = json.dumps(trial.output, ensure_ascii=False, default=str)
             lines.append(
@@ -323,6 +336,8 @@ def _print_results(run_id: str, result: Any) -> None:
             )
             if trial.error_message:
                 lines.append(f"  error: {trial.error_message}")
+            if trial.evaluation_error:
+                lines.append(f"  evaluation error: {trial.evaluation_error}")
     sys.stdout.write("\n".join(lines) + "\n")
 
 
@@ -361,13 +376,17 @@ def _sandbox_profile(
     # whose Namespace predates the explicit sandbox options. Local execution
     # remains available only through an explicit `--sandbox local` selection.
     if getattr(args, "sandbox", "docker") == "local":
+        if getattr(args, "sandbox_guardrails", "on") != "on":
+            raise ValueError("--sandbox-guardrails off requires --sandbox docker")
         return orchestration.SandboxProfile.local()
     spec = orchestration.DockerSandboxSpec(
         image=getattr(args, "sandbox_image", None) or default_image,
         cpus=getattr(args, "sandbox_cpus", 2.0),
         memory=getattr(args, "sandbox_memory", "4g"),
         pids_limit=getattr(args, "sandbox_pids_limit", 256),
+        gpus=getattr(args, "sandbox_gpus", None),
         network=getattr(args, "sandbox_network", "bridge"),
+        guardrails=getattr(args, "sandbox_guardrails", "on"),
         private_directories=tuple(
             str(Path(path).expanduser().resolve())
             for path in getattr(args, "sandbox_private_directory", ())
@@ -392,6 +411,38 @@ def _sandbox_profile(
     )
 
 
+def _select_tasks(
+    args: argparse.Namespace, environments: Mapping[str, Any]
+) -> tuple[list[str] | None, dict[str, Any]]:
+    """Return the task IDs to run (`None` for all) and the subset to record.
+
+    `--task` wins over `--run-full` and the default `--run-mini`. Levels the
+    mini does not cover, including subtask levels, run in full.
+    """
+    if args.tasks:
+        return list(args.tasks), {"name": "explicit"}
+    if getattr(args, "task_subset", "mini") == "full":
+        return None, {"name": "full"}
+    options = dict(args.env_kwargs)
+    version = getattr(args, "mini_version", None) or mini_versions()[-1]
+    task_ids = (
+        None
+        if options.get("subtasks")
+        else mini_task_ids(args.environment, options.get("level", 1), version)
+    )
+    if task_ids is None:
+        sys.stderr.write(
+            f"warning: corral-mini v{version} does not cover this level; "
+            "running all tasks\n"
+        )
+        return None, {"name": "full", "reason": "not covered by corral-mini"}
+    if missing := sorted(set(task_ids) - set(environments)):
+        raise ValueError(
+            f"corral-mini v{version} tasks not loaded: {', '.join(missing)}"
+        )
+    return list(task_ids), {"name": "corral-mini", "version": version}
+
+
 async def run_benchmark(
     args: argparse.Namespace,
     *,
@@ -399,12 +450,19 @@ async def run_benchmark(
     agent_kwargs: Mapping[str, Any] | None = None,
 ) -> int:
     """Run one CLI-configured benchmark with the task runner."""
+    from corral.run import CorralRunner
+
     environments = load_environment_group(
         args.environment,
         env_kwargs=args.env_kwargs,
     )
+    selected_task_ids, task_subset = _select_tasks(args, environments)
     if args.list_tasks:
-        _list_tasks(environments)
+        _list_tasks(
+            environments
+            if selected_task_ids is None
+            else {task_id: environments[task_id] for task_id in selected_task_ids}
+        )
         return 0
 
     canonical_agent = normalise_agent_name(agent_name or args.agent)
@@ -452,6 +510,7 @@ async def run_benchmark(
                 if build_local
                 else None
             ),
+            rebuild=getattr(args, "build_sandbox_image", False),
         )
         sandbox = orchestration.SandboxProfile(
             mode=orchestration.SandboxMode.DOCKER,
@@ -465,7 +524,7 @@ async def run_benchmark(
         )
         agents[canonical_agent] = agent
 
-    requested_task_ids = tuple(args.tasks or environments)
+    requested_task_ids = tuple(selected_task_ids or environments)
     run_id = args.run_id or _default_benchmark_run_id(
         agent=canonical_agent,
         model=model if model is not None else "default",
@@ -473,6 +532,11 @@ async def run_benchmark(
         task_ids=requested_task_ids,
         trials=args.trials,
         sandbox=sandbox.mode,
+        task_subset=(
+            f"mini-v{task_subset['version']}"
+            if task_subset["name"] == "corral-mini"
+            else None
+        ),
     )
 
     state_dir = getattr(args, "state_dir", None)
@@ -481,11 +545,20 @@ async def run_benchmark(
         state_dir = commit_file.parent / "runs"
     runs_root = Path(state_dir).expanduser().resolve()
     run_dir = runs_root / _run_directory_name(run_id)
+    for source in getattr(args, "continuation_by_task", {}).values():
+        source_dir = Path(source.trial).resolve()
+        if source_dir.is_relative_to(run_dir) or run_dir.is_relative_to(source_dir):
+            raise ValueError("continuations require a separate output run directory")
     configured_report = getattr(args, "report", None)
     report_path = (
         Path(configured_report) if configured_report else run_dir / "report.json"
     )
     report_path = report_path.expanduser().resolve()
+    for source in getattr(args, "continuation_by_task", {}).values():
+        if report_path.is_relative_to(Path(source.trial).expanduser().resolve()):
+            raise ValueError(
+                "continuation report path must be outside the source trial"
+            )
     run_manifest_path = run_dir / "run-metadata.json"
     run_manifest = {
         "schema_version": 1,
@@ -498,6 +571,7 @@ async def run_benchmark(
         "model": model,
         "environment": args.environment,
         "requested_task_ids": list(requested_task_ids),
+        "task_subset": task_subset,
         "trials_per_task": args.trials,
         "sandbox": sandbox.mode,
     }
@@ -541,7 +615,7 @@ async def run_benchmark(
         )
         result = await runner.run(
             run_id,
-            task_ids=args.tasks or None,
+            task_ids=selected_task_ids,
             trials_per_task=args.trials,
             max_parallel=args.max_parallel,
             max_parallel_per_task=args.max_parallel_per_task,
@@ -551,9 +625,11 @@ async def run_benchmark(
                 args, "max_parallel_evaluations_by_environment", None
             ),
             enable_surrender=args.enable_surrender,
+            evaluation_awareness=getattr(args, "evaluation_awareness", "off"),
             evaluate=not args.no_evaluate,
             verbose=args.verbose,
             retry_policy=_retry_policy(args),
+            continuation_by_task=getattr(args, "continuation_by_task", None),
         )
         result.metadata["storage"] = {
             "run_directory": str(run_dir),
@@ -565,12 +641,17 @@ async def run_benchmark(
         }
         result.generate_report(str(report_path))
         failed_trials = sum(
-            trial.error_message is not None for trial in result.all_results
+            trial.error_message is not None or trial.evaluation_error is not None
+            for trial in result.all_results
+        )
+        evaluation_failed_trials = sum(
+            trial.evaluation_error is not None for trial in result.all_results
         )
         run_manifest.update(
             status="completed_with_errors" if failed_trials else "completed",
             completed_at=datetime.now(timezone.utc).isoformat(),
             failed_trials=failed_trials,
+            evaluation_failed_trials=evaluation_failed_trials,
         )
         _atomic_json(run_manifest_path, run_manifest)
     except BaseException as exc:
@@ -587,11 +668,67 @@ async def run_benchmark(
 
     _print_results(run_id, result)
     sys.stdout.write(f"Outputs: {run_dir}\n")
-    return int(any(trial.error_message for trial in result.all_results))
+    return int(
+        any(
+            trial.error_message or trial.evaluation_error
+            for trial in result.all_results
+        )
+    )
+
+
+async def continue_trial(args: argparse.Namespace) -> int:
+    """Continue one historical checkpoint with independent benchmark trials."""
+    from corral.persistence.continuation import read_checkpoint
+
+    source = orchestration.ContinuationSource(
+        trial=str(Path(args.source_trial).expanduser().resolve()),
+        commit_hash=args.commit,
+        execution_id=args.source_execution,
+        branch_id=args.source_branch,
+        agent_run_id=args.source_agent_run,
+        message=(args.message[0] if args.message and len(args.message) == 1 else None),
+        messages=(
+            tuple(args.message) if args.message and len(args.message) > 1 else ()
+        ),
+    )
+    checkpoint = await read_checkpoint(source)
+    task_id = checkpoint.source.task.metadata["id"]
+    if args.tasks and args.tasks != [task_id]:
+        raise ValueError("--task must match the source checkpoint task")
+    args.tasks = [task_id]
+    request_file = Path(source.trial) / "launch-request.json"
+    if not request_file.is_file():
+        request_file = Path(source.trial) / "request.json"
+    saved = json.loads(request_file.read_text()) if request_file.is_file() else {}
+    agent = saved.get("agent_runtime") or {}
+    environment = saved.get("environment_runtime") or {}
+    if args.environment is None:
+        args.environment = environment.get("name")
+    if args.environment is None:
+        raise ValueError(
+            "source has no environment runtime definition; pass --environment and --env-kwargs"
+        )
+    if args.agent is None:
+        name = agent.get("name") or checkpoint.source.task.scaffold.get("name")
+        if not name:
+            raise ValueError("source has no agent runtime definition; pass --agent")
+        args.agent = normalise_agent_name(name)
+    args.env_kwargs = {**environment.get("options", {}), **args.env_kwargs}
+    args.agent_kwargs = {**agent.get("options", {}), **args.agent_kwargs}
+    if args.model is None:
+        args.model = agent.get("model") or checkpoint.source.task.model.get("name")
+    if args.temperature is None:
+        args.temperature = agent.get("temperature")
+    if args.api_endpoint is None:
+        args.api_endpoint = agent.get("api_endpoint")
+    args.continuation_by_task = {task_id: source}
+    return await run_benchmark(args)
 
 
 async def run_task(args: argparse.Namespace) -> int:
     """Run exactly one independent task without benchmark evaluation/reporting."""
+    from corral.run import execute_task
+
     environments = load_environment_group(
         args.environment,
         env_kwargs=args.env_kwargs,
@@ -639,6 +776,7 @@ async def run_task(args: argparse.Namespace) -> int:
                     args.max_iterations, canonical_agent
                 ),
                 enable_surrender=args.enable_surrender,
+                evaluation_awareness=getattr(args, "evaluation_awareness", "off"),
             ),
         )
     finally:
@@ -704,7 +842,21 @@ def _add_agent_arguments(parser: argparse.ArgumentParser) -> None:
             "Per-task trial budget; default: 100 for AI Scientist, 50 for other agents."
         ),
     )
-    agent.add_argument("--enable-surrender", action="store_true")
+    agent.add_argument(
+        "--evaluation-awareness",
+        choices=("on", "off"),
+        default="off",
+        help="Prepend an evaluation notice and the iteration limit to task prompts; default: off.",
+    )
+    agent.add_argument(
+        "--enable-surrender",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Allow the agent to give up by submitting SURRENDER "
+            "(default: disabled; --no-enable-surrender disables it explicitly)."
+        ),
+    )
 
 
 def _add_execution_arguments(
@@ -716,6 +868,32 @@ def _add_execution_arguments(
     execution.add_argument("--commit-file", default=default_commit_file)
 
 
+def add_task_subset_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add `--run-mini` (default), `--run-full` and `--mini-version`."""
+    subset = parser.add_mutually_exclusive_group()
+    subset.add_argument(
+        "--run-mini",
+        dest="task_subset",
+        action="store_const",
+        const="mini",
+        default="mini",
+        help="Run only the corral-mini tasks of the selected level (default).",
+    )
+    subset.add_argument(
+        "--run-full",
+        dest="task_subset",
+        action="store_const",
+        const="full",
+        help="Run every task of the selected level.",
+    )
+    parser.add_argument(
+        "--mini-version",
+        type=int,
+        choices=mini_versions(),
+        help="corral-mini release to run; default: the latest.",
+    )
+
+
 def _add_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--task",
@@ -723,11 +901,12 @@ def _add_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
         action="append",
         default=[],
         help=(
-            "Task ID to run; repeat for multiple. If omitted, all tasks run. "
-            "Dependencies are included automatically."
+            "Task ID to run; repeat for multiple. Overrides --run-mini and "
+            "--run-full. Dependencies are included automatically."
         ),
     )
     parser.add_argument("--list-tasks", action="store_true")
+    add_task_subset_arguments(parser)
     _add_environment_arguments(parser)
     _add_agent_arguments(parser)
 
@@ -751,13 +930,27 @@ def _add_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
         default_commit_file=str(Path(".corral") / "benchmark-commits.sqlite3"),
     )
     execution.add_argument("--report")
-    execution.add_argument("--verbose", action="store_true")
+    execution.add_argument(
+        "--verbose",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Include agent messages and tool calls in the report "
+            "(default: on; --no-verbose turns it off)."
+        ),
+    )
     sandbox = parser.add_argument_group("sandbox")
     sandbox.add_argument(
         "--sandbox",
         choices=("docker", "local"),
         default="docker",
         help="Trial isolation mode; default: docker.",
+    )
+    sandbox.add_argument(
+        "--sandbox-guardrails",
+        choices=("on", "off"),
+        default="on",
+        help="Docker worker isolation and agent sandboxing; off grants container-wide access. Default: on.",
     )
     sandbox.add_argument(
         "--sandbox-image",
@@ -770,6 +963,13 @@ def _add_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
     sandbox.add_argument("--sandbox-cpus", type=float, default=2.0)
     sandbox.add_argument("--sandbox-memory", default="4g")
     sandbox.add_argument("--sandbox-pids-limit", type=int, default=256)
+    sandbox.add_argument(
+        "--sandbox-gpus",
+        help=(
+            "Expose this many NVIDIA GPUs to each Docker trial, 'all', or "
+            "specific host GPUs such as 'device=2,3'."
+        ),
+    )
     sandbox.add_argument(
         "--sandbox-private-directory",
         action="append",
@@ -803,7 +1003,10 @@ def _add_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
     sandbox.add_argument(
         "--build-sandbox-image",
         action="store_true",
-        help="Build a missing custom image using the environment's Dockerfile and harness extra.",
+        help=(
+            "Rebuild the environment's image from this checkout before running. "
+            "Without it, an image is built only when its tag is missing."
+        ),
     )
     sandbox.add_argument("--docker-executable", default="docker")
     sandbox.add_argument(
@@ -835,6 +1038,12 @@ def build_parser() -> argparse.ArgumentParser:
         description="Run scientific agents and benchmarks with Corral.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
+    from corral.epistemic_analysis.cli import add_arguments as add_analysis_arguments
+
+    analyze = commands.add_parser(
+        "analyze", help="Annotate traces and analyze epistemic patterns."
+    )
+    add_analysis_arguments(analyze)
     run = commands.add_parser(
         "run",
         help="Run one independent task without benchmark evaluation.",
@@ -847,6 +1056,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_benchmark_arguments(bench)
     bench.set_defaults(_handler=run_benchmark)
+    continuation = commands.add_parser(
+        "continue", help="Start independent trials from a finished trial's commit."
+    )
+    _add_benchmark_arguments(continuation)
+    for action in continuation._actions:
+        if action.dest in {"agent", "environment"}:
+            action.required = False
+    continuation.add_argument("--source-trial", required=True)
+    continuation.add_argument("--commit", required=True)
+    continuation.add_argument("--source-execution")
+    continuation.add_argument("--source-branch", default="main")
+    continuation.add_argument("--source-agent-run")
+    continuation.add_argument("--message", action="append")
+    continuation.set_defaults(_handler=continue_trial)
     internal = commands.add_parser("internal", help=argparse.SUPPRESS)
     internal_commands = internal.add_subparsers(dest="internal_command", required=True)
     internal_run_task = internal_commands.add_parser("run-task")

@@ -23,6 +23,7 @@ async def start_session(
     previous_state: ExecutionState | None = None,
     last_score: Mapping[str, Any] | None = None,
     agent: Any = None,
+    enable_surrender: bool = False,
 ) -> AgentSession:
     execution_id = f"test-{uuid4()}"
     store = SQLiteCommitStore(":memory:", execution_id)
@@ -40,7 +41,10 @@ async def start_session(
                 execution_id=execution_id,
                 actor_id=actor_id,
                 started_at=datetime.now(timezone.utc),
-                scaffold_metadata={"max_iterations": max_iterations},
+                scaffold_metadata={
+                    "max_iterations": max_iterations,
+                    "enable_surrender": enable_surrender,
+                },
             ),
         )
     )

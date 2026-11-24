@@ -54,6 +54,7 @@ class PythonREPLTool(Tool):
         max_response_bytes: int | None,
         workspace_access: WorkspaceAccess | str,
         network_access: str = "allowed",
+        timeout_seconds: float | None = None,
     ):
         super().__init__(
             name=name,
@@ -76,7 +77,10 @@ class PythonREPLTool(Tool):
         )
         if network_access not in {"allowed", "none"}:
             raise ValueError("network_access must be allowed or none")
+        if timeout_seconds is not None and timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive, or None for no limit")
         self.network_access = network_access
+        self.timeout_seconds = timeout_seconds
         self.argument_name = argument_name
         self.namespace_factory = namespace_factory
         self.code_executor = code_executor
@@ -105,6 +109,7 @@ class PythonREPLTool(Tool):
             max_code_chars=self.max_code_chars,
             max_output_chars=self.max_output_chars,
             address_space_bytes=self.address_space_bytes,
+            timeout_seconds=self.timeout_seconds,
         )
 
     def execute_repl(
@@ -136,6 +141,7 @@ class PythonREPLTool(Tool):
             max_response_bytes=self.max_response_bytes,
             workspace_access=self.workspace_access,
             network_access=self.network_access,
+            timeout_seconds=self.timeout_seconds,
         )
 
 
@@ -156,6 +162,7 @@ def create_python_repl_tool(
     max_response_bytes: int | None = None,
     workspace_access: WorkspaceAccess | str = WorkspaceAccess.NONE,
     network_access: str = "allowed",
+    timeout_seconds: float | None = None,
 ) -> PythonREPLTool:
     """Create a serial, checkpointed REPL definition for a stateful environment."""
     return PythonREPLTool(
@@ -174,6 +181,7 @@ def create_python_repl_tool(
         max_response_bytes=max_response_bytes,
         workspace_access=workspace_access,
         network_access=network_access,
+        timeout_seconds=timeout_seconds,
     )
 
 

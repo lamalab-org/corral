@@ -7,7 +7,9 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import shutil
+import tarfile
 import tempfile
 from dataclasses import asdict, replace
 from datetime import datetime
@@ -52,6 +54,22 @@ class DockerInfrastructureError(RuntimeError):
     """A container could not be created, supervised, or decoded safely."""
 
 
+def _copy_checkpoint_file(source: str, destination: str) -> str:
+    """Replace exported files atomically, preserving other hard-linked shards."""
+    target = Path(destination)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{target.name}.checkpoint-", dir=target.parent
+    )
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    try:
+        shutil.copy2(source, temporary)
+        temporary.replace(target)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return destination
+
+
 # Runs before the image's CLI, so retained containers also work with images
 # built before resume support. A checkpoint import can remove SQLite sidecars
 # on the host; docker cp alone would leave their old copies in the volume.
@@ -60,6 +78,11 @@ import json
 import os
 from pathlib import Path
 root = Path('/corral-state')
+request = json.loads((root / 'request.json').read_text())
+if request.get('evaluation_awareness', 'off') != 'off':
+    from corral.orchestration.models import RunTaskInput
+    if 'evaluation_awareness' not in RunTaskInput.__dataclass_fields__:
+        raise RuntimeError('Docker image lacks evaluation-awareness support; rebuild the image')
 missing = json.loads((root / 'checkpoint-import.json').read_text())['missing_sidecars']
 for name in ('commits.sqlite3-wal', 'commits.sqlite3-shm'):
     if name in missing:
@@ -94,7 +117,17 @@ def state_ref(state: ExecutionState, commit: Commit) -> StateRef:
         submission=state.submission,
         output=output,
         error=str(raw_error) if raw_error is not None else None,
-        metadata={"model_parameters": parameters} if parameters else {},
+        metadata={
+            **({"model_parameters": parameters} if parameters else {}),
+            **(
+                {
+                    "lineage": dict(state.runtime.metadata["lineage"]),
+                    "inherited_usage": dict(state.runtime.metadata["inherited_usage"]),
+                }
+                if state.runtime.metadata.get("lineage")
+                else {}
+            ),
+        },
     )
 
 
@@ -131,6 +164,7 @@ class LocalTaskLauncher:
         last_evaluation = (
             self.registry.last_evaluation(request.task_id)
             if environment.current_task.allow_previous_attempt_context
+            and request.continuation is None
             else None
         )
         previous_state = None
@@ -155,6 +189,7 @@ class LocalTaskLauncher:
         scaffold_metadata: dict[str, Any] = {
             "name": type(agent).__name__,
             "enable_surrender": request.enable_surrender,
+            "evaluation_awareness": request.evaluation_awareness,
             "sandbox": self.scaffold_sandbox,
         }
         if request.sandbox.docker is not None:
@@ -162,6 +197,7 @@ class LocalTaskLauncher:
             scaffold_metadata.update(
                 sandbox_image_digest=docker.image_digest,
                 sandbox_network=docker.network,
+                sandbox_guardrails=docker.guardrails,
                 sandbox_resources={
                     "cpus": docker.cpus,
                     "memory": docker.memory,
@@ -295,8 +331,13 @@ class DockerTaskLauncher:
         build_context: str | Path | None = None,
         dockerfile: str | Path | None = None,
         build_args: Mapping[str, str] | None = None,
+        rebuild: bool = False,
     ) -> DockerSandboxSpec:
-        """Ensure an image exists before trials start and pin it to an image ID."""
+        """Ensure an image exists before trials start and pin it to an image ID.
+
+        ``rebuild`` builds even when the tag exists, so a changed checkout is
+        not silently run from an older image.
+        """
         if spec.image_digest is not None:
             await _command(
                 docker_executable,
@@ -316,7 +357,8 @@ class DockerTaskLauncher:
             output_limit=32_000,
             check=False,
         )
-        if code != 0:
+        can_build = build_context is not None and dockerfile is not None
+        if code != 0 or (rebuild and can_build):
             if build_context is not None and dockerfile is not None:
                 await _command(
                     docker_executable,
@@ -483,14 +525,66 @@ class DockerTaskLauncher:
                 prefix=".corral-checkpoint-", dir=shard.parent
             ) as directory:
                 staged = Path(directory)
-                await _command(
-                    self.docker_executable,
-                    "cp",
-                    f"{container}:/corral-state/.",
-                    str(staged),
-                    output_limit=32_000,
+                try:
+                    await _command(
+                        self.docker_executable,
+                        "cp",
+                        f"{container}:/corral-state/.",
+                        str(staged),
+                        output_limit=32_000,
+                    )
+                except DockerInfrastructureError as exc:
+                    if "fchmodat2" not in str(exc):
+                        raise
+                    # Docker Desktop may fail to restore Linux directory modes
+                    # on macOS. Stream the same archive and extract without
+                    # foreign ownership or setgid bits; never buffer the DB.
+                    archive = staged / "export.tar"
+                    with archive.open("wb") as output:
+                        process = await asyncio.create_subprocess_exec(
+                            self.docker_executable,
+                            "cp",
+                            f"{container}:/corral-state/.",
+                            "-",
+                            stdout=output,
+                            stderr=asyncio.subprocess.PIPE,
+                        )
+                        try:
+                            _, error = await process.communicate()
+                        except BaseException:
+                            with contextlib.suppress(ProcessLookupError):
+                                process.kill()
+                            await process.wait()
+                            raise
+                    if process.returncode:
+                        raise DockerInfrastructureError(
+                            error.decode(errors="replace")
+                        ) from exc
+                    staged = staged / "extracted"
+                    staged.mkdir()
+                    with tarfile.open(archive) as exported:
+                        if hasattr(tarfile, "data_filter"):
+                            exported.extractall(staged, filter="data")
+                        else:
+                            # Early 3.10/3.11 releases have no extraction filter.
+                            # The export contains only regular files and directories.
+                            members = exported.getmembers()
+                            for member in members:
+                                target = (staged / member.name).resolve()
+                                if not target.is_relative_to(staged.resolve()) or not (
+                                    member.isfile() or member.isdir()
+                                ):
+                                    raise ValueError(
+                                        "unsafe Docker state archive member"
+                                    ) from None
+                                member.mode = 0o755 if member.isdir() else 0o644
+                            exported.extractall(staged, members=members)
+                shutil.copytree(
+                    staged,
+                    shard,
+                    dirs_exist_ok=True,
+                    copy_function=_copy_checkpoint_file,
                 )
-                shutil.copytree(staged, shard, dirs_exist_ok=True)
                 # A clean close can remove these in the container. Do not replay
                 # stale host WAL contents over the newly exported database.
                 for suffix in ("-wal", "-shm"):
@@ -567,6 +661,7 @@ class DockerTaskLauncher:
             "corral.execution_id": request.execution_id,
             "corral.image_digest": docker.image_digest or "unresolved",
             "corral.runtime_protocol_version": docker.runtime_protocol_version,
+            "corral.guardrails": docker.guardrails,
         }
         volume_arguments = [self.docker_executable, "volume", "create"]
         for key, value in labels.items():
@@ -624,6 +719,28 @@ class DockerTaskLauncher:
             "--env",
             f"CORRAL_HOST_GID={os.getgid()}",
         ]
+        if docker.gpus is not None:
+            selected_devices = (
+                docker.gpus.removeprefix("device=").split(",")
+                if docker.gpus.startswith("device=")
+                else None
+            )
+            # Docker's --gpus parser needs literal quotes around a comma-separated
+            # device selector even when no shell is involved.
+            gpu_argument = f'"{docker.gpus}"' if selected_devices else docker.gpus
+            create_arguments.extend(("--gpus", gpu_argument))
+            if docker.gpus != "all":
+                task_number = re.search(r"(?:^|_)task_(\d+)$", request.task_id)
+                offset = (
+                    int(task_number.group(1)) - 1
+                    if task_number is not None
+                    else int(hashlib.sha256(request.task_id.encode()).hexdigest(), 16)
+                )
+                visible_count = (
+                    len(selected_devices) if selected_devices else int(docker.gpus)
+                )
+                device = (offset + request.trial_index) % visible_count
+                create_arguments.extend(("--env", f"CUDA_VISIBLE_DEVICES={device}"))
         for key, value in labels.items():
             create_arguments.extend(("--label", f"{key}={value}"))
         create_arguments.extend(private_mounts)
@@ -716,8 +833,12 @@ class DockerTaskLauncher:
                 "benchmark_run_id": request.benchmark_run_id,
                 "container_id": container_id,
                 "container_name": container_name,
-                "permissions_policy": "workspace-root-v1",
+                "permissions_policy": (
+                    "workspace-root-v1" if docker.guardrails == "on" else "disabled"
+                ),
+                "guardrails": docker.guardrails,
                 "cpus": docker.cpus,
+                "gpus": docker.gpus,
                 "execution_id": request.execution_id,
                 "image": docker.image,
                 "image_digest": docker.image_digest,

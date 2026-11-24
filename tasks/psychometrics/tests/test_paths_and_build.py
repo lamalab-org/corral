@@ -1,3 +1,5 @@
+"""Validate data-root resolution, artifact publication, and workspace isolation."""
+
 import importlib.util
 import json
 import shutil
@@ -128,6 +130,15 @@ def test_local_repl_uses_workspace_without_changing_parent(tmp_path):
     resumed, _ = run("value", checkpoint)
     assert "workspace data" in resumed
     assert Path.cwd() == cwd
+
+
+def test_file_tools_take_the_same_paths_as_a_sandbox(tmp_path):
+    (tmp_path / "data.csv").write_text("workspace data")
+    tools = workspace_tools(str(tmp_path))
+
+    assert tools["read_file"].execute(path="/workspace/data.csv") == "workspace data"
+    with pytest.raises(ValueError, match="absolute under /workspace"):
+        tools["read_file"].execute(path="data.csv")
 
 
 def test_repl_is_dispatched_by_the_environment(tmp_path):

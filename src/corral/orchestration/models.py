@@ -9,7 +9,7 @@ from enum import Enum
 from pathlib import PurePosixPath
 from typing import Any
 
-RUNTIME_PROTOCOL_VERSION = "4"
+RUNTIME_PROTOCOL_VERSION = "6"
 
 
 class SandboxMode(str, Enum):
@@ -36,6 +36,7 @@ class DockerSandboxSpec:
     cpus: float = 2.0
     memory: str = "4g"
     pids_limit: int = 256
+    gpus: str | None = None
     network: str = "bridge"
     environment_allowlist: tuple[str, ...] = (
         "ANTHROPIC_API_KEY",
@@ -43,6 +44,7 @@ class DockerSandboxSpec:
         "AZURE_OPENAI_API_KEY",
         "AZURE_OPENAI_ENDPOINT",
         "CORRAL_LANGFUSE_ENABLED",
+        "CORRAL_LANGFUSE_SESSION_ID",
         "HF_TOKEN",
         "LANGFUSE_BASE_URL",
         "LANGFUSE_HOST",
@@ -51,15 +53,20 @@ class DockerSandboxSpec:
         "LANGFUSE_TRACING_ENABLED",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
+        "OPENROUTER_API_KEY",
     )
     retention: str = SandboxRetention.ON_FAILURE.value
     registry_module: str | None = None
     runtime_protocol_version: str = RUNTIME_PROTOCOL_VERSION
     # Read-only controller inputs, mounted outside every worker filesystem.
     private_directories: tuple[str, ...] = ()
+    # Disable both worker confinement and native SDK sandboxing for ablations.
+    guardrails: str = "on"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "retention", SandboxRetention(self.retention).value)
+        if self.guardrails not in {"on", "off"}:
+            raise ValueError("Docker sandbox guardrails must be 'on' or 'off'")
         if not self.image.strip():
             raise ValueError("Docker sandbox image cannot be empty")
         if (
@@ -73,6 +80,28 @@ class DockerSandboxSpec:
             raise ValueError("Docker sandbox memory must look like '4096m' or '4g'")
         if self.pids_limit < 1:
             raise ValueError("Docker sandbox pids_limit must be at least one")
+        if self.gpus is not None:
+            devices = (
+                self.gpus.removeprefix("device=").split(",")
+                if self.gpus.startswith("device=")
+                else []
+            )
+            explicit_devices = (
+                bool(devices)
+                and all(
+                    re.fullmatch(r"(?:0|[1-9][0-9]*)", device) for device in devices
+                )
+                and len(devices) == len(set(devices))
+            )
+            if not (
+                self.gpus == "all"
+                or re.fullmatch(r"[1-9][0-9]*", self.gpus)
+                or explicit_devices
+            ):
+                raise ValueError(
+                    "Docker sandbox gpus must be 'all', a positive count, "
+                    "or 'device=' followed by unique GPU indices"
+                )
         if not self.network.strip():
             raise ValueError("Docker sandbox network cannot be empty")
         if not self.runtime_protocol_version.strip():
@@ -197,6 +226,38 @@ class StateRef:
 
 
 @dataclass(frozen=True)
+class ContinuationSource:
+    """A historical commit in a finished, self-contained trial directory."""
+
+    trial: str
+    commit_hash: str
+    branch_id: str = "main"
+    execution_id: str | None = None
+    agent_run_id: str | None = None
+    message: str | None = None
+    messages: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.trial or not self.branch_id:
+            raise ValueError("continuation trial and branch cannot be empty")
+        if re.fullmatch(r"[0-9a-f]{64}", self.commit_hash) is None:
+            raise ValueError("continuation requires a full SHA-256 commit hash")
+        if isinstance(self.messages, str):
+            raise TypeError("continuation messages must be a sequence of strings")
+        messages = tuple(self.messages)
+        if any(not isinstance(item, str) for item in messages):
+            raise TypeError("continuation messages must be strings")
+        if self.message is not None and messages:
+            raise ValueError("use either message or messages for a continuation")
+        object.__setattr__(self, "messages", messages)
+
+    @property
+    def message_payload(self) -> str | tuple[str, ...] | None:
+        """Preserve the historical single-message event representation."""
+        return self.messages or self.message
+
+
+@dataclass(frozen=True)
 class RunTaskInput:
     execution_id: str
     task_id: str
@@ -214,8 +275,12 @@ class RunTaskInput:
     sandbox: SandboxProfile = field(default_factory=SandboxProfile.local)
     agent_runtime: AgentRuntimeDefinition | None = None
     environment_runtime: EnvironmentRuntimeDefinition | None = None
+    continuation: ContinuationSource | None = None
+    evaluation_awareness: str = "off"
 
     def __post_init__(self) -> None:
+        if self.evaluation_awareness not in ("on", "off"):
+            raise ValueError("evaluation_awareness must be 'on' or 'off'")
         if not self.execution_id:
             raise ValueError("execution_id cannot be empty")
         if self.trial_index < 0:
@@ -303,8 +368,12 @@ class BenchmarkInput:
     environment_runtime_by_task: dict[str, EnvironmentRuntimeDefinition] = field(
         default_factory=dict
     )
+    continuation_by_task: dict[str, ContinuationSource] = field(default_factory=dict)
+    evaluation_awareness: str = "off"
 
     def __post_init__(self) -> None:
+        if self.evaluation_awareness not in ("on", "off"):
+            raise ValueError("evaluation_awareness must be 'on' or 'off'")
         if not self.benchmark_run_id:
             raise ValueError("benchmark_run_id cannot be empty")
         if not self.task_ids:
@@ -387,6 +456,7 @@ __all__ = [
     "AgentRuntimeDefinition",
     "BenchmarkExecutionResult",
     "BenchmarkInput",
+    "ContinuationSource",
     "DockerSandboxSpec",
     "EnvironmentRuntimeDefinition",
     "EvaluateTaskInput",

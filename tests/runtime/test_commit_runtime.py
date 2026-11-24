@@ -56,6 +56,80 @@ def environment_with_tools(**functions) -> Environment:
     )
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize("enable_surrender", [False, True])
+async def test_surrender_requires_launch_opt_in(tmp_path, enable_surrender):
+    class SurrenderAgent:
+        async def run_session(self, session: AgentSession) -> AgentOutcome:
+            attempted = await session.execute(
+                Action(name="submit_answer", arguments={"answer": "SURRENDER"})
+            )
+            if enable_surrender:
+                assert attempted.success
+                return AgentOutcome(status="surrendered")
+            assert not attempted.success
+            assert (
+                attempted.error
+                == "SURRENDER is not an available answer; submit an answer instead"
+            )
+            assert session.submission is None
+            submitted = await session.execute(
+                Action(name="submit_answer", arguments={"answer": "answer"})
+            )
+            assert submitted.success
+            return AgentOutcome(status="completed", answer="answer")
+
+    store = SQLiteCommitStore(tmp_path / "surrender.sqlite3")
+    state = await TaskRuntime(store, NoOpObserver()).run(
+        SurrenderAgent(),
+        environment_with_tools(),
+        execution_id="surrender",
+        started_at=datetime.now(timezone.utc),
+        max_iterations=4,
+        scaffold_metadata={"enable_surrender": enable_surrender},
+    )
+    assert state.runtime.status == ("surrendered" if enable_surrender else "submitted")
+    await store.aclose()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("enable_surrender", [False, True])
+async def test_surrender_sentinel_matches_case_insensitively(
+    tmp_path, enable_surrender
+):
+    class LowercaseSurrenderAgent:
+        async def run_session(self, session: AgentSession) -> AgentOutcome:
+            attempted = await session.execute(
+                Action(name="submit_answer", arguments={"answer": " surrender "})
+            )
+            if enable_surrender:
+                assert attempted.success
+                return AgentOutcome(status="surrendered")
+            # Disabled surrender cannot slip through as a scored answer.
+            assert not attempted.success
+            assert (
+                attempted.error
+                == "SURRENDER is not an available answer; submit an answer instead"
+            )
+            submitted = await session.execute(
+                Action(name="submit_answer", arguments={"answer": "answer"})
+            )
+            assert submitted.success
+            return AgentOutcome(status="completed", answer="answer")
+
+    store = SQLiteCommitStore(tmp_path / "surrender-case.sqlite3")
+    state = await TaskRuntime(store, NoOpObserver()).run(
+        LowercaseSurrenderAgent(),
+        environment_with_tools(),
+        execution_id="surrender-case",
+        started_at=datetime.now(timezone.utc),
+        max_iterations=4,
+        scaffold_metadata={"enable_surrender": enable_surrender},
+    )
+    assert state.runtime.status == ("surrendered" if enable_surrender else "submitted")
+    await store.aclose()
+
+
 class ParallelAgent:
     def __init__(self) -> None:
         self.tool_message_order: list[str] = []

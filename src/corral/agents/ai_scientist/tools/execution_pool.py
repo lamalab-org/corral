@@ -197,6 +197,42 @@ class ExecutionPool:
         )
         return branch
 
+    def restore_branches(
+        self, checkpoints: list[dict[str, Any]], tree: ExperimentTree
+    ) -> None:
+        restore = getattr(self.sessions, "restore_branch", None)
+        if not callable(restore) and checkpoints:
+            raise RuntimeError(
+                "AI Scientist branch checkpoint restoration is unavailable"
+            )
+        for checkpoint in checkpoints:
+            branch_id = str(checkpoint["branch_id"])
+            head_node_id = checkpoint.get("head_node_id")
+            if head_node_id is not None:
+                tree.get(head_node_id)
+            handle = restore(checkpoint)
+            branch = self._runtime_from_session(
+                handle,
+                action_history=(
+                    tree.executed_trajectory(head_node_id)
+                    if head_node_id is not None
+                    else []
+                ),
+                head_node_id=head_node_id,
+                inheritance_method="checkpoint",
+            )
+            self.active.pop(branch.branch_id)
+            branch.branch_id = branch_id
+            self.active[branch_id] = branch
+            for node in tree.nodes:
+                if node.branch_id == branch_id:
+                    node.execution_id = branch.execution_id
+                    node.branch_workspace = branch.workspace
+            if branch_id.startswith("branch_") and branch_id[7:].isdigit():
+                self._next_branch_number = max(
+                    self._next_branch_number, int(branch_id[7:]) + 1
+                )
+
     def acquire(
         self,
         parent: ExperimentNode | None,

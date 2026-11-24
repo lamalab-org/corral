@@ -67,9 +67,6 @@ lammps_image = (
         APP_DIR / "asset_versions.py", "/opt/corral-md/asset_versions.py", copy=True
     )
     .add_local_file(
-        APP_DIR / "runtime_identity.py", "/opt/corral-md/runtime_identity.py", copy=True
-    )
-    .add_local_file(
         SEED_FILE,
         "/opt/corral-md/base_workspace.json",
         copy=True,
@@ -106,7 +103,13 @@ lammps_image = lammps_image.env(
         "MODAL_IMAGE_BUILDER_VERSION": ASSETS["image_builder_version"],
     }
 )
+lammps_image = lammps_image.add_local_file(
+    APP_DIR.parent / "src/corral_md/resource_catalog.json",
+    "/opt/corral-md/resource_catalog.json",
+    copy=True,
+)
 for _source in (
+    "runtime_identity.py",
     "verification_worker.py",
     "verification_runtime.py",
     "ground_truth.py",
@@ -130,6 +133,7 @@ def runtime_info() -> dict:
         "volume_name": VOLUME_NAME,
         "asset_volumes": ASSET_VOLUMES,
     }
+
 
 volume_potential = modal.Volume.from_name(ASSET_VOLUMES["potentials"])
 volume_sim = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
@@ -160,7 +164,7 @@ def _relative(value: str) -> Path:
         or any(part in {"", ".", ".."} for part in path.parts)
     ):
         raise ValueError(f"Invalid workspace path: {value!r}")
-    if path.parts[0] in ASSET_DIRECTORIES:
+    if path.parts[0] == "resources":
         raise ValueError(f"Writable workspace cannot replace shared assets: {value!r}")
     return Path(*path.parts)
 
@@ -278,23 +282,56 @@ def prepare_workspace(run_id: str, release_id: str) -> dict:
 # This bootstrap runs before agent code. The sandbox has no controller mounts or
 # credentials. Drop privileges after preparing only its private writable volume.
 _BOOTSTRAP = """
-import ctypes, json, os, sys
+import contextlib, ctypes, hashlib, json, os, shutil, signal, subprocess, sys
 from pathlib import Path
 root = Path('/workspace')
-assets = {'models', 'potentials', 'structures'}
+volume = Path('/task-volume')
+# Modal Volume paths are symlinks. Stage mutable files into an ordinary
+# directory so getcwd() and canonical paths agree inside every invocation.
+root.mkdir(mode=0o755, exist_ok=True)
+shutil.copytree(volume, root, dirs_exist_ok=True)
 for name in json.loads(sys.argv[1]):
     (root / name).mkdir(parents=True, exist_ok=True)
-for base, dirs, files in os.walk(root):
-    if Path(base) == root:
-        dirs[:] = [name for name in dirs if name not in assets]
-    os.chown(base, 10001, 10001)
-    for name in files:
-        os.chown(Path(base) / name, 10001, 10001)
-# Modal cannot nest asset mounts beneath the writable Volume. Keep the public
-# paths as root-owned links; a sticky, root-owned workspace prevents agents from
-# replacing those links while allowing ordinary task files at the workspace root.
-for name in assets:
-    os.symlink('/assets/' + name, root / name)
+for tree in (root, volume):
+    for base, dirs, files in os.walk(tree):
+        os.chown(base, 10001, 10001)
+        for name in files:
+            os.chown(Path(base) / name, 10001, 10001)
+# Copy only authorized immutable files from the existing asset cache. Assets
+# never enter controller uploads or successful mutable-workspace exports.
+resources = root / 'resources'
+resources.mkdir(mode=0o755)
+for spec in json.loads(sys.argv[2]):
+    source = Path('/assets') / spec['relative']
+    if source.is_symlink() or not source.is_file():
+        raise ValueError('Invalid declared resource source')
+    destination = resources / spec['name'] / source.name
+    destination.parent.mkdir(mode=0o755)
+    digest = hashlib.sha256()
+    size = 0
+    with source.open('rb') as incoming, destination.open('wb') as outgoing:
+        while chunk := incoming.read(1024 * 1024):
+            digest.update(chunk)
+            size += len(chunk)
+            outgoing.write(chunk)
+    if digest.hexdigest() != spec['sha256'] or size != spec['size']:
+        raise ValueError('Declared resource failed hash validation')
+    destination.chmod(0o444)
+    destination.parent.chmod(0o555)
+resources.chmod(0o555)
+# Prevent access to volume metadata or files outside the declared catalog.
+os.chmod('/assets', 0o700)
+# Modal exposes mounts through symlinks into a shared container-local parent.
+# Hide those aliases too, retaining only a private handle for mutable export.
+volume_fd = os.open(volume, os.O_RDONLY | os.O_DIRECTORY)
+os.set_inheritable(volume_fd, False)
+for mount in (volume, Path('/assets/potentials'), Path('/assets/models'),
+              Path('/assets/structures')):
+    if mount.is_symlink():
+        backing_parent = mount.resolve().parent
+        if backing_parent == Path('/'):
+            raise ValueError('Unsafe Modal mount backing parent')
+        backing_parent.chmod(0o700)
 os.chown(root, 0, 0)
 os.chmod(root, 0o1777)
 os.setgroups([])
@@ -302,7 +339,7 @@ os.setgid(10001)
 os.setuid(10001)
 if ctypes.CDLL(None, use_errno=True).prctl(38, 1, 0, 0, 0) != 0:
     raise OSError(ctypes.get_errno(), 'Could not disable privilege escalation')
-os.chdir(sys.argv[2])
+os.chdir('/workspace')
 env = {'PATH': '/usr/local/bin:/usr/bin:/bin', 'HOME': '/workspace',
        'LANG': 'C.UTF-8', 'TMPDIR': '/workspace/.tmp'}
 # CUDA needs the runtime paths injected by the GPU container runtime.
@@ -310,7 +347,28 @@ for key in ('LD_LIBRARY_PATH', 'CUDA_VISIBLE_DEVICES', 'NVIDIA_VISIBLE_DEVICES',
             'NVIDIA_DRIVER_CAPABILITIES'):
     if key in os.environ:
         env[key] = os.environ[key]
-os.execvpe(sys.argv[3], sys.argv[3:], env)
+process = subprocess.Popen(sys.argv[3:], env=env, start_new_session=True, close_fds=True)
+try:
+    return_code = process.wait()
+finally:
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(process.pid, signal.SIGKILL)
+# Export as the same unprivileged identity as the program. Preserve symlinks
+# for the controller to reject after container termination, never follow them
+# with controller privileges. Declared resources stay outside mutable exports.
+os.fchdir(volume_fd)
+os.close(volume_fd)
+volume = Path('.')
+for entry in volume.iterdir():
+    if entry.is_dir() and not entry.is_symlink():
+        shutil.rmtree(entry)
+    else:
+        entry.unlink()
+shutil.copytree(
+    root, volume, dirs_exist_ok=True, symlinks=True,
+    ignore=lambda directory, names: {'resources'} if Path(directory) == root else set(),
+)
+sys.exit(return_code if return_code >= 0 else 128 - return_code)
 """
 
 
@@ -320,12 +378,9 @@ def _collect_workspace(volume, working: Path) -> None:
     checked = []
     for entry in entries:
         name = entry.path.removeprefix("/")
-        # These root-owned public links refer only to separately mounted assets;
-        # never export them or any asset contents into the local workspace.
-        if name in ASSET_DIRECTORIES and entry.type in {
-            FileEntryType.DIRECTORY,
-            FileEntryType.SYMLINK,
-        }:
+        # Root-owned resource copies are immutable and excluded from the
+        # mutable workspace receipt and subsequent per-action uploads.
+        if name == "resources" or name.startswith("resources/"):
             continue
         relative = _relative(name)
         if entry.type not in {FileEntryType.FILE, FileEntryType.DIRECTORY}:
@@ -350,13 +405,46 @@ def _collect_workspace(volume, working: Path) -> None:
         shutil.move(str(staged), working)
 
 
+def _authorized_asset_files(resources: dict | None) -> list[dict]:
+    catalog_path = Path("/opt/corral-md/resource_catalog.json")
+    if not catalog_path.is_file():
+        catalog_path = APP_DIR.parent / "src/corral_md/resource_catalog.json"
+    catalog = json.loads(catalog_path.read_text())
+    declared = {
+        "md-" + str(PurePosixPath(relative).with_suffix("")).replace("/", "-"): {
+            "relative": relative,
+            "sha256": spec["sha256"],
+            "size": spec["size"],
+        }
+        for relative, spec in catalog.items()
+    }
+    if resources is None:
+        # Trusted verifier code uses the same pinned scientific assets.
+        return [{"name": name, **spec} for name, spec in declared.items()]
+    selected = []
+    for name, descriptor in resources.items():
+        spec = declared.get(name)
+        if spec is None or any(
+            descriptor.get(key) != value
+            for key, value in {
+                "name": name,
+                "filename": PurePosixPath(spec["relative"]).name,
+                "sha256": spec["sha256"],
+                "size": spec["size"],
+            }.items()
+        ):
+            raise ValueError(f"Resource does not match the pinned MD catalog: {name}")
+        selected.append({"name": name, **spec})
+    return selected
+
+
 def _run_sandbox(
     command: list[str],
     working: Path,
     *,
     gpu: bool = False,
     timeout: int = 7200,
-    working_dir: str = "/workspace",
+    resources: dict | None = None,
     log_stem: str = "execution",
     check_exit: bool = True,
 ) -> dict:
@@ -376,17 +464,17 @@ def _run_sandbox(
             "-c",
             _BOOTSTRAP,
             json.dumps(directories),
-            working_dir,
+            json.dumps(_authorized_asset_files(resources)),
             *command,
             app=app,
             image=lammps_image,
-            workdir="/workspace",
+            workdir="/",
             gpu=GPU_TYPE if gpu else None,
             cpu=CPUS,
             memory=10240 if gpu else 5120,
             timeout=timeout,
             volumes={
-                "/workspace": task_volume,
+                "/task-volume": task_volume,
                 "/assets/potentials": volume_potential.read_only(),
                 "/assets/models": volume_models.read_only(),
                 "/assets/structures": volume_struct.read_only(),
@@ -430,44 +518,48 @@ def _run_sandbox(
                 f"Simulation failed (exit {sandbox.returncode}):\n"
                 f"stdout:\n{stdout[-4000:]}\nstderr:\n{stderr[-4000:]}"
             )
-        return {"exit_code": sandbox.returncode, "output": stdout + stderr}
+        return {
+            "exit_code": sandbox.returncode,
+            "output": stdout + stderr,
+            "logs": {
+                "stdout": f"/workspace/output/{log_stem}.stdout.txt",
+                "stderr": f"/workspace/output/{log_stem}.stderr.txt",
+            },
+        }
 
 
 def _run_lammps(
-    input_path: Path, log_name: str, _local_root: str, remote_root: Path
-) -> None:
-    # Public paths are stable inside every sandbox: no source-text rewriting.
-    original = input_path.read_text(encoding="utf-8")
-    log_command = re.compile(r"^\s*log\s+", re.IGNORECASE)
-    sanitized = "".join(
-        line
-        for line in original.splitlines(keepends=True)
-        if line.lstrip().startswith("#") or not log_command.match(line.strip())
+    input_path: Path,
+    log_name: str,
+    _local_root: str,
+    remote_root: Path,
+    *,
+    execution_options: dict | None = None,
+) -> dict:
+    # The sandbox supplies public mounts and cwd; preserve the original input.
+    public_input = "/workspace/" + input_path.relative_to(remote_root).as_posix()
+    result = _run_sandbox(
+        [
+            "mpirun",
+            "--bind-to",
+            "core",
+            "--map-by",
+            "core",
+            "-np",
+            str(CPUS),
+            "/usr/local/bin/lmp",
+            "-in",
+            public_input,
+            "-log",
+            "/workspace/output/" + log_name,
+        ],
+        remote_root,
+        log_stem=input_path.stem,
+        resources=(execution_options or {}).get("resources", {}),
     )
-    input_path.write_text(sanitized, encoding="utf-8")
-    try:
-        public_input = "/workspace/" + input_path.relative_to(remote_root).as_posix()
-        _run_sandbox(
-            [
-                "mpirun",
-                "--bind-to",
-                "core",
-                "--map-by",
-                "core",
-                "-np",
-                str(CPUS),
-                "/usr/local/bin/lmp",
-                "-in",
-                public_input,
-                "-log",
-                "/workspace/output/" + log_name,
-            ],
-            remote_root,
-            log_stem=input_path.stem,
-        )
-    finally:
-        input_path.parent.mkdir(parents=True, exist_ok=True)
-        input_path.write_text(original, encoding="utf-8")
+    if (remote_root / "output" / log_name).is_file():
+        result["logs"]["log"] = "/workspace/output/" + log_name
+    return result
 
 
 def _run_python(
@@ -477,19 +569,16 @@ def _run_python(
     remote_root: Path,
     *,
     execution_options: dict | None = None,
-) -> None:
+) -> dict:
     options = execution_options or {}
     timeout = options.get("timeout", 900)
-    directory = options.get("working_dir", "/workspace")
+    if options.get("working_dir", "/workspace") != "/workspace":
+        raise ValueError(
+            "This MD runtime no longer supports working_dir overrides; start a new run"
+        )
     if type(timeout) is not int or not 1 <= timeout <= 7200:
         raise ValueError("Invalid Python timeout")
-    if directory != "/workspace":
-        if not isinstance(directory, str) or not directory.startswith("/workspace/"):
-            raise ValueError("Working directory must be an absolute /workspace path")
-        relative = _relative(directory.removeprefix("/workspace/"))
-        if not (remote_root / relative).is_dir():
-            raise ValueError("Working directory does not exist")
-    _run_sandbox(
+    return _run_sandbox(
         [
             "python",
             "-u",
@@ -499,7 +588,7 @@ def _run_python(
         remote_root,
         gpu=True,
         timeout=timeout,
-        working_dir=directory,
+        resources=options.get("resources", {}),
         log_stem=script_path.stem,
     )
 
@@ -564,15 +653,24 @@ def _execute(
     shutil.copytree(run / "workspace", working)
     input_path = working / relative
     trusted_md_record = None
+    execution = None
     try:
         if not input_path.is_file() or input_path.is_symlink():
             raise FileNotFoundError(f"Modal input not found: {relative_input}")
         if kind == "lammps":
-            _run_lammps(
-                input_path, relative.with_suffix(".log").name, local_workspace, working
+            execution = _run_lammps(
+                input_path,
+                relative.with_suffix(".log").name,
+                local_workspace,
+                working,
+                **(
+                    {"execution_options": execution_options}
+                    if execution_options
+                    else {}
+                ),
             )
         elif kind == "python":
-            _run_python(
+            execution = _run_python(
                 input_path,
                 args,
                 local_workspace,
@@ -615,6 +713,8 @@ def _execute(
         "files": files,
         "revision": state["revision"] + 1,
     }
+    if execution is not None:
+        result["logs"] = execution.get("logs", {})
     if trusted_md_record is not None:
         result["trusted_md"] = trusted_md_record
         _write(
@@ -653,6 +753,7 @@ def run_lammps(
     release_id: str,
     base_head: str,
     expected_files: dict,
+    execution_options: dict | None = None,
 ) -> dict:
     """Coordinate one isolated LAMMPS sandbox and commit its successful output."""
     if args:
@@ -667,6 +768,7 @@ def run_lammps(
         release_id,
         base_head,
         expected_files,
+        execution_options,
     )
 
 
@@ -761,6 +863,7 @@ def run_verified_md(
     release_id: str,
     base_head: str,
     expected_files: dict,
+    execution_options: dict | None = None,
 ) -> dict:
     """Run a declarative task-10 protocol and retain actual execution evidence."""
     return _execute(
@@ -773,4 +876,5 @@ def run_verified_md(
         release_id,
         base_head,
         expected_files,
+        execution_options,
     )

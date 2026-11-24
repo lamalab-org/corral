@@ -1,18 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Level 2 Task 09 artifacts and scoring metadata.
-
-Generating model: a two-parameter logistic item response model over 20 binary
-items, difficulties evenly spaced from -2 to +2.
-
-    P(correct) = 1 / (1 + exp(-slope * (theta - difficulty)))
-
-Three items should leave the bank, and the vendor's review finds only one of
-them. CAT06 and CAT07 are redundant with each other and the vendor flags them;
-CAT13 and CAT14 are equally redundant and it misses them; CAT12's
-discrimination collapses from 1.15 to 0.30 in the holdout. CAT03 is flagged and
-is fine. All four dependent items have high discrimination, so an adaptive test
-reaches for them first.
-"""
+"""Generate the binary IRT bank-selection task and adaptive-test diagnostics."""
 
 from __future__ import annotations
 
@@ -79,6 +66,7 @@ UNSTABLE_HOLDOUT_DISCRIMINATION = 0.30
 # discrimination does not hold up.
 SCREENED_OUT = [FLAGGED_PAIR[1], MISSED_PAIR[1], UNSTABLE_ITEM]
 VENDOR_FLAGS = sorted([*FLAGGED_PAIR, FALSE_FLAG])
+VENDOR_VERDICTS = {item: "disagree" if item == FALSE_FLAG else "agree" for item in VENDOR_FLAGS}
 
 NODES = np.linspace(-4.0, 4.0, 31)
 PRIOR = norm.pdf(NODES) / norm.pdf(NODES).sum()
@@ -87,24 +75,21 @@ PROMPT = """You are choosing an item bank for a short computerized adaptive test
 
 You have calibration responses, an independent holdout sample, and the vendor's item review. The vendor recommends its full bank because it carries the most item information, and its review flags some items.
 
-Choose a bank, and report which item pairs are locally dependent, which vendor flags the responses do not support, and which items behave differently in the holdout sample.
+Decide whether the responses support the vendor's recommendation: which items, if any, should leave the bank, and whether the bank you end up with is ready for adaptive testing.
 """
 
 SUBMISSION_FORMAT = """A single JSON object:
 
 {
-  "bank_choice": "vendor_bank|screened_bank",
-  "dependent_pairs": [["CATxx", "CATyy"]],
-  "unsupported_vendor_flags": ["CATxx"],
-  "unstable_items": ["CATxx"],
-  "recommendation": "use_for_adaptive_testing|do_not_use_without_recalibration"
+  "removed_items": ["CATxx", ...],
+  "vendor_flags": {"<flagged item>": "agree|disagree", ...},
+  "ready_for_adaptive_testing": true|false
 }
 
-`screened_bank` means the vendor bank with the redundant half of each dependent
-pair and every unstable item removed. `dependent_pairs` lists every locally
-dependent pair the responses show, whether or not the vendor flagged it.
-`unsupported_vendor_flags` lists items the vendor flagged that the responses do
-not justify. No model syntax or working is required."""
+`removed_items` lists the items you take out of the vendor's bank; leave it empty
+to keep the full bank. `vendor_flags` gives your verdict on every item the vendor
+flagged. `ready_for_adaptive_testing` says whether the bank you end up with can
+be used as it is."""
 
 
 def _probability(discrimination, difficulty, theta):
@@ -237,6 +222,7 @@ def dependent_pairs(X, a, b, cutoff=0.15):
 
 
 def bank_index(bank):
+    """Return the bank positions of the requested items."""
     return [ITEMS.index(item) for item in bank]
 
 
@@ -273,6 +259,7 @@ def write_vendor_review(path):
 
 
 def write_codebook(path):
+    """Write the public variable and response-format descriptions."""
     path.write_text(
         "# Codebook - adaptive item bank\n\n"
         "`data.csv` and `holdout.csv` are tab-separated and hold binary responses to the "
@@ -292,18 +279,18 @@ def write_codebook(path):
 
 
 def write_memo(path):
+    """Write the preliminary analysis for the agent to assess."""
     path.write_text(
         "# Preliminary analysis\n\n"
         "The vendor recommends its full twenty-item bank. Its case is that the bank "
         "carries more item information than any reduced version, and that the items it "
         "marked for attention in the latest review are the ones to watch.\n\n"
-        "The recommendation rests on information computed from the calibration fit. No "
-        "one has checked the vendor's flags against the responses, looked for items that "
-        "behave differently in the holdout sample, or simulated the adaptive test itself.\n"
+        "The recommendation rests on information computed from the calibration fit.\n"
     )
 
 
 def build_task_json(data_sha):
+    """Build the task definition and private scoring configuration."""
     return [
         {
             "id": TASK_ID,
@@ -315,7 +302,6 @@ def build_task_json(data_sha):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "codebook.md",
                     "data.csv",
@@ -345,14 +331,17 @@ def build_task_json(data_sha):
 
 
 def truth(data_sha, rows, vendor, screened):
+    """Build the private answers, model parameters, and provenance."""
     return {
         "task_id": TASK_ID,
         "scored": {
-            "bank_choice": "screened_bank",
-            "dependent_pairs": sorted([list(FLAGGED_PAIR), list(MISSED_PAIR)]),
-            "unsupported_vendor_flags": [FALSE_FLAG],
-            "unstable_items": [UNSTABLE_ITEM],
-            "recommendation": "use_for_adaptive_testing",
+            # Either half of a redundant pair may go, but only one of them.
+            "removed_items": {
+                "always": [UNSTABLE_ITEM],
+                "one_of_each": sorted([list(FLAGGED_PAIR), list(MISSED_PAIR)]),
+            },
+            "vendor_flags": VENDOR_VERDICTS,
+            "ready_for_adaptive_testing": True,
         },
         "measured": {"vendor_bank": vendor, "screened_bank": screened},
         "generative_parameters": {
@@ -372,24 +361,36 @@ def truth(data_sha, rows, vendor, screened):
 
 
 def candidate_submissions():
+    """Return the reference answer and competing analyses for scoring checks."""
     correct = {
-        "bank_choice": "screened_bank",
-        "dependent_pairs": sorted([list(FLAGGED_PAIR), list(MISSED_PAIR)]),
-        "unsupported_vendor_flags": [FALSE_FLAG],
-        "unstable_items": [UNSTABLE_ITEM],
-        "recommendation": "use_for_adaptive_testing",
+        "removed_items": SCREENED_OUT,
+        "vendor_flags": VENDOR_VERDICTS,
+        "ready_for_adaptive_testing": True,
     }
     return {
         "correct": correct,
         "follows the vendor review": {
-            **correct,
-            "bank_choice": "vendor_bank",
-            "dependent_pairs": [list(FLAGGED_PAIR)],
-            "unsupported_vendor_flags": [],
+            "removed_items": VENDOR_FLAGS,
+            "vendor_flags": {item: "agree" for item in VENDOR_FLAGS},
+            "ready_for_adaptive_testing": True,
         },
-        "chooses on nominal information": {**correct, "bank_choice": "vendor_bank"},
-        "misses the unflagged pair": {**correct, "dependent_pairs": [list(FLAGGED_PAIR)]},
-        "keeps the item that does not transport": {**correct, "unstable_items": []},
+        "chooses on nominal information": {**correct, "removed_items": []},
+        "misses the unflagged pair": {
+            **correct,
+            "removed_items": [FLAGGED_PAIR[1], UNSTABLE_ITEM],
+        },
+        "keeps the item that does not transport": {
+            **correct,
+            "removed_items": [FLAGGED_PAIR[1], MISSED_PAIR[1]],
+        },
+        "drops both items of a redundant pair": {
+            **correct,
+            "removed_items": [*FLAGGED_PAIR, MISSED_PAIR[1], UNSTABLE_ITEM],
+        },
+        "drops the false flag too": {
+            **correct,
+            "removed_items": [*SCREENED_OUT, FALSE_FLAG],
+        },
     }
 
 
@@ -515,6 +516,7 @@ def naive(calibration, holdout, theta_holdout):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     rng = np.random.default_rng(SEED)
     calibration, _ = simulate(rng, N_CALIBRATION)

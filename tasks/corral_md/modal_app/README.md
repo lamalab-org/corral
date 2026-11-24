@@ -2,6 +2,10 @@
 
 The Modal app allows you to run computationally intensive simulation functions on [Modal's](https://modal.com) cloud servers.
 
+Corral MD uses local simulation and scoring by default. After setting up this
+optional backend, select it with `--env-kwargs '{"local": false}'` on benchmark
+runs or `--verification modal` on the scoring CLI.
+
 ## Quick Setup
 
 1. **Create a Modal account** at [modal.com](https://modal.com)
@@ -56,19 +60,20 @@ diagnostics under the remote run and do not replace the last successful result.
 All MD file-tool paths must be canonical absolute paths beginning with
 `/workspace/`. For example, `/workspace/output/result.json` is accepted, while
 `output/result.json`, `./output/result.json`, parent traversal, symbolic links
-and host paths are rejected. Shared assets live at `/workspace/potentials`,
-`/workspace/models` and `/workspace/structures`. They are accessed separately
-and are excluded from task synchronization and workspace snapshots.
+and host paths are rejected. Shared assets use the declared paths under
+`/workspace/resources/<name>/<filename>`. They are read-only and excluded from
+task synchronization and workspace snapshots. Modal checks their pinned hashes
+before exposing only the authorized files to the command.
 
 CPU Python and terminal commands run in Corral's restricted local workspace
 worker. Python with `use_gpu=True` runs in a Modal Sandbox with an A100, and
-LAMMPS also runs in Modal. The public working directory is `/workspace`;
-structured paths are translated to local storage for CPU Python. Terminal
-commands use paths relative to the task workspace. Shared assets are available
-through file tools and mounted inside Modal, but are not mounted in the local
-terminal. `timeout` and an absolute `working_dir` apply to both CPU and GPU
-Python calls. Remote logs and captured stdout/stderr are saved under
-`/workspace/output`.
+LAMMPS also runs in Modal. Every sandboxed invocation starts in `/workspace`,
+including programs stored in subdirectories. File tools, terminal, CPU/GPU
+Python and LAMMPS receive the same declared resource paths. Python accepts
+`timeout`; it has no working-directory override. Remote logs and captured
+stdout/stderr are saved under `/workspace/output`, and successful tool results
+return the exact readable filenames. The unconfined host fallback retains its
+existing limitations; it does not provide the sandbox's mount guarantees.
 
 Absolute-path validation applies to structured tool arguments. Inside Python or
 shell code, relative system calls still work relative to the sandbox's working
@@ -115,9 +120,9 @@ uv run python modal_app/setup_assets.py --output-dir /tmp/corral-md-assets
 
 Modal Sandboxes mount models read-only at:
 
-- `/workspace/models/teacher.model`: original medium MACE-MP-0,
+- `/workspace/resources/md-models-teacher/teacher.model`: original medium MACE-MP-0,
   also used to generate proxy labels in the fine-tuning task.
-- `/workspace/models/student.model`: medium MACE-MP-0b, the fine-tuning starting
+- `/workspace/resources/md-models-student/student.model`: medium MACE-MP-0b, the fine-tuning starting
   checkpoint. Use the trained checkpoint for that task's subsequent MD.
 
 Use `mace_mp(model=<absolute path>, device="cuda", default_dtype="float64",
@@ -207,5 +212,5 @@ any agent mount. Ordinary agent scripts retain their existing execution path.
 Enable independent Level 2 grading with `CORRAL_MD_VERIFICATION=modal`. Level 1
 selects its required remote checks automatically. See the
 [scoring instructions](../README.md#scoring) for defaults, CLI options, and
-submission templates. `run_verified_md` is exposed as an MD tool and shares
+submission requirements. `run_verified_md` is exposed as an MD tool and shares
 normal action replay, output synchronization and recovery.

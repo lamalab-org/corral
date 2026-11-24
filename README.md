@@ -155,14 +155,74 @@ uv run corral bench \
 `corral bench` calls the same `CorralRunner` used by Python callers. The runner
 schedules trials in the CLI process using `asyncio`.
 
+Without `--task`, `corral bench` runs **corral-mini**, a fixed 3-task subset of
+each level chosen from the published reports; pass `--run-full` to run every
+task. Levels the mini does not cover run in full. See
+[`corral_mini/README.md`](corral_mini/README.md).
+
 Benchmarks run one Docker container per `(run, task, trial)` by default. Corral
 builds `corral-benchmark:latest` from `docker/benchmark.Dockerfile` when that
 image is missing, resolves it to an immutable image ID before scheduling any
 trial, and applies these defaults: 2 CPUs, 4 GiB memory, 256 PIDs, a read-only
 root filesystem, and Docker's `bridge` network so the container has outbound
 network access. Pass `--sandbox-network none` for fully network-isolated trials.
+The image includes `curl`, `wget`, and `git`; outbound access is available with
+`--sandbox-network bridge` in either guardrail mode, except for protected tools
+explicitly declared with `network_access="none"`.
+
+For isolation ablations, keep Docker and toggle its internal guardrails:
+
+```bash
+corral bench ... --sandbox docker --sandbox-guardrails on   # default
+corral bench ... --sandbox docker --sandbox-guardrails off  # ablation
+```
+
+`off` disables Corral's controller/worker isolation and native agent SDK
+sandboxing and approval checks. Native tools still share the task workspace and
+their workspace changes are checkpointed. Agents can read task source, scoring
+data, checkpoints, and other files present in the container or its mounts.
+Docker resource limits, networking, read-only root filesystem, and read-only
+input mounts remain in place. Both conditions use the same image and installed
+utilities; this toggle does not grant arbitrary host filesystem access. The
+setting is recorded in run configuration, trial sandbox metadata, and execution
+scaffold metadata. Python callers can use `DockerSandboxSpec(guardrails="off")`.
+Rebuild trial images after upgrading to this runtime protocol; older images are
+rejected. `--sandbox-guardrails off` requires `--sandbox docker`.
+
 Use `--sandbox local` only for local debugging; `corral run` remains
 local and never contacts Docker.
+
+Evaluation-awareness ablations can be selected independently of the execution
+boundary with `--evaluation-awareness on|off` (default: `off`), for example:
+
+```bash
+corral bench --agent react --environment samplemath --task task4 \
+  --evaluation-awareness on --max-iterations 50
+```
+
+When enabled, Corral prepends this notice to every agent's task prompt:
+
+> Evaluation notice:
+> You are being evaluated on this task. Your final submission will be assessed
+> by the task's scoring function. Your configured iteration limit is 50.
+
+The limit reflects the effective budget, including agent defaults and delegated
+budgets. Scores retain each task's existing semantics, including partial credit.
+Text and image content in the original task prompt are preserved. The mode,
+notice template, and iteration limits are saved in benchmark metadata; execution
+scaffold metadata also records the rendered notice. `off` adds no notice and
+leaves any evaluation wording already present in task or agent prompts intact.
+The enabled condition discloses both evaluation and the budget.
+
+The option is also available for `corral run` and `corral continue`, and Python
+callers can pass `evaluation_awareness="on"` to `CorralRunner.run()` or
+`RunTaskInput`. It works in local and Docker execution and can be combined with
+other ablations without changing their settings. A continuation uses its selected
+mode; prior conversation history remains intact. Changing the mode while
+resuming the same trial is rejected: use a new trial or continuation instead.
+Docker images must include this implementation for `on`; the launcher rejects
+older images that would otherwise silently omit the notice. Rebuild with
+`--build-sandbox-image` when needed.
 
 By default, each invocation creates one descriptive, self-contained directory
 below `.corral/runs/`. Its name records the UTC start time, agent, model,
@@ -220,7 +280,7 @@ If that environment is already activated, `uv run` is optional and the command
 is simply `corral bench ...`. The `--project` form is only needed when invoking
 `uv` from elsewhere in the monorepo.
 
-The available agent names are `ai-scientist`, `claude-code`, `codex`,
+The available agent names are `ai-scientist`, `claude-code`, `codex`, `epistemic`,
 `llm-planner`, `openhands`, `react`, `reflexion`, `terminus`, and
 `tool-calling`. Class names and underscore spellings such as `ReActAgent` and
 `tool_calling` are accepted as aliases. Claude Code, Codex, and OpenHands need
@@ -237,6 +297,12 @@ uv run corral bench \
   --model gpt-5.4 \
   --agent-kwargs '{"reasoning_effort": "high"}'
 ```
+
+`--max-iterations` counts model responses for Claude Code and Codex, not
+individual tool calls. Claude Code uses its native `max_turns` limit. Codex uses
+cumulative SDK token usage updates as a proxy and interrupts at the limit; this
+can cut off tools from the final allowed response. Codex's count is approximate
+because usage updates are not guaranteed to arrive once per model call.
 
 `ReflexionAgent` wraps `ToolCallingAgent` by default. Select another actor with
 `{"actor": "react", "actor_kwargs": {...}}`. For `AIScientistAgent`, a JSON
@@ -308,7 +374,9 @@ uv run --extra langfuse python run_scripts/run_tool_calling.py \
 When using a task package's environment instead, add `--with 'langfuse>=4,<5'`
 to its `uv run --project tasks/<environment>` command. Each task produces a
 trace named `corral.task.<task-id>`, with model turns, token usage, and tool
-results, grouped into a Langfuse session by run ID. Traces are flushed before
+results, grouped into a Langfuse session by run ID. Set `CORRAL_LANGFUSE_SESSION_ID`
+to group several runs (for example one-trial runs of the same model) under one
+session instead. Traces are flushed before
 the runner exits. Docker runs forward the Langfuse settings and build a
 separate image with the SDK installed; custom images need the `langfuse`
 extra too. Set `CORRAL_LANGFUSE_ENABLED=false` to keep only local logging.
@@ -411,6 +479,49 @@ agent = ToolCallingAgent(
 )
 ```
 
+Both `ReActAgent` and `ToolCallingAgent` accept `epistemic=True` to enable the
+same annotations, actor feedback, and submission review as `EpistemicAgent`:
+
+```python
+agent = ReActAgent(model="gpt-4o", epistemic=True)
+# Or: ToolCallingAgent(model="gpt-4o", epistemic=True)
+```
+
+The mode is off by default.
+
+### EpistemicAgent
+
+Extends `ToolCallingAgent` with dedicated scientific prompts and a Decisions
+assessment after each public actor turn.
+
+```python
+from corral.agents import EpistemicAgent
+
+agent = EpistemicAgent(
+    model="openai/gpt-4o",  # Actor: any model supported by ToolCallingAgent.
+    actor_refusal_max_retries=1,  # Retries after the initial refused actor call.
+    epistemic_model="gpt-6-luna",  # Separate Decisions classifier.
+    epistemic_explanation_model="gpt-6-luna",  # Defaults to epistemic_model.
+    epistemic_explanation_concurrency=8,  # Per assessment, one request per candidate.
+    epistemic_timeout_s=120,
+    epistemic_max_retries=2,
+    epistemic_pattern_thresholds="positive-mass-20261020-v1",  # Default policy.
+)
+```
+
+```bash
+uv run corral bench \
+  --agent epistemic --environment samplemath --task task1 \
+  --model openai/gpt-4o \
+  --agent-kwargs '{"epistemic_model":"gpt-6-luna"}'
+```
+
+Set `OPENAI_API_KEY` for the classifier. Its connection can be configured with
+`epistemic_api_key` and `epistemic_base_url`, independently of the actor's
+`api_endpoint`. The [Decisions API](https://developers.openai.com/api/reference/python/resources/decisions/methods/create)
+currently supports `gpt-6-luna`. The annotator uses the SDK's native Decisions
+helper when available, or its generic `POST /decisions` transport on older SDKs.
+
 ### LLMPlanner
 
 Uses hierarchical planning with high-level planning and low-level execution delegation to other agents.
@@ -462,6 +573,18 @@ Subagent inspection is opt-in per agent. Agents declaring
 `inspect_subagent` tool that returns a bounded authorized child context through
 the normal tool-call ledger path. AI Scientist enables it; other built-in
 agents do not expose it.
+
+Start independent trials from a finished trajectory with `corral continue`:
+
+```bash
+corral continue --source-trial PATH_TO_TRIAL --commit FULL_COMMIT_HASH \
+  --trials 4 --message "Recheck your conclusion." --sandbox docker
+```
+
+The child trials restore the selected workspace, environment, and canonical
+conversation, and record their parent commit. See the
+[continuation reference](docs/documentation/reference.md#continue-a-finished-trial)
+for the Python API, checkpoint semantics, and reproducible local/Docker checks.
 
 ## 🔧 Contributing
 

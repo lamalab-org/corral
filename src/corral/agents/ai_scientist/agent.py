@@ -32,19 +32,32 @@ from corral.agents.ai_scientist.workers.experimenter import Experimenter
 from corral.agents.ai_scientist.workers.planner import NodePlanner, TaskFormulator
 from corral.agents.ai_scientist.workers.synthesizer import FinalSynthesizer
 from corral.agents.base_agent import BaseAgent, prompt_with_state_history
-from corral.agents.schema import AgentOutcome, AgentUsage, BudgetExhaustedError
+from corral.agents.schema import (
+    SURRENDER_SENTINEL,
+    AgentOutcome,
+    AgentUsage,
+    BudgetExhaustedError,
+)
 from corral.agents.session import AgentSession, AgentSessionCapabilities
 from corral.agents.utils import llm_call
 from corral.core.action import SUBMIT_ANSWER_TOOL_NAME, Action
 from corral.core.errors import concise_error_message
 
 _SCIENTIST_SYSTEM_PROMPT = """
-You are the reasoning component of a scientific experiment manager. Interact
-with the task environment only through experiments explicitly represented by
-the supplied Corral tool schemas. Never invent observations, never use a
-benchmark score as evidence, and distinguish measured facts from hypotheses.
+You are the reasoning component of a scientific experiment manager.
+Interact with the task environment only through experiments explicitly represented by the supplied tool schemas.
+All branches draw from the same resources. Forking or restoring a checkpoint does not replenish them.
+
 Return the requested structured object without Markdown or surrounding prose.
 """.strip()
+
+# The synthesizer writes a structured answer rather than calling tools, so the
+# tool-calling surrender prompt does not apply verbatim.
+_SCIENTIST_SURRENDER_INSTRUCTIONS = (
+    "If the collected evidence cannot support any answer, or you conclude that "
+    "the request cannot be done with the information and tools available, set "
+    f"final_answer to exactly {SURRENDER_SENTINEL}."
+)
 
 _TRACE_NODE_ID = re.compile(r"node_\d+")
 _TRACE_LABEL_HYPOTHESIS_CHARS = 96
@@ -144,6 +157,22 @@ class _BranchSessionRegistry:
         with self._lock:
             return self._sessions[execution_id]
 
+    def checkpoint(self, execution_id: str) -> dict[str, Any]:
+        session = self.session(execution_id)
+        return self.portal.call(session.checkpoint_branch)
+
+    def restore_branch(self, checkpoint: Mapping[str, Any]) -> BranchSessionHandle:
+        handle = self.create_branch()
+        try:
+            session = self.session(handle.execution_id)
+            self.portal.call(
+                partial(session.restore_branch_state, checkpoint=checkpoint)
+            )
+            return handle
+        except BaseException:
+            self.close_branch(handle.execution_id)
+            raise
+
 
 class AIScientistAgent(BaseAgent):
     """Progressive tree search over scientific actions exposed by Corral.
@@ -184,6 +213,13 @@ class AIScientistAgent(BaseAgent):
             temperature=temperature,
             **kwargs,
         )
+
+    def _surrender_instructions(self, session: AgentSession) -> str:
+        if not session.surrender_allowed:
+            return ""
+        if self.surrender_prompt is not None:
+            return self.surrender_prompt.fill({})
+        return _SCIENTIST_SURRENDER_INSTRUCTIONS
 
     @staticmethod
     def _search_snapshot(state: ScientistState) -> dict[str, Any]:
@@ -236,15 +272,54 @@ class AIScientistAgent(BaseAgent):
         status: str,
         tool_statistics: Mapping[str, Any] | None = None,
         error: str | None = None,
+        branches: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         return {
             "schema_version": 1,
+            "checkpoint_version": 1,
             "status": status,
             "search": cls._search_snapshot(state) if state is not None else None,
+            "branches": list(branches or []),
             "graph": cls._trace_metadata(state, messages),
             "tool_statistics": dict(tool_statistics or {}),
             "error": error,
         }
+
+    def _search_tools(self, session: AgentSession) -> list[dict[str, Any]]:
+        """The session's tools without the final actions, which only the main
+        session runs."""
+        final_names = {action.name for action in self.config.final_actions} | {
+            SUBMIT_ANSWER_TOOL_NAME
+        }
+        return [
+            dict(tool)
+            for tool in session.tools
+            if tool.get("function", {}).get("name") not in final_names
+        ]
+
+    def _run_final_actions(
+        self, session: AgentSession, portal: BlockingPortal
+    ) -> list[dict[str, Any]]:
+        """Run each configured final action on the main session, in order."""
+        results = []
+        for final_action in self.config.final_actions:
+            outcome = portal.call(
+                session.execute,
+                Action(
+                    name=final_action.name,
+                    arguments=dict(final_action.arguments),
+                    metadata={"agent": type(self).__name__, "final_action": True},
+                ),
+            )
+            results.append(
+                {
+                    "name": final_action.name,
+                    "success": outcome.success,
+                    "error": outcome.error,
+                    "result": str(outcome.result)[:2000],
+                }
+            )
+        return results
 
     def _execute_session(
         self,
@@ -263,7 +338,7 @@ class AIScientistAgent(BaseAgent):
             else json.dumps(prompt_value, ensure_ascii=False)
         )
         prompt = prompt_with_state_history(prompt, session.messages)
-        tools = [dict(tool) for tool in session.tools]
+        tools = self._search_tools(session)
         tool_payload = {"tools": tools}
         tools = tool_payload.get("tools", [])
 
@@ -287,11 +362,26 @@ class AIScientistAgent(BaseAgent):
         )
         initial_llm_calls = gateway.call_count
         initial_llm_tokens = getattr(gateway, "token_count", 0)
-        formulation = formulator.formulate(
-            task_prompt=prompt, tools=tools, examples=examples
-        )
-        state = ScientistState(task_prompt=prompt, tools=tools, formulation=formulation)
-        trace.write("formulation", formulation.model_dump(mode="json"))
+        saved = session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}
+        saved_search = saved.get("search")
+        if isinstance(saved_search, Mapping):
+            if saved.get("checkpoint_version") != 1:
+                raise ValueError(
+                    "AI Scientist checkpoint predates branch restoration; "
+                    "select a checkpoint created by the current runtime"
+                )
+            state = ScientistState.from_snapshot(
+                dict(saved_search), task_prompt=prompt, tools=tools
+            )
+            trace.write("search_restored", {"stage": state.current_stage.value})
+        else:
+            formulation = formulator.formulate(
+                task_prompt=prompt, tools=tools, examples=examples
+            )
+            state = ScientistState(
+                task_prompt=prompt, tools=tools, formulation=formulation
+            )
+            trace.write("formulation", formulation.model_dump(mode="json"))
 
         branch_sessions = _BranchSessionRegistry(session, portal)
         pool = ExecutionPool(
@@ -302,6 +392,38 @@ class AIScientistAgent(BaseAgent):
             stop_on_error=config.stop_plan_on_tool_error,
             replay_equivalence=self.replay_equivalence,
         )
+        if isinstance(saved_search, Mapping):
+            pool.budget.scientific_calls = state.scientific_tool_calls
+            pool.budget.replay_calls = state.replay_tool_calls
+            pool.executions_created = state.executions_created
+            pool.executions_cloned = state.executions_cloned
+            pool.peak_simultaneous_executions = state.peak_simultaneous_executions
+            pool.replay_results = list(state.replay_results)
+            try:
+                pool.restore_branches(list(saved.get("branches", [])), state.tree)
+            except BaseException:
+                pool.close_all()
+                raise
+
+        def checkpoint(search: ScientistState, active_pool: ExecutionPool) -> None:
+            portal.call(session.checkpoint_environment)
+            branches = [
+                {
+                    "branch_id": branch.branch_id,
+                    "head_node_id": branch.head_node_id,
+                    **branch_sessions.checkpoint(branch.execution_id),
+                }
+                for branch in active_pool.active.values()
+                if branch.execution_id is not None
+            ]
+            portal.call(
+                session.set_agent_state,
+                _SCIENTIST_STATE_NAMESPACE,
+                self._state_payload(
+                    search, owner.messages, status="partial", branches=branches
+                ),
+            )
+
         planner = NodePlanner(
             gateway,
             max_actions_per_node=config.max_actions_per_node,
@@ -336,6 +458,7 @@ class AIScientistAgent(BaseAgent):
             trace=trace,
             initial_llm_calls=initial_llm_calls,
             initial_llm_tokens=initial_llm_tokens,
+            on_checkpoint=checkpoint,
         )
         try:
             state = manager.execute_search(state, pool)
@@ -372,6 +495,9 @@ class AIScientistAgent(BaseAgent):
                     },
                 )
 
+            for result in self._run_final_actions(session, portal):
+                trace.write("final_action", result)
+
             answer = FinalSynthesizer(
                 gateway, max_journal_chars=config.max_journal_chars
             ).generate(
@@ -379,6 +505,7 @@ class AIScientistAgent(BaseAgent):
                 journal_context=state.journal.context(config.max_journal_chars),
                 best_nodes=state.best_nodes,
                 canonical_workspace=state.artifact_destination_workspace,
+                surrender_instructions=self._surrender_instructions(session),
             )
             if promotion is not None:
                 answer = answer.replace(
@@ -391,7 +518,10 @@ class AIScientistAgent(BaseAgent):
             # run; the local search state contains every node recorded so far.
             graph = self._trace_metadata(state, owner.messages)
             trace.write("graph_snapshot", graph)
-            pool.close_all()
+            try:
+                checkpoint(state, pool)
+            finally:
+                pool.close_all()
             branch_tool_statistics = pool.tool_statistics()
             portal.call(
                 session.set_agent_state,
@@ -401,6 +531,11 @@ class AIScientistAgent(BaseAgent):
                     owner.messages,
                     status="partial",
                     tool_statistics=branch_tool_statistics,
+                    branches=list(
+                        (session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}).get(
+                            "branches", []
+                        )
+                    ),
                 ),
             )
 
@@ -431,6 +566,11 @@ class AIScientistAgent(BaseAgent):
                 owner.messages,
                 status="completed",
                 tool_statistics=branch_tool_statistics,
+                branches=list(
+                    (session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}).get(
+                        "branches", []
+                    )
+                ),
             ),
         )
         return answer, usage, metadata
@@ -438,10 +578,12 @@ class AIScientistAgent(BaseAgent):
     async def run_session(self, session: AgentSession) -> AgentOutcome:
         """Run search, experimentation, and synthesis through session branches."""
         owner = _GatewayOwner()
-        await session.set_agent_state(
-            _SCIENTIST_STATE_NAMESPACE,
-            self._state_payload(None, (), status="running"),
-        )
+        previous = session.get_agent_state(_SCIENTIST_STATE_NAMESPACE)
+        if not previous or previous.get("search") is None:
+            await session.set_agent_state(
+                _SCIENTIST_STATE_NAMESPACE,
+                self._state_payload(None, (), status="running"),
+            )
         async with BlockingPortal() as portal:
             try:
                 answer, usage, metadata = await anyio.to_thread.run_sync(
@@ -503,11 +645,17 @@ class AIScientistAgent(BaseAgent):
                 usage=usage,
                 metadata=metadata,
             )
+        surrendered = (
+            session.surrender_allowed
+            and answer.casefold() == SURRENDER_SENTINEL.casefold()
+        )
+        if surrendered:
+            answer = SURRENDER_SENTINEL
         await session.set_agent_state(
             _SCIENTIST_STATE_NAMESPACE,
             {
                 **dict(session.get_agent_state(_SCIENTIST_STATE_NAMESPACE) or {}),
-                "status": "completed",
+                "status": "surrendered" if surrendered else "completed",
                 "error": None,
             },
         )
@@ -534,6 +682,8 @@ class AIScientistAgent(BaseAgent):
                 usage=usage,
                 metadata=metadata,
             )
+        if surrendered:
+            return AgentOutcome(status="surrendered", usage=usage, metadata=metadata)
         return AgentOutcome(
             status="completed",
             answer=answer,

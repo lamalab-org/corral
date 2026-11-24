@@ -1153,3 +1153,9 @@ async def test_benchmark_cancellation_drains_active_evaluation(monkeypatch):
         await asyncio.wait_for(benchmark, timeout=2)
     assert calls == 1
     assert active == 0
+
+
+def test_default_docker_allowlist_forwards_openrouter_and_session_settings():
+    allowlist = DockerSandboxSpec().environment_allowlist
+    assert "OPENROUTER_API_KEY" in allowlist
+    assert "CORRAL_LANGFUSE_SESSION_ID" in allowlist

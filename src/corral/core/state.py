@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field, JsonValue, field_validator
 
@@ -151,7 +151,50 @@ class ExecutionState(FrozenModel):
         for action_state in self.actions.values():
             name = action_state.action.name
             statistics[name] = statistics.get(name, 0) + 1
+        for call in self.sdk_tool_calls:
+            name = call["tool_name"]
+            statistics[name] = statistics.get(name, 0) + 1
         return statistics
+
+    @property
+    def sdk_tool_calls(self) -> list[dict[str, Any]]:
+        """Project SDK-owned tools without making them recoverable actions."""
+        calls = []
+        for run_id, messages in self.conversations.items():
+            by_id: dict[str, dict[str, Any]] = {}
+            for message in messages:
+                if not message.get("sdk_native"):
+                    continue
+                for raw in message.get("tool_calls", ()):
+                    action = Action.from_tool_call(raw)
+                    by_id[action.id] = {
+                        "tool_name": action.name,
+                        "arguments": dict(action.arguments),
+                        "result": None,
+                        "status": "pending",
+                        "error": False,
+                        "error_message": None,
+                        "duration": None,
+                        "timestamp": None,
+                        "action_id": action.id,
+                        "actor_id": self.agent_runs[run_id].actor_id,
+                    }
+                if message.get("role") == "tool":
+                    call = by_id.get(message.get("tool_call_id"))
+                    if call is not None:
+                        failed = bool(message.get("is_error"))
+                        duration_ms = message.get("duration_ms")
+                        call.update(
+                            result=message.get("content"),
+                            status="failed" if failed else "completed",
+                            error=failed,
+                            error_message=message.get("content") if failed else None,
+                            duration=None
+                            if duration_ms is None
+                            else duration_ms / 1000,
+                        )
+            calls.extend(by_id.values())
+        return calls
 
 
 __all__ = [

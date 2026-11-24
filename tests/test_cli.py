@@ -12,6 +12,7 @@ import pytest
 from corral import cli
 from corral.agents.ai_scientist import AIScientistConfig, SakanaAIScientistConfig
 from corral.agents.ai_scientist.agent import AIScientistAgent
+from corral.agents.epistemic import EpistemicAgent
 from corral.agents.llm_planner import LLMPlanner
 from corral.agents.react import ReActAgent
 from corral.agents.reflexion_agent import ReflexionAgent
@@ -23,6 +24,7 @@ from corral.core.environment import Environment, Toolset
 from corral.core.task import InputRef, TaskDefinition
 from corral.observability import LoggingObserver
 from corral.orchestration.launchers import LocalTaskLauncher
+from corral.subsets import mini_task_ids, mini_versions
 
 
 def _load_legacy_script():
@@ -50,6 +52,7 @@ EXPECTED_AGENTS = (
     "ai-scientist",
     "claude-code",
     "codex",
+    "epistemic",
     "llm-planner",
     "openhands",
     "react",
@@ -104,6 +107,7 @@ def test_every_public_concrete_agent_is_registered():
         "AIScientistAgent",
         "ClaudeCodeAgent",
         "CodexAgent",
+        "EpistemicAgent",
         "LLMPlanner",
         "OpenHandsAgent",
         "ReActAgent",
@@ -117,6 +121,7 @@ def test_every_public_concrete_agent_is_registered():
     ("name", "agent_class"),
     [
         ("ai-scientist", AIScientistAgent),
+        ("epistemic", EpistemicAgent),
         ("llm-planner", LLMPlanner),
         ("react", ReActAgent),
         ("terminus", TerminusAgent),
@@ -266,6 +271,7 @@ def test_benchmark_parser_has_safe_docker_defaults():
     )
 
     assert args.sandbox == "docker"
+    assert args.sandbox_guardrails == "on"
     assert args.sandbox_image is None
     assert args.sandbox_cpus == 2.0
     assert args.sandbox_memory == "4g"
@@ -277,6 +283,32 @@ def test_benchmark_parser_has_safe_docker_defaults():
     assert args.max_parallel_evaluations is None
     assert args.max_parallel_total is None
     assert args.max_parallel_evaluations_by_environment == {}
+    assert args.evaluation_awareness == "off"
+
+
+@pytest.mark.parametrize(
+    ("command", "extra"),
+    [
+        ("bench", []),
+        ("run", ["--task", "task1"]),
+        ("continue", ["--source-trial", "/tmp/source", "--commit", "a" * 64]),
+    ],
+)
+@pytest.mark.parametrize("mode", ["off", "on"])
+def test_evaluation_awareness_parser(command, extra, mode):
+    args = cli.build_parser().parse_args(
+        [
+            command,
+            "--agent",
+            "react",
+            "--environment",
+            "samplemath",
+            *extra,
+            "--evaluation-awareness",
+            mode,
+        ]
+    )
+    assert args.evaluation_awareness == mode
 
 
 def test_legacy_benchmark_namespace_also_defaults_to_docker():
@@ -313,7 +345,7 @@ def test_benchmark_selects_image_task_and_extra_for_environment_and_harness(
         lambda *args, **kwargs: {"task1": _environment("task1")},
     )
     args = cli.build_parser().parse_args(
-        ["bench", "--agent", agent, "--environment", environment]
+        ["bench", "--agent", agent, "--environment", environment, "--run-full"]
     )
     image_kind = environment if environment in {"stargazer", "wetlab"} else "benchmark"
 
@@ -360,6 +392,7 @@ def test_benchmark_preserves_explicit_custom_image(monkeypatch, build, environme
             environment,
             "--sandbox-image",
             "custom:test",
+            "--run-full",
             *(["--build-sandbox-image"] if build else []),
         ]
     )
@@ -379,7 +412,9 @@ def test_benchmark_preserves_explicit_custom_image(monkeypatch, build, environme
                 "CORRAL_EXTRAS": "claude",
                 "CORRAL_TASK": environment,
             }
+            assert kwargs["rebuild"] is True
         else:
+            assert kwargs["rebuild"] is False
             assert kwargs["build_context"] is None
             assert kwargs["dockerfile"] is None
             assert kwargs["build_args"] is None
@@ -589,14 +624,16 @@ def test_run_executes_one_task_without_a_benchmark(
     default_limit,
     max_iterations,
 ):
+    from corral import run
+
     iteration_limits = []
-    original_execute = cli.execute_task
+    original_execute = run.execute_task
 
     async def record_execute(**kwargs):
         iteration_limits.append(kwargs["task"].max_iterations)
         return await original_execute(**kwargs)
 
-    monkeypatch.setattr(cli, "execute_task", record_execute)
+    monkeypatch.setattr(run, "execute_task", record_execute)
     monkeypatch.setattr(
         cli,
         "load_environment_group",
@@ -791,3 +828,158 @@ def test_benchmark_runs_locally_and_writes_report(
     manifest = json.loads((reports[0].parent / "run-metadata.json").read_text())
     assert manifest["status"] == ("completed_with_errors" if failed else "completed")
     assert len(list(reports[0].parent.rglob("commits.sqlite3"))) == 2
+
+
+def _bench_args(*extra):
+    return cli.build_parser().parse_args(
+        ["bench", "--agent", "react", "--environment", "afm", *extra]
+    )
+
+
+def _afm_environments(level=1):
+    task_ids = [f"afm_experiment_level_{level}_task_{i}" for i in range(1, 11)]
+    return {task_id: _environment(task_id) for task_id in task_ids}
+
+
+def test_benchmark_runs_corral_mini_by_default():
+    selected, subset = cli._select_tasks(_bench_args(), _afm_environments())
+
+    assert selected == list(mini_task_ids("afm", 1))
+    assert subset == {"name": "corral-mini", "version": mini_versions()[-1]}
+
+
+def test_benchmark_runs_v1_only_when_requested():
+    selected, subset = cli._select_tasks(
+        _bench_args("--mini-version", "1"), _afm_environments()
+    )
+
+    assert selected == list(mini_task_ids("afm", 1, version=1))
+    assert subset == {"name": "corral-mini", "version": 1}
+
+
+def test_benchmark_run_full_and_explicit_tasks_override_corral_mini():
+    environments = _afm_environments()
+
+    assert cli._select_tasks(_bench_args("--run-full"), environments) == (
+        None,
+        {"name": "full"},
+    )
+    assert cli._select_tasks(
+        _bench_args("--task", "afm_experiment_level_1_task_1"), environments
+    ) == (["afm_experiment_level_1_task_1"], {"name": "explicit"})
+
+
+def test_benchmark_rejects_run_mini_with_run_full():
+    with pytest.raises(SystemExit):
+        _bench_args("--run-mini", "--run-full")
+
+
+def test_benchmark_runs_uncovered_levels_in_full(capsys):
+    args = _bench_args("--env-kwargs", '{"subtasks": true}')
+
+    assert cli._select_tasks(args, _afm_environments()) == (
+        None,
+        {"name": "full", "reason": "not covered by corral-mini"},
+    )
+    assert "does not cover" in capsys.readouterr().err
+
+
+def test_benchmark_rejects_mini_tasks_missing_from_environment():
+    environments = _afm_environments()
+    environments.pop(mini_task_ids("afm", 1)[0])
+
+    with pytest.raises(ValueError, match="tasks not loaded"):
+        cli._select_tasks(_bench_args(), environments)
+
+
+def test_list_tasks_shows_only_corral_mini_tasks(monkeypatch, capsys):
+    monkeypatch.setattr(
+        cli, "load_environment_group", lambda *args, **kwargs: _afm_environments(2)
+    )
+    args = _bench_args("--env-kwargs", '{"level": 2}', "--list-tasks")
+
+    assert asyncio.run(cli.run_benchmark(args)) == 0
+    listed = [line.split("\t")[0] for line in capsys.readouterr().out.splitlines()]
+    assert listed == list(mini_task_ids("afm", 2))
+
+
+def test_benchmark_reports_evaluation_failure_as_incomplete(
+    monkeypatch, tmp_path, capsys
+):
+    import importlib
+
+    run_module = importlib.import_module("corral.run")
+
+    async def unavailable_evaluator(*args, **kwargs):
+        raise ValueError("Cannot grade a different execution protocol or task bank")
+
+    monkeypatch.setattr(run_module, "evaluate_task", unavailable_evaluator)
+    monkeypatch.setattr(
+        cli,
+        "load_environment_group",
+        lambda *args, **kwargs: {"task1": _environment("task1")},
+    )
+    monkeypatch.setattr(cli, "create_agent", lambda *args, **kwargs: SubmitAgent())
+    args = cli.build_parser().parse_args(
+        [
+            "bench",
+            "--agent",
+            "react",
+            "--environment",
+            "samplemath",
+            "--sandbox",
+            "local",
+            "--max-attempts",
+            "1",
+            "--run-id",
+            "evaluation-failure",
+            "--output-dir",
+            str(tmp_path),
+        ]
+    )
+    assert asyncio.run(cli.run_benchmark(args)) == 1
+    assert (
+        "evaluation error: Cannot grade a different execution protocol or task bank"
+        in capsys.readouterr().out
+    )
+    manifest = json.loads(
+        (tmp_path / "evaluation-failure/run-metadata.json").read_text()
+    )
+    assert manifest["status"] == "completed_with_errors"
+    assert manifest["failed_trials"] == manifest["evaluation_failed_trials"] == 1
+    report = json.loads((tmp_path / "evaluation-failure/report.json").read_text())
+    trial = report["task_results"]["task1"]["trials"][0]
+    assert trial["score"] is None
+    assert trial["error_message"] is None
+    assert trial["evaluation_error"]
+
+
+def test_benchmark_parser_defaults_to_verbose_reports():
+    base = ["bench", "--agent", "ReActAgent", "--environment", "samplemath"]
+
+    assert cli.build_parser().parse_args(base).verbose is True
+    assert cli.build_parser().parse_args([*base, "--verbose"]).verbose is True
+    assert cli.build_parser().parse_args([*base, "--no-verbose"]).verbose is False
+
+
+@pytest.mark.parametrize("guardrails", ["on", "off"])
+def test_benchmark_guardrails_are_serialized(guardrails):
+    args = cli.build_parser().parse_args(
+        [
+            "bench",
+            "--agent",
+            "react",
+            "--environment",
+            "samplemath",
+            "--sandbox-guardrails",
+            guardrails,
+        ]
+    )
+    assert cli._sandbox_profile(args).docker.guardrails == guardrails
+
+
+def test_guardrails_off_requires_docker():
+    with pytest.raises(ValueError, match="requires --sandbox docker"):
+        cli._sandbox_profile(
+            argparse.Namespace(sandbox="local", sandbox_guardrails="off")
+        )

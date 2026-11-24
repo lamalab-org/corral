@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Task 05 artifacts and scoring metadata.
-
-Generating model, United States: one HSNS factor plus a second trait carried by
-the four Dark-Triad narcissism items.
-
-The items load identically in both genders, so structure, loadings, variances
-and the correlation between the two traits are all comparable. But six of the
-ten HSNS items are answered differently at the same trait level, in both
-directions, and nothing in the data says which four are clean - so no reference
-set can be defended and the latent means are not identified. The real latent
-difference, 0.30, is deliberately unrecoverable. The two traits correlate 0.50
-in men and 0.30 in women, and that contrast is recoverable.
-"""
+"""Generate the task assessing which gender comparisons are defensible."""
 
 from __future__ import annotations
 
@@ -83,41 +71,38 @@ You are given responses from an online personality survey. The codebook describe
 every column.
 
 Read the data and select participants from the United States who reported male or \
-female. Investigate how far the Hypersensitive Narcissism Scale (HSNS) measures the \
+female. Investigate whether the Hypersensitive Narcissism Scale (HSNS) measures the \
 same thing in men and in women, and on that basis decide which of the following \
 comparisons between the two groups are psychometrically defensible:
 
-  factor_structure               do the same items measure the same factor
+  latent_means                   is the average level of the trait comparable
   loadings                       does the trait relate to its items the same way
-  factor_variances               is the spread of the trait comparable
+  observed_score_means           are the average total scores comparable
+  factor_structure               do the same items measure the same factor
   association_with_other_trait   is its relationship with the Dark Triad narcissism
                                  items comparable
-  latent_means                   is the average level of the trait comparable
-  observed_score_means           are the average total scores comparable
+  factor_variances               is the spread of the trait comparable
 
 Carry out the comparisons you judge defensible, and report the correlation between \
 the two traits in each group.
-
-Items are five-point ordinal ratings and 0 denotes a missing response.
 """
 
 SUBMISSION_FORMAT = """\
 A single JSON object:
 
 {
-  "model_syntax": "<complete lavaan/semopy model>",
+  "model_syntax": "<complete semopy model>",
   "comparisons": {
-    "factor_structure": <true|false>, "loadings": <true|false>,
-    "factor_variances": <true|false>, "association_with_other_trait": <true|false>,
-    "latent_means": <true|false>, "observed_score_means": <true|false>
+    "latent_means": <true|false>, "loadings": <true|false>,
+    "observed_score_means": <true|false>, "factor_structure": <true|false>,
+    "association_with_other_trait": <true|false>, "factor_variances": <true|false>
   },
   "trait_correlation_men": <float>,
   "trait_correlation_women": <float>
 }
 
-`model_syntax` is the measurement model you used, in lavaan notation (`=~` loadings,
-`~~` (co)variances). It is re-fitted during evaluation, so it must be complete and
-runnable.
+`model_syntax` is the measurement model you used, in semopy syntax (`=~` loadings,
+`~~` (co)variances). It must be complete and runnable so the fit can be reproduced.
 """
 
 
@@ -132,17 +117,19 @@ def simulate(n, rng, female, scale=1.0, us=True):
     for item, base in HSNS_LOADINGS.items():
         lam = base * scale
         ystar = lam * eta_h + rng.normal(0, np.sqrt(1 - lam**2), n)
-        tau = np.asarray(C.THRESHOLDS[item])
+        intercept = np.asarray(C.INTERCEPTS[item])
         if us and item in ITEM_SHIFTS:
             out[item] = np.where(
-                female, C.categorize(ystar, tau + ITEM_SHIFTS[item]), C.categorize(ystar, tau)
+                female,
+                C.continuous_response(ystar, intercept - ITEM_SHIFTS[item]),
+                C.continuous_response(ystar, intercept),
             )
         else:
-            out[item] = C.categorize(ystar, tau)
+            out[item] = C.continuous_response(ystar, intercept)
     for item, base in OTHER_LOADINGS.items():
         lam = base * scale
         ystar = lam * eta_o + rng.normal(0, np.sqrt(1 - lam**2), n)
-        out[item] = C.categorize(ystar, C.THRESHOLDS[item])
+        out[item] = C.continuous_response(ystar, C.INTERCEPTS[item])
     return pd.DataFrame(out)[MODEL_VARS]
 
 
@@ -162,7 +149,7 @@ def build_dataset(rng):
             loadings={i: ("x", 0.6) for i in C.DD_ITEMS if i not in OTHER},
             phi_matrix=np.array([[1.0]]),
             factor_names=["x"],
-            taus=C.THRESHOLDS,
+            intercepts=C.INTERCEPTS,
         )
         frames.append(pd.concat([block, filler, demo], axis=1))
     return C.finalize(frames, rng, SEED)
@@ -172,7 +159,7 @@ def comparison_sample(df):
     """US respondents reporting male or female, with complete answers."""
     sub = df[(df.country == "US") & df.gender.isin([1, 2])]
     X = sub[ALL_VARS]
-    return X[(X[MODEL_VARS] != 0).all(axis=1)].astype(float)
+    return X[X[MODEL_VARS].notna().all(axis=1)].astype(float)
 
 
 def reference_syntax():
@@ -247,7 +234,9 @@ def build_truth(targets, floor, pop, data_sha, rows):
                 "hsns_loadings": HSNS_LOADINGS,
                 "other_loadings": OTHER_LOADINGS,
                 "loadings_invariant_across_gender": True,
-                "item_threshold_shifts_for_women": ITEM_SHIFTS,
+                "item_intercept_shifts_for_women": {
+                    item: -value for item, value in ITEM_SHIFTS.items()
+                },
                 "clean_items": CLEAN_ITEMS,
                 "latent_difference_women_minus_men": LATENT_DIFFERENCE,
                 "latent_difference_identified": False,
@@ -255,10 +244,10 @@ def build_truth(targets, floor, pop, data_sha, rows):
             },
             "non_us": {
                 "loading_scale": LOADING_SCALE_NON_US,
-                "item_threshold_shifts_for_women": {},
+                "item_intercept_shifts_for_women": {},
                 "trait_correlation": 0.40,
             },
-            "thresholds": C.THRESHOLDS,
+            "item_intercepts": C.INTERCEPTS,
         },
         "provenance": C.provenance(Path(__file__).name, SEED, rows, data_sha),
     }
@@ -311,7 +300,6 @@ def build_task_json(data_sha):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "codebook.md",
                     "data.csv",
@@ -363,6 +351,7 @@ def verify(df, targets, pop):
 
     # loadings identical across groups -> metric invariance holds
     def loadings(sub):
+        """Estimate standardized item loadings for a group."""
         m = semopy.Model(reference_syntax())
         m.fit(sub[MODEL_VARS])
         ins = m.inspect(std_est=True)
@@ -441,6 +430,7 @@ def naive(df, targets, pop):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     rng = np.random.default_rng(SEED)
     print("Simulating ...")

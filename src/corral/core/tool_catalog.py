@@ -177,6 +177,7 @@ class ToolPolicy(FrozenModel):
     workspace_args: tuple[str, ...] = ()
     resources: tuple[str, ...] = ()
     worker_operation: str | None = None
+    inflight_continuation: Literal["retry", "reject"] = "retry"
 
     @model_validator(mode="after")
     def _validate_bindings(self) -> ToolPolicy:
@@ -202,6 +203,14 @@ def canonical_tool_policy_json(policies: Mapping[str, Any]) -> str:
     )
 
 
+def _tool_policy_payload(policy: ToolPolicy) -> dict[str, Any]:
+    """Keep legacy policy fingerprints stable for the default retry policy."""
+    payload = policy.model_dump(mode="json")
+    if policy.inflight_continuation == "retry":
+        payload.pop("inflight_continuation")
+    return payload
+
+
 def tool_policy_fingerprint(policies: Mapping[str, Any]) -> str:
     payload = canonical_tool_policy_json(policies)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -218,8 +227,7 @@ class ToolPolicySnapshot(FrozenModel):
     def _validate_fingerprint(self) -> ToolPolicySnapshot:
         validate_sha256_hex(self.fingerprint, field_name="tool policy fingerprint")
         payload = {
-            name: policy.model_dump(mode="json")
-            for name, policy in self.policies.items()
+            name: _tool_policy_payload(policy) for name, policy in self.policies.items()
         }
         expected = tool_policy_fingerprint(payload)
         if self.fingerprint != expected:
@@ -234,7 +242,7 @@ class ToolPolicySnapshot(FrozenModel):
         for name, tool in tools.items():
             if name != getattr(tool, "name", None):
                 raise ValueError(f"tool policy key {name!r} does not match tool name")
-            policies[name] = ToolPolicy(
+            policy = ToolPolicy(
                 trusted=bool(getattr(tool, "trusted", False)),
                 controller_dispatch=bool(getattr(tool, "controller_dispatch", False)),
                 workspace_access=str(
@@ -246,7 +254,9 @@ class ToolPolicySnapshot(FrozenModel):
                 workspace_args=tuple(sorted(getattr(tool, "workspace_args", ()))),
                 resources=tuple(sorted(getattr(tool, "resources", ()))),
                 worker_operation=getattr(tool, "worker_operation", None),
-            ).model_dump(mode="json")
+                inflight_continuation=getattr(tool, "inflight_continuation", "retry"),
+            )
+            policies[name] = _tool_policy_payload(policy)
         return cls(policies=policies, fingerprint=tool_policy_fingerprint(policies))
 
 

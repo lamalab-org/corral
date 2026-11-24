@@ -1,14 +1,12 @@
 """The public MD namespace is absolute, isolated and read-only for assets."""
 
 import json
-from types import SimpleNamespace
 
 import pytest
 from corral_md import tools as md_tools
 from corral_md.env import MolecularDynamicsEnvironment, _md_file_tools
 from corral_md.submission import resolve_submission
 from corral_md.workspace import MDWorkspaceFilesystem
-from modal.volume import FileEntryType
 
 from corral.core.environment import Toolset
 from corral.core.task import TaskDefinition
@@ -87,7 +85,7 @@ def test_symlinks_cannot_alias_files_inside_or_outside_workspace(tmp_path):
     assert (tmp_path / "secret").read_text() == "private"
 
 
-@pytest.mark.parametrize("kind", ["models", "potentials", "structures"])
+@pytest.mark.parametrize("kind", ["resources", "resources/md-models-teacher"])
 def test_assets_cannot_be_written_or_shadowed(kind, tmp_path):
     fs = MDWorkspaceFilesystem(tmp_path)
     fs.write_file("/workspace/input.txt", "input")
@@ -97,36 +95,25 @@ def test_assets_cannot_be_written_or_shadowed(kind, tmp_path):
         lambda: fs.copy_file("/workspace/input.txt", f"/workspace/{kind}/file"),
         lambda: fs.move_file(f"/workspace/{kind}/file", "/workspace/file"),
     ):
-        with pytest.raises(PermissionError, match="read-only"):
+        with pytest.raises(ValueError, match="reserved"):
             operation()
     assert not (tmp_path / kind).exists()
 
 
-def test_assets_are_read_remotely_without_materializing_catalog(tmp_path, monkeypatch):
-    from corral_md import modal_workspace, workspace
-
-    entry = SimpleNamespace(path="SW/Si.sw", type=FileEntryType.FILE, size=9)
-    volume = SimpleNamespace(
-        read_file=lambda path: iter([b"potential"]),
-        listdir=lambda path, **kwargs: [entry],
-    )
-    monkeypatch.setattr(
-        modal_workspace, "configured_asset_volume_name", lambda name: name
-    )
-    monkeypatch.setattr(workspace.modal.Volume, "from_name", lambda name: volume)
-    fs = MDWorkspaceFilesystem(tmp_path)
-    assert fs.list_files("/workspace/potentials", recursive=True) == [
-        "/workspace/potentials/SW/Si.sw"
-    ]
-    assert fs.read_file("/workspace/potentials/SW/Si.sw") == "potential"
-    assert fs.file_info("/workspace/potentials/SW/Si.sw")["read_only"] is True
-    assert (
-        fs.grep("potential", "/workspace/potentials/SW/Si.sw")[0]["file"]
-        == "/workspace/potentials/SW/Si.sw"
-    )
-    fs.copy_file("/workspace/potentials/SW/Si.sw", "/workspace/input/copied.sw")
-    assert (tmp_path / "input/copied.sw").read_text() == "potential"
-    assert not (tmp_path / "potentials").exists()
+def test_declared_assets_use_shared_filesystem_without_workspace_copies(tmp_path):
+    resource = tmp_path / "Si.sw"
+    resource.write_text("potential")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    public = "/workspace/resources/md-potentials-SW-Si/Si.sw"
+    fs = MDWorkspaceFilesystem(workspace, resource_paths={public: resource})
+    assert fs.list_files("/workspace/resources", recursive=True) == [public]
+    assert fs.read_file(public) == "potential"
+    assert fs.file_info(public)["read_only"] is True
+    assert fs.grep("potential", public)[0]["file"] == public
+    fs.copy_file(public, "/workspace/input/copied.sw")
+    assert (workspace / "input/copied.sw").read_text() == "potential"
+    assert not (workspace / "resources").exists()
 
 
 def test_cpu_python_runs_in_local_workspace_and_checks_working_dir(tmp_path):
@@ -138,7 +125,7 @@ def test_cpu_python_runs_in_local_workspace_and_checks_working_dir(tmp_path):
     )
     (tmp_path / "output").mkdir()
     tool = md_tools.build_execute_python_script_tool(tmp_path)
-    with pytest.raises(ValueError):
+    with pytest.raises(TypeError, match="working_dir"):
         tool.execute(script_path="/workspace/script.py", working_dir=".")
     result = json.loads(
         tool.execute(
@@ -187,13 +174,19 @@ def test_gpu_python_uses_only_modal_backend_and_checks_working_dir(
 ):
     (tmp_path / "script.py").write_text("print('run')")
     calls = []
+    (tmp_path / "output").mkdir()
+    (tmp_path / "output/script.stdout.txt").write_text("run\n")
+    (tmp_path / "output/script.stderr.txt").write_text("")
     monkeypatch.setattr(
         md_tools,
         "run_python_gpu_in_modal",
-        lambda *args, **kwargs: calls.append((args, kwargs)) or 1,
+        lambda *args, **kwargs: calls.append((args, kwargs)) or {
+            "stdout": "/workspace/output/script.stdout.txt",
+            "stderr": "/workspace/output/script.stderr.txt",
+        },
     )
     tool = md_tools.build_execute_python_script_tool(tmp_path)
-    with pytest.raises(ValueError):
+    with pytest.raises(TypeError, match="working_dir"):
         tool.execute(script_path="/workspace/script.py", working_dir=".")
     assert not calls
     result = json.loads(
@@ -201,7 +194,8 @@ def test_gpu_python_uses_only_modal_backend_and_checks_working_dir(
     )
     assert result["success"]
     assert result["backend"] == "modal_a100"
-    assert calls[0][1]["working_dir"] == "/workspace"
+    assert "working_dir" not in calls[0][1]
+    assert "working_dir" not in tool.params_json_schema["properties"]
 
 
 def test_domain_paths_require_public_absolute_names(tmp_path):
@@ -236,12 +230,12 @@ def test_potential_metadata_cannot_accept_existing_host_file(tmp_path):
         with pytest.raises(ValueError):
             md_tools.get_potential_metadata.execute(file_path=path)
     assert md_tools.get_potential_metadata.execute(
-        file_path="/workspace/potentials/SW/Si.sw"
+        file_path="/workspace/resources/md-potentials-SW-Si/Si.sw"
     )
 
 
 def test_public_submission_paths_map_exactly_to_restored_files(tmp_path):
-    from corral_md.workflow_scoring.common import Evidence
+    from corral_md.scoring.common import Evidence
 
     output = tmp_path / "output"
     output.mkdir()
@@ -249,14 +243,14 @@ def test_public_submission_paths_map_exactly_to_restored_files(tmp_path):
     manifest = {"artifacts": {"data": "/workspace/output/result.csv"}}
     (output / "manifest.json").write_text(json.dumps(manifest))
     resolved = json.loads(
-        resolve_submission("/workspace/output/manifest.json", tmp_path)
+        resolve_submission(json.dumps(manifest), tmp_path)
     )
     assert resolved["artifacts"]["data"] == str(output / "result.csv")
-    evidence = Evidence(resolve_submission("/workspace/output/manifest.json", tmp_path))
+    evidence = Evidence(resolve_submission(json.dumps(manifest), tmp_path))
     assert evidence._path("/workspace/output/result.csv") == output / "result.csv"
     with pytest.raises(ValueError):
         evidence._path("/workspace/../output/result.csv")
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(ValueError, match="JSON object directly"):
         resolve_submission("/workspace/wrong/result.csv", tmp_path)
     with pytest.raises(ValueError):
         workspace_relative_path("/workspace/../output/result.csv")

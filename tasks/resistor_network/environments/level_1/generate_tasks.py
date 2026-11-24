@@ -4,7 +4,10 @@ Level 1 circuits are sampled by `resistor_network.sampler`. Ground truth measure
 simulating each sampled circuit, not from hand-derived formulas.
 
 Usage (from tasks/resistor_network, with the venv set up per README.md):
-    uv run python environments/level_1/generate_tasks.py [--count 8] [--seed 1]
+    uv run python environments/level_1/generate_tasks.py [--count 10] [--seed 202610141]
+
+The batch contains ten structurally distinct tasks with 12-16 resistors. See README.md for the seed
+that reproduces the saved benchmark bank.
 """
 
 import argparse
@@ -17,15 +20,22 @@ from resistor_network.sampler import generate_level_tasks
 
 LEVEL = 1
 DEFAULT_COUNT = 10
-DEFAULT_SEED = 1
+DEFAULT_SEED = 202610141
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=f"Generate level {LEVEL} resistor_network tasks")
-    parser.add_argument(
-        "--count", type=int, default=DEFAULT_COUNT, help="Number of tasks to generate (6-10 recommended)"
+    parser = argparse.ArgumentParser(
+        description=f"Generate level {LEVEL} resistor_network tasks"
     )
-    parser.add_argument("--seed", type=int, default=DEFAULT_SEED, help="Random seed for reproducibility")
+    parser.add_argument(
+        "--count",
+        type=int,
+        default=DEFAULT_COUNT,
+        help="Number of tasks to generate (must be 10)",
+    )
+    parser.add_argument(
+        "--seed", type=int, default=DEFAULT_SEED, help="Random seed for reproducibility"
+    )
     args = parser.parse_args()
 
     tasks = generate_level_tasks(level=LEVEL, count=args.count, seed=args.seed)

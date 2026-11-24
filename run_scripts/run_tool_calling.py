@@ -15,7 +15,7 @@ from uuid import uuid4
 from dotenv import load_dotenv
 
 from corral import ENVIRONMENT_NAMES
-from corral.cli import run_benchmark
+from corral.cli import add_task_subset_arguments, run_benchmark
 from corral.orchestration.defaults import resolve_max_iterations
 
 if TYPE_CHECKING:
@@ -89,11 +89,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         help=(
-            "Task ID to run; repeat for multiple. If omitted, all tasks run. "
-            "Dependencies are included automatically."
+            "Task ID to run; repeat for multiple. Overrides --run-mini and "
+            "--run-full. Dependencies are included automatically."
         ),
     )
     parser.add_argument("--list-tasks", action="store_true")
+    add_task_subset_arguments(parser)
 
     environment = parser.add_argument_group("environment")
     environment.add_argument(
@@ -118,7 +119,15 @@ def build_parser() -> argparse.ArgumentParser:
     agent.add_argument(
         "--max-iterations", type=int, default=resolve_max_iterations(None, AGENT_ID)
     )
-    agent.add_argument("--enable-surrender", action="store_true")
+    agent.add_argument(
+        "--enable-surrender",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Allow the agent to give up by submitting SURRENDER "
+            "(default: disabled; --no-enable-surrender disables it explicitly)."
+        ),
+    )
 
     execution = parser.add_argument_group("execution")
     execution.add_argument("--trials", type=int, default=1)
@@ -133,8 +142,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="JSON",
         help="JSON object mapping environment names or IDs to evaluation limits.",
     )
+    execution.add_argument(
+        "--evaluation-awareness", choices=("on", "off"), default="off"
+    )
     execution.add_argument("--no-evaluate", action="store_true")
     execution.add_argument("--sandbox", choices=("docker", "local"))
+    execution.add_argument("--sandbox-guardrails", choices=("on", "off"), default="on")
     execution.add_argument("--sandbox-image")
     execution.add_argument("--sandbox-cpus", type=float, default=2.0)
     execution.add_argument("--sandbox-memory", default="4g")

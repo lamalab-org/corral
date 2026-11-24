@@ -1,6 +1,7 @@
 import ast
 import json
 
+import psycopg2
 from loguru import logger
 from rdkit import Chem
 from retrosynthesis.retrosynthesis_utils import (
@@ -8,8 +9,8 @@ from retrosynthesis.retrosynthesis_utils import (
     check_price,
     check_templates_equal,
     search_by_template,
-    species_match,
     valid_smiles,
+    validate_route_reactions,
 )
 
 
@@ -64,50 +65,13 @@ def collect_leaf_molecules(node):
 
 
 def validate_reactions_with_products(node, expected_product=None):
-    """
-    Validate reactions by checking if reactants + template produce expected product.
-    The expected_product is the parent molecule that this reaction should produce.
-    """
-    if node["type"] == "mol":
-        current_smiles = node["smiles"]
-
-        if "children" not in node or not node["children"]:
-            # This molecule has child reactions, validate them with current_smiles as expected product
-            for child in node["children"]:
-                if child["type"] == "reaction" and not validate_reactions_with_products(
-                    child, current_smiles
-                ):
-                    return False
-            return True
-        else:
-            # Leaf molecule, no reaction to validate
-            return True
-
-    elif node["type"] == "reaction":
-        # This is a reaction node - validate that it produces the expected_product
-        if expected_product is not None:
-            template_id = node["template_id"]
-
-            # Get reactants (children of this reaction node)
-            reactant_smiles = [
-                child["smiles"] for child in node["children"] if child["type"] == "mol"
-            ]
-
-            # Verify the reaction produces the expected product
-            try:
-                ground_reactants = apply_template_retro(expected_product, template_id)
-                if not species_match(reactant_smiles, ground_reactants):
-                    return False
-            except Exception:
-                return False
-
-        # Recursively validate all child molecules
-        for child in node["children"]:
-            if not validate_reactions_with_products(child):
-                return False
-        return True
-    else:
-        return False
+    """Validate the complete route using the same checks as ``verify_route``."""
+    if expected_product is not None:
+        node = {"type": "mol", "smiles": expected_product, "children": [node]}
+    valid, error = validate_route_reactions(node)
+    if not valid:
+        logger.info("Invalid route: {}", error)
+    return valid
 
 
 def score_final(prediction: dict, target: dict) -> float:
@@ -174,6 +138,9 @@ def score_final(prediction: dict, target: dict) -> float:
         else:
             return 0.0
 
+    except psycopg2.Error:
+        # An unavailable catalog is an evaluation error, not a failed synthesis.
+        raise
     except Exception as e:
         # Any exception during validation means failure
         logger.warning(f"Exception during scoring: {e}")
@@ -196,8 +163,8 @@ def score_final_without_price(prediction: dict, target: list) -> float:
         1.0 if all conditions are met, else 0.0.
     """
     prediction = prediction.replace("```json", "").replace("```", "").strip()
-    prediction = json.loads(prediction)
     try:
+        prediction = json.loads(prediction)
         # Step 1: Validate all reactions in the pathway
         if not validate_reactions_with_products(prediction):
             return 0.0
@@ -242,6 +209,9 @@ def score_final_without_price(prediction: dict, target: list) -> float:
 
         return 1.0
 
+    except psycopg2.Error:
+        # An unavailable catalog is an evaluation error, not a failed synthesis.
+        raise
     except Exception as e:
         # Any exception during validation means failure
         logger.warning(f"Exception during scoring: {e}")
@@ -249,66 +219,14 @@ def score_final_without_price(prediction: dict, target: list) -> float:
 
 
 def check_reactants(prediction: dict, target: list) -> float:
+    """Require valid catalog reactions as well as the expected leaf molecules.
+
+    ``target`` is the list of required starting-material SMILES. As before,
+    their comparison ignores atom maps and stereochemistry and permits extra
+    leaves, but every leaf must now be connected by a validated reaction.
     """
-    Scoring function to check if the retrosynthesis route is valid and meets the criteria.
-    The criteria are:
-        - All reactions must be valid.
-        - All starting materials must be valid SMILES.
-        - Leaf molecules must contain all target molecules.
+    return score_final_without_price(prediction, target)
 
-    Args:
-        prediction: The retrosynthesis route in JSON format.
-        target: A list containing the target molecule SMILES and the maximum allowed price.
-
-    Returns:
-        float that will be 1.0 if all conditions are met, 0.0 if any condition is violated.
-    """
-    prediction = prediction.replace("```json", "").replace("```", "").strip()
-    try:
-        leaf_molecules = collect_leaf_molecules(prediction)
-    except Exception as e:
-        logger.warning(f"Exception during leaf molecule collection: {e}")
-        return 0.0
-    if not leaf_molecules:
-        return 0.0
-
-    try:
-        # Convert all molecules to RDKit mol objects (canonical SMILES for comparison)
-        # Use canonical SMILES as the key for comparison
-        leaf_mols = {}
-        for smiles in leaf_molecules:
-            pred_mol = Chem.MolFromSmiles(smiles)
-            if pred_mol is None:
-                return 0.0
-            # Remove atom mapping numbers
-            for atom in pred_mol.GetAtoms():
-                atom.SetAtomMapNum(0)
-            # Remove stereochemistry for comparison
-            Chem.RemoveStereochemistry(pred_mol)
-            canonical_smiles = Chem.MolToSmiles(pred_mol)
-            leaf_mols[canonical_smiles] = pred_mol
-
-        target_mols = {}
-        for target_smiles in target:
-            target_mol = Chem.MolFromSmiles(target_smiles)
-            if target_mol is None:
-                return 0.0
-            # Remove atom mapping numbers
-            for atom in target_mol.GetAtoms():
-                atom.SetAtomMapNum(0)
-            # Remove stereochemistry for comparison
-            Chem.RemoveStereochemistry(target_mol)
-            canonical_smiles = Chem.MolToSmiles(target_mol)
-            target_mols[canonical_smiles] = target_mol
-
-        return (
-            1.0
-            if all(target_canonical in leaf_mols for target_canonical in target_mols)
-            else 0.0
-        )
-    except Exception as e:
-        logger.warning(f"Exception during reactant checking: {e}")
-        return 0.0
 
 def check_template(prediction: str, target: str) -> float:
     """

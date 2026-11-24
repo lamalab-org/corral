@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import os
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -13,6 +14,23 @@ from typing import Protocol, runtime_checkable
 from corral.core.workspace import blob_ref_for_sha256, sha256_from_blob_ref
 
 _COPY_CHUNK_SIZE = 1024 * 1024
+
+
+def iter_blob_refs(value):
+    """Yield content addresses nested in a portable JSON checkpoint."""
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            if (
+                key == "blob_ref"
+                and isinstance(child, str)
+                and child.startswith("sha256:")
+            ):
+                yield child
+            else:
+                yield from iter_blob_refs(child)
+    elif isinstance(value, tuple | list):
+        for child in value:
+            yield from iter_blob_refs(child)
 
 
 class ArtifactStoreError(RuntimeError):
@@ -253,3 +271,19 @@ class LocalArtifactStore:
 
     async def contains(self, blob_ref: str) -> bool:
         return await asyncio.to_thread(self._contains, blob_ref)
+
+
+@dataclass(frozen=True, slots=True)
+class PrivateArtifacts:
+    """Controller-only files a trusted tool keeps with the trial.
+
+    Files go to the execution's ArtifactStore, which travels with the
+    checkpoint but is never mounted into a worker. A saved file is referenced
+    only by the ``blob_ref`` the tool records in its own state.
+    """
+
+    store: ArtifactStore
+
+    def save(self, path: str | Path) -> str:
+        """Store one file and return its ``blob_ref``. Call from a worker thread."""
+        return asyncio.run(self.store.put_file(path)).blob_ref

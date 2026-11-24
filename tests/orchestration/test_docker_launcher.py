@@ -108,22 +108,34 @@ def test_saved_reasoning_effort_reconstructs_agent(
         assert "reasoning_effort" not in agent.kwargs
 
 
-@pytest.mark.parametrize("version", ["1", "2", "3"])
+@pytest.mark.parametrize("version", ["1", "2", "3", "4", "5"])
 def test_legacy_runtime_cannot_disable_worker_permissions(version):
     with pytest.raises(ValueError, match="rebuild the image"):
         DockerSandboxSpec(runtime_protocol_version=version)
 
 
-def test_restore_host_ownership_uses_os_chown(monkeypatch, tmp_path):
+@pytest.mark.parametrize("gpus", ["device=", "device=2,2", "device=-1", "device=2, x"])
+def test_docker_gpu_device_selector_rejects_invalid_indices(gpus):
+    with pytest.raises(ValueError, match="Docker sandbox gpus"):
+        DockerSandboxSpec(gpus=gpus)
+
+
+@pytest.mark.parametrize("already_owned", [False, True])
+def test_restore_host_ownership_uses_os_chown(monkeypatch, tmp_path, already_owned):
     checkpoint = tmp_path / "checkpoint"
     checkpoint.mkdir()
     result = checkpoint / "result.json"
     result.write_text("{}")
     ownership_changes = []
+    owner = checkpoint.stat()
+    uid, gid = owner.st_uid, owner.st_gid
+    if not already_owned:
+        uid += 1
+        gid += 1
 
     monkeypatch.setattr(internal.os, "geteuid", lambda: 0)
-    monkeypatch.setenv("CORRAL_HOST_UID", "501")
-    monkeypatch.setenv("CORRAL_HOST_GID", "20")
+    monkeypatch.setenv("CORRAL_HOST_UID", str(uid))
+    monkeypatch.setenv("CORRAL_HOST_GID", str(gid))
     monkeypatch.setattr(
         internal.os,
         "chown",
@@ -132,7 +144,35 @@ def test_restore_host_ownership_uses_os_chown(monkeypatch, tmp_path):
 
     internal._restore_host_ownership(checkpoint)
 
-    assert ownership_changes == [(result, 501, 20), (checkpoint, 501, 20)]
+    assert ownership_changes == (
+        [] if already_owned else [(result, uid, gid), (checkpoint, uid, gid)]
+    )
+
+
+def test_claim_checkpoint_ownership_covers_restored_artifact_directories(
+    monkeypatch, tmp_path
+):
+    checkpoint = tmp_path / "checkpoint"
+    artifact = checkpoint / "artifacts" / "01" / "blob"
+    artifact.parent.mkdir(parents=True)
+    artifact.write_bytes(b"saved output")
+    ownership_changes = []
+
+    monkeypatch.setattr(internal.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(
+        internal.os,
+        "chown",
+        lambda path, uid, gid: ownership_changes.append((path, uid, gid)),
+    )
+
+    internal._set_checkpoint_ownership(checkpoint, 0, 0)
+
+    assert {path for path, uid, gid in ownership_changes if (uid, gid) == (0, 0)} == {
+        checkpoint,
+        checkpoint / "artifacts",
+        artifact.parent,
+        artifact,
+    }
 
 
 @pytest.mark.anyio
@@ -178,13 +218,34 @@ async def test_preflight_builds_selected_task_and_extra_only_when_image_is_missi
 
 
 @pytest.mark.anyio
+async def test_preflight_rebuilds_an_existing_image_when_asked(monkeypatch, tmp_path):
+    commands = []
+    digest = "sha256:" + "b" * 64
+
+    async def command(*arguments, **_kwargs):
+        commands.append(arguments)
+        return 0, digest
+
+    monkeypatch.setattr(launchers, "_command", command)
+    await launchers.DockerTaskLauncher.preflight(
+        DockerSandboxSpec(image="corral-wetlab:latest"),
+        build_context=tmp_path,
+        dockerfile=tmp_path / "wetlab.Dockerfile",
+        rebuild=True,
+    )
+
+    assert [arguments[1] for arguments in commands] == ["image", "build", "image"]
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize("private_data", [False, True])
 @pytest.mark.parametrize(
     ("agent_name", "default_limit"), [("react", 50), ("ai_scientist", 100)]
 )
 @pytest.mark.parametrize("max_iterations", [None, 7])
+@pytest.mark.parametrize("gpus", [None, "4", "device=2,3"])
 async def test_docker_launcher_uses_private_volume_and_exports_host_checkpoint(
-    monkeypatch, tmp_path, private_data, agent_name, default_limit, max_iterations
+    monkeypatch, tmp_path, private_data, agent_name, default_limit, max_iterations, gpus
 ):
     store = ShardedCommitStore(tmp_path / ".corral")
     private_root = tmp_path / "private-bank"
@@ -258,6 +319,7 @@ async def test_docker_launcher_uses_private_volume_and_exports_host_checkpoint(
             docker=DockerSandboxSpec(
                 image="corral:test",
                 image_digest="sha256:" + "b" * 64,
+                gpus=gpus,
                 private_directories=(str(private_root),) if private_data else (),
             ),
         ),
@@ -307,6 +369,18 @@ async def test_docker_launcher_uses_private_volume_and_exports_host_checkpoint(
         not in (execution_dir / "request.json").read_text()
     )
     assert "--read-only" in create
+    if gpus is not None:
+        assert create[create.index("--gpus") + 1] == (
+            '"device=2,3"' if gpus == "device=2,3" else "4"
+        )
+        assert any(
+            entry.startswith("CUDA_VISIBLE_DEVICES=")
+            and entry[-1] in ("01" if gpus == "device=2,3" else "0123")
+            for entry in forwarded_env
+        )
+        assert durable_metadata["sandbox"]["gpus"] == gpus
+    else:
+        assert "--gpus" not in create
     assert "--init" in create
     assert create[create.index("--user") + 1] == "0:0"
     assert durable_metadata["sandbox"]["permissions_policy"] == "workspace-root-v1"
@@ -593,7 +667,9 @@ async def test_failed_container_is_reused_with_new_limits_then_removed(
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("change", ["image", "credentials", "network", "legacy"])
+@pytest.mark.parametrize(
+    "change", ["image", "credentials", "network", "legacy", "guardrails"]
+)
 async def test_incompatible_container_is_replaced_from_exported_checkpoint(
     tmp_path, monkeypatch, docker_lifecycle, change
 ):
@@ -611,6 +687,8 @@ async def test_incompatible_container_is_replaced_from_exported_checkpoint(
         options = (
             {"image_digest": "sha256:" + "c" * 64}
             if change == "image"
+            else {"guardrails": "off"}
+            if change == "guardrails"
             else {"network": "none"}
         )
         request = replace(
@@ -692,8 +770,9 @@ async def test_resume_cannot_return_stale_result_or_replay_stale_sqlite_sidecars
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("fails", [False, True])
+@pytest.mark.parametrize("guardrails", ["on", "off"])
 async def test_container_uses_configured_observer_and_flushes_on_exit(
-    monkeypatch, tmp_path, fails
+    monkeypatch, tmp_path, fails, guardrails
 ):
     observer = Mock(spec=NoOpObserver)
     environment = SimpleNamespace(
@@ -721,7 +800,8 @@ async def test_container_uses_configured_observer_and_flushes_on_exit(
             return result
 
     monkeypatch.setattr(internal.os, "chown", lambda *_: None)
-    monkeypatch.setattr(internal.permissions, "configure", lambda *_: None)
+    configure = Mock()
+    monkeypatch.setattr(internal.permissions, "configure", configure)
     monkeypatch.setattr(internal, "_restore_host_ownership", lambda *_: None)
     monkeypatch.setattr(internal, "_registry_from_module", lambda *_: registry)
     monkeypatch.setattr(internal, "observer_from_env", lambda: observer)
@@ -733,7 +813,9 @@ async def test_container_uses_configured_observer_and_flushes_on_exit(
         agent_id="tool-calling",
         sandbox=SandboxProfile(
             mode=SandboxMode.DOCKER,
-            docker=DockerSandboxSpec(registry_module="test:registry"),
+            docker=DockerSandboxSpec(
+                registry_module="test:registry", guardrails=guardrails
+            ),
         ),
     )
     request_path = tmp_path / "request.json"
@@ -749,8 +831,36 @@ async def test_container_uses_configured_observer_and_flushes_on_exit(
         assert (
             json.loads(result_path.read_text())["execution_id"] == result.execution_id
         )
+    configure.assert_called_once_with(tmp_path, guardrails=guardrails == "on")
     observer.flush.assert_called_once_with()
     registry.close.assert_called_once_with()
+
+
+@pytest.mark.parametrize("mode", ["off", "on"])
+@pytest.mark.parametrize("supports_awareness", [False, True])
+def test_bootstrap_rejects_images_that_would_ignore_awareness(
+    tmp_path, monkeypatch, mode, supports_awareness
+):
+    from corral.orchestration import models
+
+    (tmp_path / "request.json").write_text(json.dumps({"evaluation_awareness": mode}))
+    (tmp_path / "checkpoint-import.json").write_text(
+        json.dumps({"missing_sidecars": []})
+    )
+    if not supports_awareness:
+        monkeypatch.setattr(
+            models, "RunTaskInput", SimpleNamespace(__dataclass_fields__={})
+        )
+    execute = Mock()
+    monkeypatch.setattr(os, "execvp", execute)
+    bootstrap = launchers._DOCKER_BOOTSTRAP.replace("/corral-state", str(tmp_path))
+    if mode == "on" and not supports_awareness:
+        with pytest.raises(RuntimeError, match="rebuild the image"):
+            exec(bootstrap, {})
+        execute.assert_not_called()
+    else:
+        exec(bootstrap, {})
+        execute.assert_called_once()
 
 
 def _docker_request(execution_id: str) -> RunTaskInput:
@@ -810,11 +920,13 @@ async def test_container_task_traces_through_the_environment_observer(
         def flush(self):
             flushed.append(True)
 
-    def stop(*_args):
+    def stop(*_args, **_kwargs):
         raise RuntimeError("stop after the observer is created")
 
     monkeypatch.setattr(internal, "observer_from_env", Observer)
-    monkeypatch.setattr(internal.os, "chown", stop)
+    # Stop at the same startup boundary regardless of the runner's ownership.
+    monkeypatch.setattr(internal, "_set_checkpoint_ownership", lambda *_: None)
+    monkeypatch.setattr(internal.permissions, "configure", stop)
     checkpoint = tmp_path / "checkpoint"
     checkpoint.mkdir()
     request_path = checkpoint / "request.json"
@@ -824,3 +936,82 @@ async def test_container_task_traces_through_the_environment_observer(
         await internal.run_task_from_files(request_path, checkpoint / "result.json")
 
     assert flushed == [True]
+
+
+@pytest.mark.anyio
+async def test_checkpoint_export_falls_back_to_safe_tar_for_directory_mode_error(
+    tmp_path, monkeypatch
+):
+    import io
+    import tarfile
+
+    shard = tmp_path / "shard"
+    shard.mkdir()
+    (shard / "checkpoint-pending.json").write_text("{}")
+    (shard / "commits.sqlite3-wal").write_bytes(b"stale")
+
+    async def command(*arguments, **_kwargs):
+        if arguments[1] == "cp":
+            raise launchers.DockerInfrastructureError(
+                "fchmodat2 artifacts/aa: operation not permitted"
+            )
+        return 0, ""
+
+    async def stream(*arguments, stdout, **_kwargs):
+        assert arguments[-1] == "-"
+        with tarfile.open(fileobj=stdout, mode="w") as archive:
+            entry = tarfile.TarInfo("commits.sqlite3")
+            entry.size = 7
+            entry.mode = 0o6640
+            archive.addfile(entry, io.BytesIO(b"durable"))
+
+        class Process:
+            returncode = 0
+
+            async def communicate(self):
+                return None, b""
+
+        return Process()
+
+    monkeypatch.setattr(launchers, "_command", command)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", stream)
+    launcher = launchers.DockerTaskLauncher(Mock())
+    await launcher._export_checkpoint(shard, "container")
+    assert (shard / "commits.sqlite3").read_bytes() == b"durable"
+    assert not (shard / "commits.sqlite3").stat().st_mode & 0o6000
+    assert not (shard / "commits.sqlite3-wal").exists()
+    assert not (shard / "checkpoint-pending.json").exists()
+
+
+@pytest.mark.parametrize("value", ["", "disabled", True, False, None])
+def test_guardrails_reject_ambiguous_values(value):
+    with pytest.raises(ValueError, match="guardrails"):
+        DockerSandboxSpec(guardrails=value)
+
+
+@pytest.mark.anyio
+async def test_unconfined_docker_keeps_outer_limits_and_records_policy(
+    tmp_path, docker_lifecycle
+):
+    daemon = docker_lifecycle
+    daemon.outcome = "submitted"
+    request = _docker_request("benchmark:task-a:1")
+    request = replace(
+        request,
+        sandbox=replace(
+            request.sandbox, docker=replace(request.sandbox.docker, guardrails="off")
+        ),
+    )
+    async with ShardedCommitStore(tmp_path / "runs") as store:
+        await launchers.DockerTaskLauncher(store).run(request)
+        metadata = json.loads(
+            (store.execution_dir(request.execution_id) / "sandbox.json").read_text()
+        )
+        assert metadata["guardrails"] == "off"
+        assert metadata["permissions_policy"] == "disabled"
+    create = next(command for command in daemon.commands if command[1] == "create")
+    assert "--read-only" in create
+    assert create[create.index("--cpus") + 1] == "2.0"
+    assert create[create.index("--memory") + 1] == "4g"
+    assert create[create.index("--network") + 1] == "bridge"
+    assert "corral.guardrails=off" in create

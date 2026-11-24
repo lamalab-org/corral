@@ -1,67 +1,23 @@
-import os
-import time
-from pathlib import Path
-
-import nanosurf
 import numpy as np
-from langchain.tools.retriever import create_retriever_tool
-from langchain_chroma import Chroma
-from langchain_openai import OpenAIEmbeddings
-from loguru import logger
 from NSFopen.read import read
 from pymoo.core.problem import ElementwiseProblem
 from scipy.optimize import curve_fit
 from skimage.metrics import mean_squared_error
 from skimage.metrics import structural_similarity as ssim
 
-embeddings = OpenAIEmbeddings(
-    model="text-embedding-3-large",
-)
-
-db_new = Chroma(
-    persist_directory=str(Path(__file__).resolve().parent / "aila_db"),
-    embedding_function=embeddings,
-)
-
-retriever_wo = db_new.as_retriever(
-    search_type="similarity",
-    search_kwargs={"k": 1},
-)
-
-
-Document_Retriever = create_retriever_tool(
-    retriever_wo,
-    "Document_Retriever",
-    "This tool offers reference code specifically designed for "
-    "managing an AFM (Atomic Force Microscope) machine, which is connected to a database. "
-    "The tool also includes the AFM software manual for guidance."
-    "However, it does not contain any code related to displaying/optimizing images."
-    "Single query allowed at one. but multiple call allowed",
-)
+from afm_runtime import runtime
 
 
 def scan_image(PGain, IGain, DGain, file):
-    spm = nanosurf.SPM()
-    application = spm.application
-    scan = application.Scan
-    zcontrol = application.ZController
-
-    application.SetGalleryHistoryFilenameMask(file)
-    zcontrol.PGain = PGain
-    zcontrol.IGain = IGain
-    zcontrol.DGain = DGain
-    scan.StartFrameUp()
-
-    current_working_directory = application.GetGalleryHistoryDirectoryPath
-
-    scanning = scan.IsScanning
-    while scanning:
-        logger.info("Scanning in progress...")
-        time.sleep(5)
-        scanning = scan.IsScanning
-
-    list_of_files = list(Path(current_working_directory).glob("*.nid"))
-    latest_file = max(list_of_files, key=os.path.getctime)
+    latest_file = runtime().call(
+        "update_and_acquire",
+        {
+            "pgain": PGain,
+            "igain": IGain,
+            "dgain": DGain,
+        },
+        file,
+    )
     afm = read(latest_file)
     data = afm.data
     im_file_fw = data["Image"]["Forward"]["Z-Axis"]
@@ -73,7 +29,6 @@ def scan_image(PGain, IGain, DGain, file):
         data_range=im_file_bw.max() - im_file_bw.min(),
     )
     mse = mean_squared_error(im_file_bw, im_file_fw)
-    del spm
     return similarity_index, mse
 
 
@@ -110,25 +65,15 @@ def corrected_image(image):
 
 
 def scan_image_poly(PGain, IGain, DGain, file):
-    spm = nanosurf.SPM()
-    application = spm.application
-    scan = application.Scan
-    zcontrol = application.ZController
-
-    application.SetGalleryHistoryFilenameMask(file)
-    zcontrol.PGain = PGain
-    zcontrol.IGain = IGain
-    zcontrol.DGain = DGain
-    scan.StartFrameUp()
-    current_working_directory = application.GetGalleryHistoryDirectoryPath
-    scanning = scan.IsScanning
-    while scanning:
-        logger.info("Scanning in progress...")
-        time.sleep(5)
-        scanning = scan.IsScanning
-
-    list_of_files = list(Path(current_working_directory).glob("*.nid"))
-    latest_file = max(list_of_files, key=os.path.getctime)
+    latest_file = runtime().call(
+        "update_and_acquire",
+        {
+            "pgain": PGain,
+            "igain": IGain,
+            "dgain": DGain,
+        },
+        file,
+    )
     afm = read(latest_file)
     data = afm.data
     im_file_fw = corrected_image(data["Image"]["Forward"]["Z-Axis"])
@@ -140,7 +85,6 @@ def scan_image_poly(PGain, IGain, DGain, file):
         data_range=im_file_bw.max() - im_file_bw.min(),
     )
     mse = mean_squared_error(im_file_bw, im_file_fw)
-    del spm
     return similarity_index, mse
 
 

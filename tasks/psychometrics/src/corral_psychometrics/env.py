@@ -24,10 +24,15 @@ from corral.core.task import InputRef, TaskDefinition, with_fixed_inputs
 from corral.core.transition import ToolExecutionResult
 from corral.report.logging import event, exception_fields
 from corral.runtime import permissions
+from corral.runtime.python_repl import PythonREPLTimeoutError
 from corral.tools.python_repl import PythonREPLTool
 
 from corral_psychometrics import paths, score
-from corral_psychometrics.tools import workspace_tools
+from corral_psychometrics.tools import (
+    DEFAULT_REPL_TIMEOUT_MINUTES,
+    timeout_message,
+    workspace_tools,
+)
 
 SCORING_FUNCTIONS: dict[str, Callable[..., dict]] = {
     name: getattr(score, name)
@@ -46,10 +51,7 @@ SCORING_FUNCTIONS: dict[str, Callable[..., dict]] = {
 def _verify_checksums(
     task_id: str, task_info: dict[str, Any], scoring_params: dict[str, Any], root: Path
 ) -> None:
-    """Check a task's files against the checksums recorded for them.
-
-    Verifies that every public input hashes to its recorded value, and that the definition and the answer key were built from the same dataset.
-    """
+    """Validate public-file hashes and agreement between task and answer-key datasets."""
     declared = task_info.get("initial_input", {}).get("data_sha256")
     data_dir = paths.resolve(scoring_params["data_dir"], root=root)
     checksums = dict(task_info.get("public_sha256", {}))
@@ -94,10 +96,7 @@ def _verify_checksums(
 def _copy_public_inputs(
     env: Environment, data_dir: Path, declared: tuple[str, ...]
 ) -> EnvironmentSetup:
-    """Copy a task's public inputs into its isolated workspace (usually the dataset and codebook).
-
-    Fails unless `data_dir` holds exactly the declared files.
-    """
+    """Copy only declared public files into the isolated workspace."""
     if not env.workspace_path:
         raise RuntimeError("psychometrics tasks require a workspace")
     workspace = Path(env.workspace_path).resolve()
@@ -132,6 +131,7 @@ class PsychometricsEnvironment(Environment):
     """Dispatches PythonREPL, keeping its session checkpoint in task state."""
 
     def execute_controller_tool(self, state: ExecutionState, prepared: Any) -> Any:
+        """Dispatch tools while preserving the task REPL checkpoint."""
         tool, arguments = prepared.tool, prepared.arguments
         if tool.name != "PythonREPL":
             return super().execute_controller_tool(state, prepared)
@@ -145,19 +145,24 @@ class PsychometricsEnvironment(Environment):
         checkpoint = hidden.get("analysis_session")
         code = arguments["input_code"]
 
-        if permissions.enabled():
-            result = tool.execute_repl(
-                code=code, checkpoint=checkpoint, workspace=self.workspace_path
-            )
-            output, checkpoint = result.output, result.checkpoint
-        else:
-            session = tool.create_session()
-            try:
-                session.restore(checkpoint)
-                output = session.execute(code)
-                checkpoint = session.snapshot()
-            finally:
-                session.close()
+        try:
+            if permissions.enabled():
+                result = tool.execute_repl(
+                    code=code, checkpoint=checkpoint, workspace=self.workspace_path
+                )
+                output, checkpoint = result.output, result.checkpoint
+            else:
+                session = tool.create_session()
+                try:
+                    session.restore(checkpoint)
+                    output = session.execute(code)
+                    checkpoint = session.snapshot()
+                finally:
+                    session.close()
+        except PythonREPLTimeoutError as exc:
+            # The checkpoint from before the call is kept, so the agent loses
+            # only this call's work.
+            output = timeout_message(exc.timeout_seconds / 60)
 
         hidden["analysis_session"] = checkpoint
         environment["hidden_arguments"] = hidden
@@ -167,9 +172,12 @@ class PsychometricsEnvironment(Environment):
         )
 
 
-#: Closes every task prompt, identically.
-CLOSING_INSTRUCTION = (
-    "Before you answer, make sure nothing in the data would change your conclusions."
+#: Added to every task that asks for a model. semopy and lavaan read the same
+#: syntax differently here, and the scorer fits with semopy.
+SEMOPY_NOTE = (
+    "I use semopy to fit the models. When two factors are both regressed "
+    "on something (for example `F1 ~ gender` and `F2 ~ gender`), semopy fixes their "
+    "correlation to zero unless you add `F1 ~~ F2`; lavaan would estimate it by default."
 )
 
 
@@ -178,23 +186,19 @@ def _task_prompt(env: Environment, state: ExecutionState) -> str:
     del state
     task = env.current_task
     files = sorted(task.initial_input.get("public_inputs", ()))
+    note = f"{SEMOPY_NOTE}\n\n" if "model_syntax" in task.submission_format else ""
     prompt = (
         f"{task.description}\n\n"
-        f"Required submission format:\n{task.submission_format}\n\n"
-        "Available workspace files:\n"
-        + "\n".join(f"- {name}" for name in files)
-        + f"\n\n{CLOSING_INSTRUCTION}"
+        "Please return your answer in this format so I can use it directly:\n"
+        f"{task.submission_format}\n\n"
+        f"{note}"
+        "I've put the files in your workspace: " + ", ".join(f"`{name}`" for name in files) + "."
     )
     return prompt
 
 
 def _scoring_function(name: str, params: dict[str, Any], root: Path) -> Callable[[Any], float]:
-    """Bind a scorer to its task's rules and the root its paths resolve against.
-
-    The scorers report a dict, but a task's `scoring_fn` is a float to corral's
-    evaluation layer, so only the binary score reaches it. `build.py` and the
-    scoring tests call the scorers directly and read the whole report.
-    """
+    """Bind a task scorer and expose its binary score to Corral."""
     try:
         fn = SCORING_FUNCTIONS[name]
     except KeyError as exc:
@@ -203,6 +207,7 @@ def _scoring_function(name: str, params: dict[str, Any], root: Path) -> Callable
 
     @functools.wraps(fn)
     def score(answer: Any) -> float:
+        """Return the task binary score for a submitted answer."""
         return float(bound(answer)["score_binary"])
 
     return score
@@ -252,12 +257,11 @@ def create_environments(
     level: int = 1,
     work_dir: str | None = None,
     data_root: str | Path | None = None,
+    repl_timeout_minutes: float | None = DEFAULT_REPL_TIMEOUT_MINUTES,
 ) -> dict[str, Environment]:
-    """Create one isolated psychometrics environment per generated task.
-
-    `data_root`  which built dataset to read; defaults to the source checkout
-    `work_dir`   where the agents' writable workspaces go
-    """
+    """Create isolated task environments with public files and a persistent analysis REPL."""
+    if repl_timeout_minutes is not None and repl_timeout_minutes <= 0:
+        raise ValueError("repl_timeout_minutes must be positive, or None for no limit")
     started = perf_counter()
     root = paths.task_root(data_root)
     work_dir = work_dir or os.environ.get("CORRAL_WORK_DIR", str(root / "CORRAL_WORK_DIR"))
@@ -273,7 +277,12 @@ def create_environments(
             tasks,
             base_work_dir=str(Path(work_dir).expanduser().resolve()),
             name=f"psychometrics-level-{level}",
-            toolset=Toolset(pool={}, workspace_factory=workspace_tools),
+            toolset=Toolset(
+                pool={},
+                workspace_factory=functools.partial(
+                    workspace_tools, repl_timeout_minutes=repl_timeout_minutes
+                ),
+            ),
             env_cls=PsychometricsEnvironment,
         )
     except Exception as exc:

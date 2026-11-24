@@ -245,15 +245,15 @@ def test_sandbox_gets_only_current_task_and_read_only_assets(worker, tmp_path, m
         assert json.loads((working / "output/result.json").read_text()) == {"answer": 42}
     command, options = calls[0]
     assert command[-2:] == ("python", "/workspace/script.py")
-    assert options["workdir"] == "/workspace"
+    assert options["workdir"] == "/"
     assert options["gpu"] == (module.GPU_TYPE if gpu else None)
     assert options["timeout"] == 900
     assert finished
     assert options.get("secrets", ()) == ()
     assert set(options["volumes"]) == {
-        "/workspace", "/assets/potentials", "/assets/models", "/assets/structures",
+        "/task-volume", "/assets/potentials", "/assets/models", "/assets/structures",
     }
-    assert options["volumes"]["/workspace"] is volume
+    assert options["volumes"]["/task-volume"] is volume
     for name in ("potentials", "models", "structures"):
         assert options["volumes"][f"/assets/{name}"].read_only is True
     assert (working / "output/execution.stdout.txt").read_text() == "complete\n"
@@ -264,7 +264,7 @@ def test_sandbox_gets_only_current_task_and_read_only_assets(worker, tmp_path, m
 
 @pytest.mark.parametrize(("name", "entry_type"), [
     ("../escape", "FILE"), ("/../escape", "FILE"),
-    ("models/teacher.model", "FILE"), ("output/link", "SYMLINK"),
+    ("output/link", "SYMLINK"),
 ])
 def test_sandbox_export_rejects_unsafe_files_without_replacing_attempt(worker, tmp_path, name, entry_type):
     from types import SimpleNamespace
@@ -289,7 +289,13 @@ def test_python_and_lammps_use_stable_absolute_paths_without_rewriting(worker, t
     original = "print('/workspace/output/result.json')\n"
     script.write_text(original)
     calls = []
-    monkeypatch.setattr(module, "_run_sandbox", lambda *args, **kwargs: calls.append((args, kwargs)))
+    def run(*args, **kwargs):
+        calls.append((args, kwargs))
+        if len(calls) == 2:
+            assert (working / "run.in").read_text() == "log /workspace/custom.log\nrun 0\n"
+        return {"logs": {}}
+
+    monkeypatch.setattr(module, "_run_sandbox", run)
     module._run_python(script, ["/workspace/input/data.json"], "/local", working)
     assert calls[0][0][0] == ["python", "-u", "/workspace/scripts/analyze.py", "/workspace/input/data.json"]
     assert script.read_text() == original
@@ -300,3 +306,164 @@ def test_python_and_lammps_use_stable_absolute_paths_without_rewriting(worker, t
     module._run_lammps(input_file, "run.log", "/local", working)
     assert calls[1][0][0][-4:] == ["-in", "/workspace/run.in", "-log", "/workspace/output/run.log"]
     assert input_file.read_text() == "log /workspace/custom.log\nrun 0\n"
+
+
+def test_modal_resources_are_exact_pinned_declarations(worker):
+    from corral_md.resources import asset_descriptors, asset_relative_paths
+
+    module, _ = worker
+    descriptor = asset_descriptors()["md-potentials-SW-Si"]
+    selected = {descriptor.name: descriptor.model_dump(mode="json")}
+    assert module._authorized_asset_files(selected) == [{
+        "name": descriptor.name,
+        "relative": asset_relative_paths()[descriptor.name],
+        "sha256": descriptor.sha256,
+        "size": descriptor.size,
+    }]
+    assert module._authorized_asset_files({}) == []
+    selected[descriptor.name]["sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="pinned MD catalog"):
+        module._authorized_asset_files(selected)
+    with pytest.raises(ValueError, match="pinned MD catalog"):
+        module._authorized_asset_files({"undeclared": descriptor.model_dump(mode="json")})
+
+
+def test_python_rejects_legacy_cwd_override(worker, tmp_path, monkeypatch):
+    module, _ = worker
+    monkeypatch.setattr(module, "_run_sandbox", lambda *_a, **_k: pytest.fail("must reject before execution"))
+    with pytest.raises(ValueError, match="no longer supports working_dir"):
+        module._run_python(tmp_path / "script.py", [], "/local", tmp_path,
+                           execution_options={"working_dir": "/workspace/output"})
+
+
+def test_resource_files_are_never_exported_into_mutable_workspace(worker, tmp_path):
+    from types import SimpleNamespace
+
+    module, _ = worker
+    working = tmp_path / "attempt/workspace"
+    working.mkdir(parents=True)
+    entries = [
+        SimpleNamespace(path="resources", type=module.FileEntryType.DIRECTORY),
+        SimpleNamespace(path="resources/fixture", type=module.FileEntryType.DIRECTORY),
+        SimpleNamespace(path="resources/fixture/data", type=module.FileEntryType.FILE),
+        SimpleNamespace(path="result.txt", type=module.FileEntryType.FILE),
+    ]
+    volume = SimpleNamespace(
+        iterdir=lambda *_a, **_k: entries,
+        read_file=lambda path: iter([b"result"]) if path == "/result.txt" else pytest.fail("resource exported"),
+    )
+    module._collect_workspace(volume, working)
+    assert sorted(path.name for path in working.iterdir()) == ["result.txt"]
+
+
+def test_worker_records_exact_execution_logs(worker):
+    module, _ = worker
+    module._prepare("run-1", "release-1")
+    working = module.RUNS / "run-1/workspace"
+    (working / "input/run.in").write_text("run 0\n")
+
+    def run(_input, _log, _local, root):
+        logs = {}
+        for kind, filename in (("stdout", "run.stdout.txt"), ("stderr", "run.stderr.txt"), ("log", "run.log")):
+            (root / "output" / filename).write_text(kind)
+            logs[kind] = "/workspace/output/" + filename
+        return {"logs": logs}
+
+    module._run_lammps = run
+    result = module._execute("lammps", "run-1", "action-1", "input/run.in", "/local", [],
+                             "release-1", "base", module._manifest(working))
+    assert set(result["logs"]) == {"stdout", "stderr", "log"}
+    for name in result["logs"].values():
+        assert name.removeprefix("/workspace/") in result["files"]
+
+
+def test_modal_mutable_workspace_reserves_only_canonical_resource_namespace(worker, tmp_path):
+    module, _ = worker
+    for name in ("models", "potentials", "structures"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "result").write_text("editable")
+    assert len(module._manifest(tmp_path)) == 3
+    with pytest.raises(ValueError, match="shared assets"):
+        module._relative("resources/fixture/data")
+
+
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_modal_bootstrap_stages_a_real_cwd_and_exports_only_mutable_files(
+    worker, tmp_path, exit_code,
+):
+    import hashlib
+    import subprocess
+    import sys
+
+    module, _ = worker
+    task_backings = tmp_path / "task-backings"
+    task_backings.mkdir(mode=0o755)
+    backing = task_backings / "modal-volume"
+    backing.mkdir()
+    volume = tmp_path / "task-volume"
+    volume.symlink_to(backing, target_is_directory=True)
+    workspace = tmp_path / "workspace"
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    asset_backings = tmp_path / "asset-backings"
+    asset_backings.mkdir(mode=0o755)
+    asset_volume = asset_backings / "potential-volume"
+    asset_volume.mkdir()
+    (assets / "potentials").symlink_to(asset_volume, target_is_directory=True)
+    (asset_volume / "fixture.dat").write_bytes(b"pinned fixture")
+    (backing / "scripts").mkdir()
+    original = (
+        "import os, sys\nfrom pathlib import Path\n"
+        "assert os.getcwd() == sys.argv[1]\n"
+        "assert 'CORRAL_WORKSPACE' not in os.environ\n"
+        "for name in os.listdir('/proc/self/fd'):\n"
+        "    try: entry = os.fstat(int(name))\n"
+        "    except OSError: continue\n"
+        "    assert (entry.st_dev, entry.st_ino) != tuple(map(int, sys.argv[2:4]))\n"
+        "# Export must use the supervisor's retained handle, not mount traversal.\n"
+        "Path(sys.argv[4]).unlink()\n"
+        "assert Path('resources/fixture/fixture.dat').read_bytes() == b'pinned fixture'\n"
+        "Path('output/resources').mkdir()\n"
+        "Path('output/resources/result.txt').write_text('mutable result')\n"
+        "os.chdir('scripts')\n"
+        "print('ran original script')\n"
+        "# Preserve public path literals: /workspace/output/result.txt\n"
+        f"sys.exit({exit_code})\n"
+    )
+    (backing / "scripts/probe.py").write_text(original)
+    resource = {
+        "name": "fixture", "relative": "potentials/fixture.dat",
+        "sha256": hashlib.sha256(b"pinned fixture").hexdigest(),
+        "size": len(b"pinned fixture"),
+    }
+    # Keep real subprocess and filesystem behavior; only privileged ownership
+    # operations are stubbed so this regression runs without root. Live Modal
+    # smoke tests exercise the actual UID drop and immutable mount permissions.
+    bootstrap = (
+        "import os\n"
+        "os.chown = lambda *_args, **_kwargs: None\n"
+        "os.setgroups = lambda *_args: None\n"
+        "os.setgid = lambda *_args: None\n"
+        "os.setuid = lambda *_args: None\n"
+        + module._BOOTSTRAP.replace("/workspace", str(workspace))
+        .replace("/task-volume", str(volume))
+        .replace("/assets", str(assets))
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", bootstrap,
+         json.dumps(["input", "scripts", "output", ".tmp"]),
+         json.dumps([resource]), sys.executable,
+         str(workspace / "scripts/probe.py"), str(workspace),
+         str(backing.stat().st_dev), str(backing.stat().st_ino), str(volume)],
+        cwd=tmp_path, capture_output=True, text=True, timeout=15,
+    )
+    assert completed.returncode == exit_code, completed.stderr
+    assert completed.stdout == "ran original script\n"
+    assert task_backings.stat().st_mode & 0o777 == 0o700
+    assert asset_backings.stat().st_mode & 0o777 == 0o700
+    assert not volume.exists()
+    assert workspace.is_dir() and not workspace.is_symlink()
+    assert (workspace / "scripts/probe.py").read_text() == original
+    assert (backing / "scripts/probe.py").read_text() == original
+    assert (backing / "output/resources/result.txt").read_text() == "mutable result"
+    assert not (backing / "resources").exists()

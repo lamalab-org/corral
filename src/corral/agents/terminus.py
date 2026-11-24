@@ -159,15 +159,23 @@ class TerminusAgent(BaseAgent):
         task_text = (
             task if isinstance(task, str) else json.dumps(task, ensure_ascii=False)
         )
-        surrender_rule = "Do not surrender; keep working until you have a final answer."
+        surrender_rule = (
+            "Always provide tool_calls; keep working until you can call submit_answer."
+        )
         if enable_surrender:
             surrender_rule = (
                 self.surrender_prompt.fill({})
                 if self.surrender_prompt is not None
-                else "Surrender only if the task is genuinely impossible."
+                else (
+                    "If you cannot complete this request, or you conclude that it "
+                    "cannot be done with the information and tools available, set "
+                    "surrender to true instead of providing tool_calls."
+                )
             )
         examples_block = (
-            "\nWorked examples:\n" + "\n\n".join(map(str, examples)) if examples else ""
+            "\n\nWorked examples:\n" + "\n\n".join(map(str, examples))
+            if examples
+            else ""
         )
         return f"""
 You are a Terminus-style autonomous scientific agent.
@@ -175,8 +183,7 @@ You are a Terminus-style autonomous scientific agent.
 Complete the task using only the Corral tools listed below.
 
 Task:
-{task_text}
-{examples_block}
+{task_text}{examples_block}
 
 Available Corral tools:
 {json.dumps(tools, indent=2, ensure_ascii=False)}
@@ -273,8 +280,8 @@ Rules:
             return
         middle = run.messages[head:-tail]
         prompt = (
-            "Summarize this transcript into a concise progress note. Preserve "
-            "concrete observations and remaining work; invent nothing.\n\n"
+            "Summarize this transcript into a concise progress note.\n"
+            "Preserve concrete observations and remaining work; invent nothing.\n\n"
             + "\n\n".join(
                 f"[{message.get('role')}] {message.get('content')}"
                 for message in middle
@@ -373,7 +380,9 @@ Rules:
                     )
                 feedback = {
                     "role": "user",
-                    "content": f"Invalid response: {exc}. Return corrected JSON only.",
+                    "content": (
+                        f"Invalid response: {exc}.\nReturn corrected JSON only."
+                    ),
                 }
                 run.messages.append(feedback)
                 await session.record_message(feedback)
@@ -401,7 +410,10 @@ Rules:
                     )
                 feedback = {
                     "role": "user",
-                    "content": "Surrender is disabled. Continue using the available tools.",
+                    "content": (
+                        "Stopping without an answer is not available.\n"
+                        "Continue using the available tools."
+                    ),
                 }
                 await session.record_message(assistant, usage=turn_usage)
                 run.messages.append(feedback)
@@ -413,8 +425,7 @@ Rules:
                 feedback = {
                     "role": "user",
                     "content": (
-                        f"Requested {len(parsed.tool_calls)} calls; at most "
-                        f"{self.max_actions_per_turn} are allowed per turn."
+                        f"Requested {len(parsed.tool_calls)} calls; at most {self.max_actions_per_turn} are allowed per turn."
                     ),
                 }
                 run.messages.append(feedback)

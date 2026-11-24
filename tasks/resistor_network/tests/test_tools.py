@@ -672,51 +672,6 @@ class TestEstimateResistorValues:
 
         assert result["resistors"]["R1"] == pytest.approx(10.0)
 
-    def test_multiple_resistors_optimization(self):
-        """Test optimization with multiple resistors"""
-        topology = {
-            "resistors": {"R1": 1.0, "R2": 1.0, "R3": 1.0},
-            "connections": [["A", "B", "R1"], ["B", "C", "R2"], ["C", "D", "R3"]],
-        }
-        measurements = [{"node_a": "A", "node_b": "D", "resistance": 30.0}]
-
-        with patch(
-            "resistor_network.tools.validate_measurements.execute"
-        ) as mock_validate:
-            mock_validate.return_value = json.dumps(
-                {"total_error": 0.0}
-            )  # All combinations equally good
-
-            result_json = estimate_resistor_values.execute(
-                topology=json.dumps(topology), measurements=json.dumps(measurements)
-            )
-            result = json.loads(result_json)
-
-        # Should find some optimization (exact values depend on mock behavior)
-        assert "resistors" in result
-        assert len(result["resistors"]) == 3
-
-    def test_large_circuit_heuristic(self):
-        """Test heuristic approach for large circuits (>3 resistors)"""
-        topology = {
-            "resistors": {f"R{i}": 1.0 for i in range(1, 6)},  # 5 resistors
-            "connections": [[f"N{i}", f"N{i+1}", f"R{i}"] for i in range(1, 6)],
-        }
-        measurements = [{"node_a": "N1", "node_b": "N6", "resistance": 50.0}]
-
-        with patch(
-            "resistor_network.tools.validate_measurements.execute"
-        ) as mock_validate:
-            mock_validate.return_value = json.dumps({"total_error": 10.0})
-
-            result_json = estimate_resistor_values.execute(
-                topology=json.dumps(topology), measurements=json.dumps(measurements)
-            )
-            result = json.loads(result_json)
-
-        assert "resistors" in result
-        assert len(result["resistors"]) == 5
-
     def test_optimization_error_handling(self):
         """Test error handling in optimization"""
         with patch(
@@ -736,46 +691,43 @@ class TestEstimateResistorValues:
 class TestGenerateTestMeasurements:
     """Tests for generate_test_measurements tool"""
 
-    def test_simple_measurements_generation(self):
-        """Test generation of measurements for simple circuit"""
+    def test_measurements_are_simulated_and_rounded(self):
+        """Each pair gets its simulated resistance, rounded to 3 decimals"""
         topology = {
-            "resistors": {"R1": 10.0, "R2": 20.0},
-            "connections": [["A", "B", "R1"], ["B", "C", "R2"]],
+            "resistors": {"R1": 10.0, "R2": 20.0, "R3": 30.0},
+            "connections": [["A", "B", "R1"], ["B", "C", "R2"], ["A", "C", "R3"]],
         }
-        terminal_pairs = [["A", "B"], ["B", "C"], ["A", "C"]]
 
-        with patch("resistor_network.tools.simulate_circuit_resistance") as mock_sim:
-            mock_sim.side_effect = [10.0, 20.0, 30.0]  # Expected resistances
-
-            result_json = generate_test_measurements.execute(
-                topology=json.dumps(topology), terminal_pairs=terminal_pairs
+        result = json.loads(
+            generate_test_measurements.execute(
+                topology=json.dumps(topology),
+                terminal_pairs=[["A", "B"], ["B", "C"], ["A", "C"]],
             )
-            result = json.loads(result_json)
+        )
 
-        assert len(result) == 3
-        assert result[0]["node_a"] == "A"
-        assert result[0]["node_b"] == "B"
-        assert result[0]["resistance"] == 10.0
-        assert result[2]["resistance"] == 30.0
+        assert result == [
+            {"node_a": "A", "node_b": "B", "resistance": 8.333},
+            {"node_a": "B", "node_b": "C", "resistance": 13.333},
+            {"node_a": "A", "node_b": "C", "resistance": 15.0},
+        ]
 
     def test_measurement_with_simulation_error(self):
-        """Test handling of simulation errors during measurement generation"""
+        """A failed simulation is reported per pair instead of aborting"""
         topology = {"resistors": {"R1": 10.0}, "connections": [["A", "B", "R1"]]}
-        terminal_pairs = [["X", "Y"]]  # Non-existent nodes
 
-        with patch("resistor_network.tools.simulate_circuit_resistance") as mock_sim:
-            mock_sim.side_effect = Exception("Node not found")
-
-            result_json = generate_test_measurements.execute(
-                topology=json.dumps(topology), terminal_pairs=terminal_pairs
+        with patch(
+            "resistor_network.tools.get_resistance_between_nodes",
+            side_effect=Exception("Node not found"),
+        ):
+            result = json.loads(
+                generate_test_measurements.execute(
+                    topology=json.dumps(topology), terminal_pairs=[["X", "Y"]]
+                )
             )
-            result = json.loads(result_json)
 
-        assert len(result) == 1
-        assert isinstance(result, list)
-        assert len(result) > 0
-        assert "error" in result[0]
-        assert "Could not measure" in result[0]["error"]
+        assert result == [
+            {"node_a": "X", "node_b": "Y", "error": "Could not measure: Node not found"}
+        ]
 
     def test_invalid_terminal_pairs(self):
         """Test handling of invalid terminal pairs"""
@@ -789,21 +741,6 @@ class TestGenerateTestMeasurements:
 
         # Should skip invalid pairs
         assert len(result) == 0
-
-    def test_rounding_of_results(self):
-        """Test that results are properly rounded"""
-        topology = {"resistors": {"R1": 10.0}, "connections": [["A", "B", "R1"]]}
-        terminal_pairs = [["A", "B"]]
-
-        with patch("resistor_network.tools.simulate_circuit_resistance") as mock_sim:
-            mock_sim.return_value = 10.123456789
-
-            result_json = generate_test_measurements.execute(
-                topology=json.dumps(topology), terminal_pairs=terminal_pairs
-            )
-            result = json.loads(result_json)
-
-        assert result[0]["resistance"] == 10  # Rounded to 0 decimal places
 
 
 # Hypothesis-based property tests

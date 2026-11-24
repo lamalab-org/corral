@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
+import tempfile
 from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import anyio
 
+from corral.agents._transcript import event_clock
 from corral.agents.hooks import AgentHooks, HookContext, HookPoint
 from corral.agents.schema import AgentOutcome, AgentUsage
 from corral.agents.usage import usage_from_mapping
@@ -28,6 +32,7 @@ from corral.core.events import (
     AgentTurnRecorded,
     ContextImported,
     ParallelGroupCompleted,
+    RuntimeUpdate,
     SubmissionAccepted,
     TaskConfigured,
     ToolCompleted,
@@ -42,12 +47,18 @@ from corral.core.tool_catalog import ToolCatalogSnapshot
 from corral.core.transition import (
     ToolEffects,
     ToolRecoveryPending,
+    environment_operations,
     execute_action,
+    is_surrender_answer,
     propose_action,
+    surrender_enabled,
 )
+from corral.core.workspace import WorkspaceState
 from corral.observability import record_commit_safely
 from corral.persistence import CommitConflictError
+from corral.persistence.artifacts import iter_blob_refs
 from corral.runtime import permissions
+from corral.runtime.evaluation_awareness import prepend_evaluation_notice
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -76,9 +87,13 @@ class AgentSessionCapabilities:
     """Opt-in model-facing capabilities supplied by the session runtime."""
 
     inspect_subagents: bool = False
+    native_workspace: bool = False
 
     def to_metadata(self) -> dict[str, bool]:
-        return {"inspect_subagents": self.inspect_subagents}
+        return {
+            "inspect_subagents": self.inspect_subagents,
+            **({"native_workspace": True} if self.native_workspace else {}),
+        }
 
     @classmethod
     def from_value(cls, value: object) -> AgentSessionCapabilities:
@@ -87,7 +102,7 @@ class AgentSessionCapabilities:
         if isinstance(value, cls):
             return value
         if isinstance(value, Mapping):
-            unknown = set(value) - {"inspect_subagents"}
+            unknown = set(value) - {"inspect_subagents", "native_workspace"}
             if unknown:
                 raise ValueError(
                     f"unknown AgentSession capabilities: {sorted(unknown)}"
@@ -95,7 +110,10 @@ class AgentSessionCapabilities:
             enabled = value.get("inspect_subagents", False)
             if not isinstance(enabled, bool):
                 raise TypeError("inspect_subagents capability must be a boolean")
-            return cls(inspect_subagents=enabled)
+            native_workspace = value.get("native_workspace", False)
+            if not isinstance(native_workspace, bool):
+                raise TypeError("native_workspace capability must be a boolean")
+            return cls(inspect_subagents=enabled, native_workspace=native_workspace)
         raise TypeError(
             "session_capabilities must be AgentSessionCapabilities or a mapping"
         )
@@ -115,8 +133,7 @@ def inspect_subagent_tool() -> dict[str, Any]:
         "function": {
             "name": INSPECT_SUBAGENT_TOOL_NAME,
             "description": (
-                "Inspect the conversation and tool activity of a child or "
-                "descendant subagent that this agent is authorized to inspect. "
+                "Inspect the conversation and tool activity of a child or descendant subagent that this agent is authorized to inspect.\n"
                 "Use this only when the normal subagent result needs investigation."
             ),
             "parameters": {
@@ -242,7 +259,11 @@ class AgentSession:
         self._delegated_iteration_limit: ContextVar[int | None] = ContextVar(
             f"corral_delegate_budget_{id(self)}", default=None
         )
+        self._checkpoint_owner = self
+        self._checkpoint_lock = anyio.Lock()
         self._action_lock = anyio.Lock()
+        self._record_lock = anyio.Lock()
+        self._event_index: int | None = None
         self._tool_connection: ContextVar[ToolConnection | None] = ContextVar(
             f"corral_tool_connection_{id(self)}", default=None
         )
@@ -274,6 +295,61 @@ class AgentSession:
         return self.state
 
     async def _append_agent(self, event: Any, request_id: str) -> Commit:
+        # SDK callbacks and MCP proposals share this writer. Only persistence
+        # is serialized; tool executions can still overlap.
+        async with self._record_lock:
+            return await self._append_agent_ordered(event, request_id)
+
+    async def _append_agent_ordered(self, event: Any, request_id: str) -> Commit:
+        occurred_at = None
+        if isinstance(event, AgentTurnRecorded):
+            if self._event_index is None:
+                # Metadata-only SDK lifecycle events also consume indexes.
+                # Recover from the ledger, including those absent from history.
+                history = await self.state_store.trace_commits(
+                    self.actor.run_id, branch_id=self.branch_id
+                )
+                self._event_index = (
+                    max(
+                        (
+                            commit.event.metadata.get("chronology", {}).get(
+                                "event_index", -1
+                            )
+                            for commit in history
+                            if isinstance(commit.event, AgentTurnRecorded)
+                        ),
+                        default=-1,
+                    )
+                    + 1
+                )
+            clock = dict(
+                event.messages[0].get("chronology", {})
+                if event.messages
+                else event.metadata.get("chronology", {})
+            )
+            if not clock:
+                clock = event_clock()
+            clock.update(event_index=self._event_index, agent_run_id=self.actor.run_id)
+            self._event_index += 1
+            occurred_at = datetime.fromisoformat(clock["occurred_at"])
+            event = AgentTurnRecorded.model_validate(
+                {
+                    **event.model_dump(mode="json"),
+                    "messages": tuple(
+                        {
+                            **message,
+                            "chronology": {
+                                **clock,
+                                **message.get("chronology", {}),
+                                "event_index": clock["event_index"],
+                                "agent_run_id": self.actor.run_id,
+                            },
+                        }
+                        for message in event.messages
+                    ),
+                    "metadata": {**event.metadata, "chronology": clock},
+                }
+            )
         commit = await self._bound_store.append(
             CommitRequest(
                 request_id=request_id,
@@ -282,6 +358,7 @@ class AgentSession:
                 based_on_hash=self._last_observed_hash,
                 author=self.actor,
                 event=event,
+                occurred_at=occurred_at,
             )
         )
         await self._notify(commit)
@@ -295,6 +372,7 @@ class AgentSession:
         *,
         based_on_hash: str | None = None,
     ) -> Commit:
+        clock = event_clock()
         commit = await self.state_store.bind(
             self.runtime_actor,
             branch_id=self.branch_id,
@@ -307,6 +385,7 @@ class AgentSession:
                 based_on_hash=based_on_hash or self._last_observed_hash,
                 author=self.runtime_actor,
                 event=event,
+                occurred_at=datetime.fromisoformat(clock["occurred_at"]),
             )
         )
         await self._notify(commit)
@@ -344,6 +423,8 @@ class AgentSession:
             if isinstance(prompt, str | list)
             else self.environment.get_task_prompt(self.state)
         )
+        if self.state.task.scaffold.get("evaluation_awareness", "off") == "on":
+            resolved = prepend_evaluation_notice(resolved, self.iteration_limit)
         handoff = self._context.agent_run.handoff
         if handoff is None:
             return resolved
@@ -399,6 +480,49 @@ class AgentSession:
     @property
     def workspace(self) -> str | None:
         return self.execution_workspace
+
+    @property
+    def native_sandbox_disabled(self) -> bool:
+        """Explicit Docker ablation policy; local execution keeps SDK defaults."""
+        return permissions.guardrails_disabled()
+
+    @property
+    def native_tool_workspace(self) -> str | None:
+        """Shared task workspace for native tools in either Docker policy."""
+        if (
+            permissions.enabled() or self.native_sandbox_disabled
+        ) and self.capabilities.native_workspace:
+            return self.workspace
+        return None
+
+    async def _capture_native_workspace(self) -> None:
+        """Checkpoint direct SDK writes without scheduling them for replay."""
+        if self.native_tool_workspace is None:
+            return
+        async with self._action_lock:
+            await self._refresh()
+            # Submission already captured the final workspace through its MCP
+            # action. Buffered SDK transcripts can arrive after that boundary.
+            if self.state.is_terminal:
+                return
+            previous = self.state.workspace
+            workspace = await anyio.to_thread.run_sync(
+                lambda: self.environment.capture_workspace(previous)
+            )
+            if (
+                workspace.files == previous.files
+                and workspace.artifacts == previous.artifacts
+            ):
+                return
+            commit = await self._append_runtime(
+                TaskConfigured(
+                    status="Native SDK workspace changes captured",
+                    workspace_delta=WorkspaceDelta.from_workspace(workspace),
+                    expected_workspace_revision=previous.revision,
+                ),
+                f"agent:{self.actor.run_id}:native-workspace:{uuid4()}",
+            )
+            await self._refresh(observed_hash=commit.hash)
 
     @property
     def previous_evaluation(self) -> Mapping[str, Any] | None:
@@ -474,7 +598,7 @@ class AgentSession:
 
     @property
     def surrender_allowed(self) -> bool:
-        return bool(self.state.task.scaffold.get("enable_surrender", False))
+        return surrender_enabled(self.state)
 
     @property
     def submission(self) -> str | None:
@@ -489,45 +613,135 @@ class AgentSession:
         raw_messages: Sequence[Mapping[str, Any]],
         *,
         usage: Mapping[str, Any] | None = None,
+        llm_calls: int = 1,
     ) -> None:
-        """Commit exactly the conversation messages added by one turn."""
+        """Commit provider messages, retaining tools executed by the SDK.
+
+        Corral tools already have authored action/result commits. SDK tools
+        remain transcript-only so recovery never tries to execute them.
+        """
         messages: list[Mapping[str, JsonValue]] = []
+        native_calls = {
+            call["id"]: call["function"]["name"]
+            for message in self.messages
+            if message.get("sdk_native")
+            for call in message.get("tool_calls", ())
+        }
+        task_tools = {tool["function"]["name"] for tool in self.tools}
+        native_results = {
+            message.get("tool_call_id")
+            for message in self.messages
+            if message.get("sdk_native") and message.get("role") == "tool"
+        }
+
+        async def record_sdk_lifecycle(message):
+            clock = message.get("chronology")
+            if not clock:
+                return
+            # Keep MCP SDK identity/timing without duplicating runtime tool
+            # calls in the conversation or charging their usage twice.
+            lifecycle = {
+                key: value
+                for key, value in message.items()
+                if key
+                in {
+                    "tool_calls",
+                    "tool_call_id",
+                    "name",
+                    "is_error",
+                    "runtime_action_id",
+                }
+            }
+            await self._append_agent(
+                AgentTurnRecorded(
+                    metadata={
+                        "chronology": clock,
+                        "sdk_tool_event": _json_value(lifecycle),
+                    }
+                ),
+                f"agent:{self.actor.run_id}:sdk-event:{uuid4()}",
+            )
+
         for raw in raw_messages:
             message = dict(raw)
-            if message.get("role") == "tool" or message.get("tool_calls"):
-                continue
-            if message.get("content") is None and not message.get("name"):
+            if message.get("tool_calls"):
+                calls = [
+                    call
+                    for call in message["tool_calls"]
+                    if message.get("sdk_native")
+                    or (
+                        call["function"]["name"] not in task_tools
+                        and not call["function"]["name"].startswith("mcp__corral__")
+                    )
+                ]
+                echoed = [call for call in message["tool_calls"] if call not in calls]
+                if echoed:
+                    await record_sdk_lifecycle({**message, "tool_calls": echoed})
+                if message.get("chronology", {}).get("sdk"):
+                    calls = [call for call in calls if call["id"] not in native_calls]
+                if not calls:
+                    continue
+                message.update(tool_calls=calls, sdk_native=True)
+                native_calls.update(
+                    (call["id"], call["function"]["name"]) for call in calls
+                )
+            elif message.get("role") == "tool":
+                if (
+                    message.get("chronology", {}).get("sdk")
+                    and message.get("tool_call_id") in native_results
+                ):
+                    continue
+                name = native_calls.get(message.get("tool_call_id"))
+                if name is None:
+                    await record_sdk_lifecycle(message)
+                    continue
+                message.update(name=name, sdk_native=True)
+                native_results.add(message.get("tool_call_id"))
+            elif message.get("content") is None and not message.get("name"):
                 continue
             detached = _json_value(message)
             if not isinstance(detached, Mapping):
                 raise TypeError("a provider transcript message must be a JSON object")
             messages.append(detached)
-        if not messages:
+        if not messages and usage is None:
             return
         normalized = usage_from_mapping(
             usage,
-            llm_calls=1 if usage is not None else 0,
+            llm_calls=llm_calls if usage is not None else 0,
         )
-        await self._append_agent(
-            AgentTurnRecorded(
-                messages=tuple(messages),
-                usage_delta=UsageDelta(
-                    input_tokens=normalized.input_tokens,
-                    output_tokens=normalized.output_tokens,
-                    reasoning_tokens=normalized.reasoning_tokens,
-                    llm_calls=normalized.llm_calls,
+        # Keep native call/result boundaries visible to streaming observers.
+        batches = (
+            [(message,) for message in messages]
+            if any(message.get("sdk_native") for message in messages)
+            else [tuple(messages)]
+        )
+        for index, batch in enumerate(batches):
+            await self._append_agent(
+                AgentTurnRecorded(
+                    messages=batch,
+                    usage_delta=UsageDelta(
+                        input_tokens=normalized.input_tokens if index == 0 else 0,
+                        output_tokens=normalized.output_tokens if index == 0 else 0,
+                        reasoning_tokens=normalized.reasoning_tokens
+                        if index == 0
+                        else 0,
+                        llm_calls=normalized.llm_calls if index == 0 else 0,
+                        tool_calls=sum(len(m.get("tool_calls", ())) for m in batch),
+                    ),
                 ),
-            ),
-            f"agent:{self.actor.run_id}:turn:{uuid4()}",
-        )
+                f"agent:{self.actor.run_id}:turn:{uuid4()}",
+            )
+        if any(m.get("sdk_native") and m.get("role") == "tool" for m in messages):
+            await self._capture_native_workspace()
 
     async def record_message(
         self,
         raw: Mapping[str, Any],
         *,
         usage: Mapping[str, Any] | None = None,
+        llm_calls: int = 1,
     ) -> None:
-        await self.record_messages((raw,), usage=usage)
+        await self.record_messages((raw,), usage=usage, llm_calls=llm_calls)
 
     async def run_hooks(
         self,
@@ -688,6 +902,7 @@ class AgentSession:
         )
 
         async def fail(error: Exception) -> ToolResponse:
+            observed = event_clock()
             failed = await self.state_store.bind(
                 tool_actor,
                 branch_id=self.branch_id,
@@ -699,6 +914,7 @@ class AgentSession:
                     branch_id=self.branch_id,
                     based_on_hash=based_on,
                     author=tool_actor,
+                    occurred_at=datetime.fromisoformat(observed["occurred_at"]),
                     event=ToolFailed(
                         action_id=trusted.id,
                         invocation_id=invocation_id,
@@ -745,6 +961,7 @@ class AgentSession:
                 raise
             except Exception as exc:
                 return await fail(exc)
+        observed = event_clock()
         try:
             completed = await self.state_store.bind(
                 tool_actor,
@@ -757,6 +974,7 @@ class AgentSession:
                     branch_id=self.branch_id,
                     based_on_hash=based_on,
                     author=tool_actor,
+                    occurred_at=datetime.fromisoformat(observed["occurred_at"]),
                     event=ToolCompleted(
                         action_id=trusted.id,
                         invocation_id=invocation_id,
@@ -780,9 +998,9 @@ class AgentSession:
         if trusted.is_submission and effects.success:
             answer = trusted.arguments["answer"]
             assert isinstance(answer, str)
-            surrendered = bool(
-                self.state.runtime.metadata.get("surrender_sentinel")
-            ) and answer == str(self.state.runtime.metadata["surrender_sentinel"])
+            surrendered = self.surrender_allowed and is_surrender_answer(
+                self.state, answer
+            )
             accepted = await self._append_runtime(
                 SubmissionAccepted(
                     action_id=trusted.id,
@@ -1205,9 +1423,12 @@ class AgentSession:
                 build_terminal_tool,
             )
 
-            environment.tools["terminal"] = build_terminal_tool(
+            rebound_terminal = build_terminal_tool(
                 AbsoluteWorkspaceFilesystem(environment.workspace_path)
             )
+            if original_terminal := environment.tools.get("terminal"):
+                rebound_terminal.description = original_terminal.description
+            environment.tools["terminal"] = rebound_terminal
         branch_state = await self.state_store.materialize(selected)
         if node_workspace is None:
             await anyio.to_thread.run_sync(
@@ -1228,6 +1449,7 @@ class AgentSession:
             agent=self._hook_agent,
             mcp_host=self.mcp_host,
         )
+        branch._checkpoint_owner = self._checkpoint_owner
         if node_workspace is not None:
             workspace = await environment.workspace_manager.snapshot(
                 node_workspace, previous=branch_state.workspace
@@ -1242,6 +1464,111 @@ class AgentSession:
             )
             await branch._refresh(observed_hash=commit.hash)
         return branch
+
+    async def checkpoint_environment(self) -> None:
+        """Commit controller-owned shared resources before saving a checkpoint."""
+        current = await self._refresh()
+        captured = await anyio.to_thread.run_sync(
+            self.environment.capture_environment, current.environment.values
+        )
+        operations = environment_operations(
+            current.environment.values,
+            self.environment.normalize_public_paths(captured),
+        )
+        if operations:
+            commit = await self._append_runtime(
+                TaskConfigured(
+                    status="Environment checkpoint saved",
+                    environment_operations=operations,
+                    expected_environment_revision=current.environment.revision,
+                ),
+                f"environment-checkpoint:{uuid4()}",
+            )
+            await self._refresh(observed_hash=commit.hash)
+
+    async def checkpoint_branch(self) -> dict[str, Any]:
+        """Save branch state without exposing private environment values to workers.
+
+        The opaque blob and public workspace manifest are both retained in agent
+        bookkeeping so continuation imports the snapshot and its file bytes.
+        """
+        await self.checkpoint_environment()
+        state = await self.state_store.materialize(self.branch_id)
+        payload = {
+            "environment": state.environment.values,
+            "workspace": state.workspace.model_dump(mode="json"),
+        }
+        blob = await self.environment.workspace_manager.artifact_store.put_bytes(
+            json.dumps(payload).encode()
+        )
+        owner = self._checkpoint_owner
+        async with owner._checkpoint_lock:
+            current = await owner._refresh()
+            refs = set(current.runtime.metadata.get("branch_checkpoints", ()))
+            refs.add(blob.blob_ref)
+            commit = await owner._append_runtime(
+                TaskConfigured(
+                    status="Branch checkpoint saved",
+                    runtime_update=RuntimeUpdate(
+                        metadata={"branch_checkpoints": sorted(refs)}
+                    ),
+                ),
+                f"branch-checkpoint:{uuid4()}",
+            )
+            await owner._refresh(observed_hash=commit.hash)
+        return {
+            "blob_ref": blob.blob_ref,
+            "workspace": payload["workspace"],
+            "environment_artifacts": [
+                {"blob_ref": ref}
+                for ref in sorted(set(iter_blob_refs(payload["environment"])))
+            ],
+        }
+
+    async def restore_branch_state(self, *, checkpoint: Mapping[str, Any]) -> None:
+        """Restore a saved branch in its assigned controller-owned workspace."""
+        if "blob_ref" in checkpoint:
+            payload = await self.environment.workspace_manager.artifact_store.get_bytes(
+                checkpoint["blob_ref"]
+            )
+            checkpoint = json.loads(payload)
+        # Historical local checkpoints stored their environment inline.
+        saved_workspace = WorkspaceState.model_validate(checkpoint["workspace"])
+        destination = self.workspace
+        if destination is None:
+            raise ValueError("branch checkpoint requires a workspace")
+        # Materialize all bytes before replacing the branch's physical files or
+        # publishing its logical state. Node directories are absent from the
+        # main trial snapshot and must be restored separately.
+        with tempfile.TemporaryDirectory(dir=Path(destination).parent) as temporary:
+            staged = Path(temporary) / "workspace"
+            await self.environment.workspace_manager.materialize(
+                saved_workspace, staged
+            )
+            for entry in Path(destination).iterdir():
+                if entry.is_dir() and not entry.is_symlink():
+                    shutil.rmtree(entry)
+                else:
+                    entry.unlink()
+            permissions.copy_workspace(staged, destination)
+
+        current = await self._refresh()
+        restored = WorkspaceState.model_validate(
+            {**saved_workspace.model_dump(mode="json"), "id": current.workspace.id}
+        )
+        commit = await self._append_runtime(
+            TaskConfigured(
+                status="Branch checkpoint restored",
+                environment_operations=environment_operations(
+                    current.environment.values, checkpoint["environment"]
+                ),
+                workspace_delta=WorkspaceDelta.from_workspace(restored),
+                expected_environment_revision=current.environment.revision,
+                expected_workspace_revision=current.workspace.revision,
+            ),
+            f"branch:{self.branch_id}:restored:{uuid4()}",
+        )
+        await self._refresh(observed_hash=commit.hash)
 
     async def promote_artifacts(self, *, source_workspace: str) -> list[str]:
         """Copy a selected node's files into this agent's canonical workspace."""
@@ -1482,6 +1809,7 @@ async def run_agent_session(
     try:
         result = await _run_bound_agent(agent, interface)
         await interface._finish_subagents()
+        await interface._capture_native_workspace()
         # SDK/MCP adapters may turn a raised tool exception into an agent
         # outcome. Do not close the agent or execution while its tool still
         # needs recovery, even when an adapter swallowed the suspension.

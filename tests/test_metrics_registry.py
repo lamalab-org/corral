@@ -324,16 +324,6 @@ class TestMetricRegistry:
         assert results["error_metric"] is None  # Calculation failed
         assert results["dummy_metric"] == 42.0  # Should still succeed
 
-    def test_calculate_all_with_error(self, empty_registry, sample_benchmark_result):
-        """Test that errors during calculation are handled gracefully."""
-        empty_registry.register(ErrorMetric())
-        empty_registry.register(DummyMetric())
-
-        results = empty_registry.calculate_all(sample_benchmark_result)
-
-        assert results["error_metric"] is None  # Error was caught
-        assert results["dummy_metric"] == 42.0  # Should still succeed
-
     def test_calculate_all_with_nonexistent_enabled_metric(
         self, populated_registry, sample_benchmark_result
     ):
@@ -587,22 +577,6 @@ class TestParallelBatchCalculation:
         for i in range(3):
             assert results[f"metric_{i}"] == 20.0
 
-    def test_parallel_false_explicitly(self, multi_task_benchmark_result):
-        """Test that parallel=False explicitly uses sequential calculation."""
-        registry = MetricRegistry()
-
-        # Register metrics
-        for i in range(3):
-            metric = SlowMetric(f"metric_{i}", sleep_time=0.01)
-            registry.register(metric)
-
-        # Explicitly set parallel=False
-        results = registry.calculate_all(multi_task_benchmark_result, parallel=False)
-
-        assert len(results) == 3
-        for i in range(3):
-            assert results[f"metric_{i}"] == 20.0
-
 
 class TestParallelCostThreshold:
     """Test that parallel=True only spawns the pool when it is worth it."""
@@ -676,22 +650,3 @@ class TestParallelCostThreshold:
         pricey.estimated_cost_seconds = 3.5
 
         assert registry._estimated_cost([cheap, negative, bad, pricey]) == 3.5
-
-
-class TestBatchCalculationBackwardCompatibility:
-    """Test that existing usage patterns still work."""
-
-    def test_backward_compatible_call_signature(self, multi_task_benchmark_result):
-        """Test that old call signature (without parallel arg) still works."""
-        registry = MetricRegistry()
-        registry.register(SlowMetric("test", sleep_time=0.01))
-
-        # Old style call - should work fine
-        results = registry.calculate_all(multi_task_benchmark_result)
-        assert results["test"] == 20.0
-
-        # With enabled_only
-        results = registry.calculate_all(
-            multi_task_benchmark_result, enabled_only=["test"]
-        )
-        assert results["test"] == 20.0

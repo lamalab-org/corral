@@ -98,6 +98,41 @@ def test_simagent_setup_deploys_without_release_environment(modules, monkeypatch
     assert any(call[0] == "smoke" for call in calls)
 
 
+def test_deployment_smoke_explicitly_authorizes_declared_resources(modules, monkeypatch):
+    from corral_md.resources import asset_descriptors
+
+    release, _ = modules
+    volume = _Volume()
+    gpu_options = []
+    monkeypatch.setattr(release, "wait_for_active_app", lambda *_: None)
+
+    def function(_app, name):
+        if name == "prepare_workspace":
+            return SimpleNamespace(remote=lambda *_: {"head": "initial", "files": {}})
+
+        def spawn(run_id, action_id, *_args, **kwargs):
+            if name == "run_lammps":
+                volume.files[f"/corral/runs/{run_id}/actions/{action_id}.json"] = b"{}"
+                result = {"action_id": action_id, "files": {"output/smoke.log": {}}}
+            else:
+                assert name == "run_python_gpu"
+                gpu_options.append(kwargs["execution_options"])
+                result = {"files": {"output/gpu.json": {}}}
+            return SimpleNamespace(get=lambda: result)
+
+        return SimpleNamespace(spawn=spawn)
+
+    monkeypatch.setattr(release.modal.Function, "from_name", function)
+    release.smoke_test("build-1", volume)
+    assert gpu_options == [{
+        "timeout": 300,
+        "resources": {
+            name: descriptor.model_dump(mode="json")
+            for name, descriptor in asset_descriptors().items()
+        },
+    }]
+
+
 def test_setup_waits_for_active_simagent_build(modules, monkeypatch):
     release, _ = modules
     monkeypatch.delenv("CORRAL_MD_MODAL_VOLUME", raising=False)

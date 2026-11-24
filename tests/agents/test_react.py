@@ -127,3 +127,54 @@ async def test_model_failure_keeps_only_the_final_error_message(monkeypatch, age
 
     assert outcome.status == "agent_failure"
     assert outcome.error == "Required field 'answer' is missing."
+
+
+@pytest.mark.anyio
+async def test_malformed_action_name_is_not_sent_as_a_message_name(monkeypatch, agent):
+    garbled = "` in final, got output. Let's do plain text final tags " * 4
+    model_call = AsyncMock(
+        side_effect=[
+            SimpleNamespace(
+                content=f"<action>{garbled}</action><action_input>{{}}</action_input>",
+                usage=None,
+                id=None,
+            ),
+            SimpleNamespace(
+                content="<action>PythonREPL</action><action_input>{}</action_input>",
+                usage=None,
+                id=None,
+            ),
+            SimpleNamespace(content="not an action", usage=None, id=None),
+        ]
+    )
+    monkeypatch.setattr("corral.agents.base_agent.llm_call", model_call)
+
+    class Session:
+        prompt = "solve"
+        surrender_allowed = False
+        tools = ()
+        examples = ()
+        iteration_limit = 3
+        initial_state = SimpleNamespace(
+            messages=(), metadata=SimpleNamespace(scaffold={})
+        )
+
+        def __init__(self):
+            self.messages = []
+
+        def final_messages(self):
+            return tuple(self.messages)
+
+        async def record_message(self, message, **_kwargs):
+            self.messages.append(message)
+
+        async def execute(self, action, **_kwargs):
+            return SimpleNamespace(success=False, result=None, error="unknown tool")
+
+    await agent.run_session(Session())
+
+    sent = model_call.await_args_list[2].kwargs["messages"]
+    observations = [m for m in sent if m.get("content") == "Error: unknown tool"]
+    assert len(observations) == 2
+    assert "name" not in observations[0]
+    assert observations[1]["name"] == "PythonREPL"

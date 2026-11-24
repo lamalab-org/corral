@@ -99,25 +99,16 @@ def _spectra_prompt(env: Environment, state: ExecutionState) -> str:
     """Task prompt that echoes each dependency's question and answer."""
     task = env.current_task
     prompt = (
-        f"Task {task.name}:\n"
         f"{task.description}\n\n"
-        "Required submission format:\n"
+        "Please return your answer in this format so I can use it directly:\n"
         f"{task.submission_format}\n\n"
     )
-
-    prompt += "\nAvailable input data:\n"
 
     # Display resolved inputs from dependencies
     resolved = env.resolve_inputs(state)
     for input_name, ref in task.input_map.items():
         dep_prompt = env.group_tasks[ref.task_id].description
-        prompt += f"- Input from '{ref.task_id}' with question: '{dep_prompt}' and answer: '{resolved[input_name]}'\n"
-
-    # Display initial input data
-    if task.initial_input:
-        for key, value in task.initial_input.items():
-            if key != "work_dir":
-                prompt += f"- {key}: {value}\n"
+        prompt += f"For '{dep_prompt}' ({ref.task_id}), the earlier result was: {resolved[input_name]}\n"
 
     event(
         "DEBUG",
@@ -135,7 +126,7 @@ def _expose_ground_truth(env: Environment, state: ExecutionState) -> Environment
     del state
     return EnvironmentSetup(
         hidden_arguments={"h_smiles": env.current_task.scoring_inputs},
-        status="Ground-truth molecule exposed to tools.",
+        status="Spectroscopy tools configured for the sample.",
     )
 
 

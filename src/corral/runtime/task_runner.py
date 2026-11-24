@@ -23,9 +23,12 @@ from corral.core.errors import concise_error_message
 from corral.core.events import (
     AgentCompleted,
     AgentStarted,
+    AgentTurnRecorded,
     ExecutionCompleted,
     ExecutionFailed,
+    SubmissionAccepted,
 )
+from corral.core.transition import is_surrender_answer, surrender_enabled
 from corral.observability import (
     LoggingObserver,
     Observation,
@@ -36,6 +39,7 @@ from corral.observability import (
     restore_commit_safely,
     update_safely,
 )
+from corral.runtime.evaluation_awareness import awareness_metadata
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -216,6 +220,9 @@ class TaskRuntime:
         )
         session_capabilities = agent_session_capabilities(agent)
 
+        policy = awareness_metadata(
+            (scaffold_metadata or {}).get("evaluation_awareness", "off"), max_iterations
+        )
         head = await store.head(branch_id)
         if head is None:
             initial_event = await asyncio.to_thread(
@@ -226,6 +233,7 @@ class TaskRuntime:
                 model_metadata=model_metadata,
                 scaffold_metadata={
                     **dict(scaffold_metadata or {}),
+                    **policy,
                     "max_iterations": max_iterations,
                     "previous_evaluation": last_score,
                 },
@@ -248,7 +256,52 @@ class TaskRuntime:
             async for commit in store.iter_commits(branch_id):
                 restore_commit_safely(self.observer, commit, context=context)
         current = await store.materialize(branch_id)
+        if (
+            current.task.scaffold.get("evaluation_awareness", "off")
+            != policy["evaluation_awareness"]
+        ):
+            raise ValueError(
+                "evaluation_awareness differs from the saved trial; start a new trial or continuation"
+            )
         environment.validate_state_tool_catalog(current)
+        if current.runtime.metadata.get("lineage"):
+            source_version = current.task.metadata.get("execution_version")
+            if source_version != environment.current_task.execution_version:
+                raise ValueError(
+                    "continuation task execution_version differs from source"
+                )
+            inherited_run = current.agent_runs.get(agent_actor.run_id)
+            if (
+                inherited_run is not None
+                and inherited_run.actor_id != agent_actor.actor_id
+            ):
+                raise ValueError(
+                    "continuation requires the source agent implementation"
+                )
+            await asyncio.to_thread(environment.prepare_workspace, current.workspace)
+            accepted = current.runtime.metadata.get("pending_submission")
+            if accepted is not None and not current.is_terminal:
+                await self._append(
+                    store,
+                    CommitRequest(
+                        request_id="continuation:submission",
+                        execution_id=execution_id,
+                        branch_id=branch_id,
+                        based_on_hash=current.through_commit_hash,
+                        author=runtime_actor,
+                        event=SubmissionAccepted(
+                            action_id=accepted["action_id"],
+                            requested_by_run_id=agent_actor.run_id,
+                            answer=accepted["answer"],
+                            surrendered=(
+                                surrender_enabled(current)
+                                and is_surrender_answer(current, accepted["answer"])
+                            ),
+                        ),
+                    ),
+                    context,
+                )
+                current = await store.materialize(branch_id)
         if current.is_terminal:
             current, _ = await self._complete_accepted_submission(
                 store,
@@ -273,7 +326,10 @@ class TaskRuntime:
                 event_types = [
                     commit.event.type async for commit in store.iter_commits(branch_id)
                 ]
-                if "task.configured" not in event_types:
+                if (
+                    "task.configured" not in event_types
+                    and not current.runtime.metadata.get("checkpoint_configured")
+                ):
                     configuration = asyncio.create_task(
                         asyncio.to_thread(environment.configure, current)
                     )
@@ -347,6 +403,31 @@ class TaskRuntime:
                         )
                         await session.resume_pending_actions()
                         current = session.state
+                    extra_messages = current.runtime.metadata.get(
+                        "continuation_messages"
+                    )
+                    if extra_messages is None:
+                        single = current.runtime.metadata.get("continuation_message")
+                        extra_messages = [] if single is None else [single]
+                    if extra_messages and not current.is_terminal:
+                        await self._append(
+                            store,
+                            CommitRequest(
+                                request_id="continuation:message",
+                                execution_id=execution_id,
+                                branch_id=branch_id,
+                                based_on_hash=current.through_commit_hash,
+                                author=agent_actor,
+                                event=AgentTurnRecorded(
+                                    messages=tuple(
+                                        {"role": "user", "content": message}
+                                        for message in extra_messages
+                                    )
+                                ),
+                            ),
+                            context,
+                        )
+                        current = await store.materialize(branch_id)
                     outcome = None
                     if not current.is_terminal:
                         outcome = await run_agent_session(

@@ -223,10 +223,31 @@ class ShardedCommitStore:
 
     def execution_dir(self, execution_id: str) -> Path:
         """Return and initialize the host checkpoint directory for an execution."""
-        metadata: dict[str, Any] = {}
+        path = self.execution_path(execution_id)
+        workspace_snapshots_name = (
+            "snapshots" if self.benchmark_run_id is None else "workspace-snapshots"
+        )
+        metadata = self._shard_metadata(execution_id)
+        path.mkdir(parents=True, exist_ok=True)
+        path.chmod(0o2770)
+        for directory_name in (
+            "artifacts",
+            "recovery",
+            workspace_snapshots_name,
+            "state-snapshots",
+        ):
+            directory = path / directory_name
+            directory.mkdir(mode=0o2770, exist_ok=True)
+            directory.chmod(0o2770)
+        commits = path / "commits.sqlite3"
+        commits.touch(mode=0o660, exist_ok=True)
+        _ensure_metadata(path, execution_id, extra=metadata)
+        return path
+
+    def execution_path(self, execution_id: str) -> Path:
+        """Return the prospective trial path without touching the filesystem."""
         if self.benchmark_run_id is None:
             path = self.executions_root / execution_shard_name(execution_id)
-            workspace_snapshots_name = "snapshots"
         else:
             prefix = f"{self.benchmark_run_id}:"
             if not execution_id.startswith(prefix):
@@ -250,27 +271,6 @@ class ShardedCommitStore:
                 / _descriptive_component("task", task_id)
                 / f"k-{trial_index + 1}"
             )
-            workspace_snapshots_name = "workspace-snapshots"
-            metadata = {
-                "benchmark_run_id": self.benchmark_run_id,
-                "task_id": task_id,
-                "trial_index": trial_index,
-                "k": trial_index + 1,
-            }
-        path.mkdir(parents=True, exist_ok=True)
-        path.chmod(0o2770)
-        for directory_name in (
-            "artifacts",
-            "recovery",
-            workspace_snapshots_name,
-            "state-snapshots",
-        ):
-            directory = path / directory_name
-            directory.mkdir(mode=0o2770, exist_ok=True)
-            directory.chmod(0o2770)
-        commits = path / "commits.sqlite3"
-        commits.touch(mode=0o660, exist_ok=True)
-        _ensure_metadata(path, execution_id, extra=metadata)
         return path
 
     def _shard_metadata(self, execution_id: str) -> dict[str, Any]:

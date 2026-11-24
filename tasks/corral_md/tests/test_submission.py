@@ -1,120 +1,154 @@
 import json
+from pathlib import Path
 
 import pytest
-from corral_md.submission import resolve_submission
+from corral_md.scoring.common import Evidence
+from corral_md.submission import resolve_local_submission, resolve_submission
 
 
-def test_json_values_and_manifest_paths_are_resolved(tmp_path):
-    workspace = tmp_path / "restored"
-    outputs = workspace / "results"
-    outputs.mkdir(parents=True)
-    (outputs / "300.traj").touch()
-    (outputs / "400.traj").touch()
-    manifest = outputs / "manifest.json"
-    content = {"300": "300.traj", "nested": ["results/400.traj", 2, "3.14"]}
-    manifest.write_text(json.dumps(content))
-    original = manifest.read_bytes()
-    for answer in ("results/manifest.json", str(manifest)):
-        resolved = json.loads(resolve_submission(answer, workspace))
-        assert resolved == {
-            "300": str(outputs / "300.traj"),
-            "nested": [str(outputs / "400.traj"), 2, "3.14"],
-        }
-    assert manifest.read_bytes() == original
+@pytest.mark.parametrize("resolver", [resolve_submission, resolve_local_submission])
+@pytest.mark.parametrize(
+    "wrapper",
+    [
+        "{}",
+        "```json\n{}\n```",
+        "```\n{}\n```",
+        " \n``` JSON \r\n{}\r\n  ```\t\n",
+        (
+            "{}\n\nI made the labelled dataset of 45 isolated Ag₂ dimers.\n"
+            "**Files:**\n- `dataset.extxyz` stores energies and forces."
+        ),
+        " \n{}\nFinished.",
+        "```json\n{}\n```\n\nFinished.",
+        "```\n{}\n```\nFinished.",
+    ],
+)
+def test_json_resolves_artifacts_from_workspace(tmp_path, resolver, wrapper):
+    output = tmp_path / "output"
+    output.mkdir()
+    (output / "data.json").write_text("[1, 2, 3]")
+    answer = {
+        "artifacts": {
+            "data": "output/data.json",
+            "nested": ["/workspace/output/data.json"],
+        },
+        "results": {
+            "value": 3,
+            "unit": "m2/s",
+            "note": "See `output/manifest.json`; literal ```json and ``` are preserved.",
+        },
+    }
+    resolved = resolver(wrapper.format(json.dumps(answer)), tmp_path)
+    assert json.loads(resolved) == {
+        **answer,
+        "artifacts": {
+            "data": str(output / "data.json"),
+            "nested": [str(output / "data.json")],
+        },
+    }
+    evidence = Evidence(resolved)
+    plain = Evidence(resolve_submission(json.dumps(answer), tmp_path))
+    assert evidence.fingerprint() == plain.fingerprint()
+    assert evidence.root == evidence.base == tmp_path
+    assert evidence.json("data") == [1, 2, 3]
+    assert not (output / "manifest.json").exists()
 
 
-def test_ambiguous_basename_is_rejected(tmp_path):
-    for directory in ("first", "second"):
-        (tmp_path / directory).mkdir()
-        (tmp_path / directory / "result.csv").touch()
-    with pytest.raises(ValueError, match="ambiguous"):
-        resolve_submission("result.csv", tmp_path)
+@pytest.mark.parametrize("wrapper", ["{}", "```json\n{}\n```"])
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "/workspace/manifest.json",
+        "manifest.json",
+        '"/workspace/manifest.json"',
+        "Completed: `/workspace/manifest.json`",
+        "/workspace/manifest.json\nCompleted the thermal cycle.",
+        "Manifest path: manifest.json",
+        "result.csv",
+        "[]",
+        "null",
+        "42",
+        '```json\n{"artifacts": {}}',
+        '{"artifacts": {}}\n```',
+        '```python\n{"artifacts": {}}\n```',
+        "```json\n{}\n```\n```json\n{}\n```",
+        "Answer:\n```json\n{}\n```",
+        '{"results": {}}\n{"results": {"value": 2}}',
+        '{"results": {}}\nCorrection:\n{"results": {"value": 2}}',
+        '{"results": {}}\nCorrection:\n```json\n{"results": {}}\n```',
+        '{"results": {}}\n{"results":',
+        '{"results": {}}}',
+        '{"results": {}}\n[]',
+        "```json\n{}\nFinished.\n```",
+        '{"artifacts":{},"artifacts":{}}\nFinished.',
+        '{"results":{"value":NaN}}\nFinished.',
+        '{"results":{"value":1e999}}\nFinished.',
+        '{"artifacts":{},"artifacts":{}}',
+        '{"results":{"value":NaN}}',
+        '{"results":{"value":1e999}}',
+    ],
+)
+def test_final_answer_must_be_a_json_object(tmp_path, monkeypatch, answer, wrapper):
+    answer = wrapper.format(answer)
+    (tmp_path / "manifest.json").write_text('{"artifacts":{},"results":{}}')
+    monkeypatch.setattr(
+        Path, "read_text", lambda *_a, **_k: pytest.fail("must not read an answer file")
+    )
+    with pytest.raises(ValueError):
+        resolve_submission(answer, tmp_path)
+    invalid = json.loads(resolve_local_submission(answer, tmp_path))
+    assert invalid["artifacts"] == invalid["results"] == {}
+    assert invalid["invalid_submission"]
 
 
-def test_missing_file_does_not_read_from_cwd(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "link", ["../secret.csv", "link.csv", "output/../../secret.csv"]
+)
+def test_artifact_paths_cannot_escape_workspace(tmp_path, link):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    (tmp_path / "result.csv").write_text("outside workspace")
+    (tmp_path / "secret.csv").touch()
+    (workspace / "link.csv").symlink_to(tmp_path / "secret.csv")
+    with pytest.raises(ValueError, match="workspace"):
+        resolve_submission(json.dumps({"artifacts": {"data": link}}), workspace)
+
+
+def test_missing_artifact_does_not_read_from_cwd_or_another_run(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    (workspace / "other").mkdir(parents=True)
+    (tmp_path / "data.json").write_text("[99]")
+    (workspace / "other/data.json").write_text("[99]")
     monkeypatch.chdir(tmp_path)
-    for answer in ("result.csv", str(tmp_path / "result.csv")):
-        with pytest.raises(FileNotFoundError, match="missing from the workspace"):
-            resolve_submission(answer, workspace)
+    evidence = Evidence(
+        resolve_submission('{"artifacts":{"data":"data.json"}}', workspace)
+    )
+    with pytest.raises(ValueError, match="Missing artifact"):
+        evidence.json("data")
 
 
-def test_submission_paths_cannot_escape_workspace(tmp_path):
+def test_external_artifact_is_never_read(tmp_path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    secret = tmp_path / "secret.csv"
-    secret.touch()
-    (workspace / "link.csv").symlink_to(secret)
-    for answer in ("../secret.csv", "link.csv", '{"result": "link.csv"}'):
-        with pytest.raises(ValueError, match="workspace"):
-            resolve_submission(answer, workspace)
-
-
-def test_manifest_can_link_sibling_workspace_files(tmp_path):
-    workspace = tmp_path / "workspace"
-    output = workspace / "output"
-    scripts = workspace / "scripts"
-    output.mkdir(parents=True)
-    scripts.mkdir()
-    script = scripts / "run.py"
-    script.write_text("print('ok')")
-    (output / "manifest.json").write_text(
-        json.dumps({"scripts": {"run": "../scripts/run.py"}})
+    external = tmp_path / "data.json"
+    external.write_text("[99]")
+    evidence = Evidence(
+        resolve_submission(
+            json.dumps({"artifacts": {"data": str(external)}}), workspace
+        )
     )
-
-    resolved = json.loads(resolve_submission("/workspace/output/manifest.json", workspace))
-
-    assert resolved["scripts"]["run"] == str(script)
-
-
-def test_manifest_sibling_path_cannot_escape_workspace(tmp_path):
-    workspace = tmp_path / "workspace"
-    output = workspace / "output"
-    output.mkdir(parents=True)
-    (tmp_path / "secret.csv").write_text("secret")
-    (output / "manifest.json").write_text(
-        json.dumps({"artifacts": {"secret": "../../secret.csv"}})
-    )
-
-    with pytest.raises(ValueError, match="workspace"):
-        resolve_submission("/workspace/output/manifest.json", workspace)
-
-
-def test_manifest_sibling_symlink_is_rejected(tmp_path):
-    workspace = tmp_path / "workspace"
-    output = workspace / "output"
-    scripts = workspace / "scripts"
-    output.mkdir(parents=True)
-    scripts.mkdir()
-    secret = tmp_path / "secret.py"
-    secret.write_text("secret")
-    (scripts / "run.py").symlink_to(secret)
-    (output / "manifest.json").write_text(
-        json.dumps({"scripts": {"run": "../scripts/run.py"}})
-    )
-
-    with pytest.raises(ValueError, match="workspace"):
-        resolve_submission("/workspace/output/manifest.json", workspace)
+    with pytest.raises(ValueError, match="escapes"):
+        evidence.json("data")
 
 
 def test_inline_report_prose_is_metadata_and_part_of_fingerprint(tmp_path):
-    from corral_md.workflow_scoring.common import Evidence
-
     content = {
         "artifacts": {},
-        "report": {"interpretation": "Scientific explanation. " * 100},
+        "report": {"interpretation": "Scientific explanation. " * 500},
+        "results": {"note": "../not a path"},
     }
-    manifest = tmp_path / "manifest.json"
-    manifest.write_text(json.dumps(content))
-    resolved = resolve_submission("/workspace/manifest.json", tmp_path)
-    evidence = Evidence(resolved)
-
-    assert json.loads(resolved)["report"] == content["report"]
+    evidence = Evidence(resolve_submission(json.dumps(content), tmp_path))
     assert evidence.report == content["report"]
     original = evidence.fingerprint()
-    content["report"]["interpretation"] += " Updated conclusion."
-    manifest.write_text(json.dumps(content))
-    changed = Evidence(resolve_submission("/workspace/manifest.json", tmp_path))
+    content["report"]["interpretation"] += " An additional conclusion."
+    changed = Evidence(resolve_submission(json.dumps(content), tmp_path))
     assert changed.fingerprint() != original

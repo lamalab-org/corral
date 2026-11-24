@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Check the expected scoring results for every task.
-
-    uv run --with numpy --with pandas --with scipy --with semopy \
-      python tests/test_scoring.py
-"""
+"""Validate reference answers, competing analyses, and equivalent submission syntax."""
 
 from __future__ import annotations
 
@@ -29,8 +25,8 @@ ROOT = paths.task_root()
 # follows from that numbering -- see corral_psychometrics.paths.
 TASKS = [
     (1, 1, "two_correlated_factors"),
-    (1, 2, "bifactor_general_plus_specifics"),
-    (1, 3, "unidimensional_with_correlated_residuals"),
+    (1, 2, "bifactor_s1_machiavellianism_reference"),
+    (1, 3, "correct"),
     (1, 4, "DD, bifactor (CORRECT)"),
     (1, 5, "correct"),
     (1, 6, "joint latent model (CORRECT)"),
@@ -172,7 +168,7 @@ def run_task(level, number, expected_winner):
     for col, val in params.get("subset", {}).items():
         data = data[data[col].isin(val)] if isinstance(val, list) else data[data[col] == val]
     X = data[[c for c in keep if c in data.columns]]
-    X = X[(X != 0).all(axis=1)].astype(float)
+    X = X[X.notna().all(axis=1)].astype(float)
 
     failures = []
     print(f"\n{gen.TASK_ID}")
@@ -199,7 +195,7 @@ def run_task(level, number, expected_winner):
     if "gender" in items:
         pooled_X = pooled_X[pooled_X.gender.isin([1, 2])]
     pooled_X = pooled_X[items]
-    pooled_X = pooled_X[(pooled_X != 0).all(axis=1)].astype(float)
+    pooled_X = pooled_X[pooled_X.notna().all(axis=1)].astype(float)
     key = (
         "item_quality"
         if "item_quality" in good
@@ -304,12 +300,36 @@ def run_population_task(gen, params, expected_winner):
         },
         "not JSON": "the populations are unclear",
     }
+    if "models" in good:
+        first = next(iter(good["models"]))
+        adversarial["one population without a model"] = {
+            **good,
+            "models": {k: v for k, v in good["models"].items() if k != first},
+        }
+        adversarial["a model that does not run"] = {
+            **good,
+            "models": {**good["models"], first: "F1 =~ NOT_AN_ITEM"},
+        }
     for name, submission in adversarial.items():
         result = score_model_criteria(submission, params, base_dir=ROOT)
         if result["score_binary"] != 0.0:
             failures.append(f"adversarial {name} scored {result['score_binary']}")
         print(
             f"  {name:38s} {result['score_binary']:6.1f} {result['score_partial']:7.2f}  {result['reason']}"
+        )
+    if "models" in good:
+        # Factor names and line order are the submitter's choice.
+        renamed = {}
+        for population, spec in good["models"].items():
+            for factor in latent_names(spec):
+                spec = re.sub(rf"\b{factor}\b", f"Trait_{factor}", spec)
+            renamed[population] = "\n".join(reversed(spec.splitlines()))
+        result = score_model_criteria({**good, "models": renamed}, params, base_dir=ROOT)
+        if result["score_binary"] != 1.0:
+            failures.append(f"correct models with renamed factors scored {result['score_binary']}")
+        print(
+            f"  {'correct models, renamed and reordered':38s} {result['score_binary']:6.1f} "
+            f"{result['score_partial']:7.2f}  {result['reason']}"
         )
     return failures
 
@@ -423,12 +443,38 @@ def run_adaptive_bank_choice_task(gen, params, expected_winner):
     good = cases["correct"]
     failures += cosmetic_failures(cases, params, expected_winner)
     adversarial = {
-        "bank choice omitted": {k: v for k, v in good.items() if k != "bank_choice"},
-        "dependent pairs omitted": {k: v for k, v in good.items() if k != "dependent_pairs"},
-        "vendor flags taken as given": {**good, "unsupported_vendor_flags": []},
-        "recommendation omitted": {k: v for k, v in good.items() if k != "recommendation"},
+        "removed items omitted": {k: v for k, v in good.items() if k != "removed_items"},
+        "vendor flags taken as given": {
+            **good,
+            "vendor_flags": {item: "agree" for item in good["vendor_flags"]},
+        },
+        "vendor flags omitted": {k: v for k, v in good.items() if k != "vendor_flags"},
+        "readiness omitted": {k: v for k, v in good.items() if k != "ready_for_adaptive_testing"},
+        "readiness as a string": {**good, "ready_for_adaptive_testing": "true"},
         "not JSON": "the screened bank seems preferable",
     }
+    # Either half of a redundant pair may leave the bank, in any order.
+    other_half = {
+        "removes the other half of each pair": {
+            **good,
+            "removed_items": [
+                gen.FLAGGED_PAIR[0],
+                gen.MISSED_PAIR[0],
+                gen.UNSTABLE_ITEM,
+            ],
+        },
+        "lists the removed items in another order": {
+            **good,
+            "removed_items": list(reversed(good["removed_items"])),
+        },
+    }
+    for name, submission in other_half.items():
+        result = score_model_criteria(submission, params, base_dir=ROOT)
+        if result["score_binary"] != 1.0:
+            failures.append(f"equivalent answer {name} scored {result['score_binary']}")
+        print(
+            f"  {name:38s} {result['score_binary']:6.1f} {result['score_partial']:7.2f}  {result['reason']}"
+        )
     for name, submission in adversarial.items():
         result = score_model_criteria(submission, params, base_dir=ROOT)
         if result["score_binary"] != 0.0:

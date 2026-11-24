@@ -27,6 +27,7 @@ from corral.core.events import (
     ContextImported,
     ExecutionCompleted,
     ExecutionFailed,
+    ExecutionForked,
     ExecutionStarted,
     ParallelGroupCompleted,
     SubmissionAccepted,
@@ -157,6 +158,7 @@ def _atomic_json(path: Path, value: dict[str, Any]) -> None:
 
 
 _AUTHOR_KINDS: dict[type[Any], frozenset[str]] = {
+    ExecutionForked: frozenset({"runtime"}),
     ExecutionStarted: frozenset({"runtime"}),
     TaskConfigured: frozenset({"runtime"}),
     AgentStarted: frozenset({"runtime"}),
@@ -686,7 +688,7 @@ class SQLiteCommitStore:
                 .limit(1)
             )
             if any_commit is not None or not isinstance(
-                request.event, ExecutionStarted
+                request.event, ExecutionStarted | ExecutionForked
             ):
                 raise CommitNotFoundError(
                     f"branch {request.branch_id!r} was not explicitly created"

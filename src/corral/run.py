@@ -24,6 +24,7 @@ from corral.orchestration.models import (
     AgentRuntimeDefinition,
     BenchmarkExecutionResult,
     BenchmarkInput,
+    ContinuationSource,
     EnvironmentRuntimeDefinition,
     EvaluateTaskInput,
     RetryPolicy,
@@ -34,6 +35,7 @@ from corral.orchestration.models import (
 )
 from corral.report.logging import event, exception_fields, log_context
 from corral.report.projection import normalise_k_values, project_benchmark_result
+from corral.runtime.evaluation_awareness import awareness_metadata
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterable, Mapping
@@ -89,6 +91,34 @@ async def execute_task(
     retry_policy: RetryPolicy | None = None,
 ) -> StateRef:
     """Run one task and return a reference to its persisted final state."""
+    if task.continuation is not None:
+        from corral.persistence.continuation import (
+            import_checkpoint,
+            validate_destination,
+        )
+
+        execution_path = getattr(state_store, "execution_path", None)
+        store_path = (
+            execution_path(task.execution_id) / "commits.sqlite3"
+            if callable(execution_path)
+            else getattr(state_store, "path", None)
+        )
+        validate_destination(task, store_path)
+        manager_factory = getattr(state_store, "workspace_manager", None)
+        if callable(manager_factory):
+            manager = manager_factory(task.execution_id)
+        else:
+            manager = registry.environment(
+                task.environment_id, task.execution_id
+            ).workspace_manager
+        await import_checkpoint(task, state_store, manager)
+    if hasattr(state_store, "execution_dir"):
+        from corral.persistence.sharded import _atomic_json
+
+        _atomic_json(
+            state_store.execution_dir(task.execution_id) / "launch-request.json",
+            asdict(task),
+        )
     launcher: TaskLauncher
     if task.sandbox.mode == "docker":
         if docker_launcher is None:
@@ -351,6 +381,7 @@ def _report_metadata(
                 request.max_parallel_evaluations_by_environment
             ),
             "enable_surrender": request.enable_surrender,
+            **awareness_metadata(request.evaluation_awareness),
             "evaluate": request.evaluate,
             "retry_policy": asdict(request.retry_policy),
             "sandbox": asdict(request.sandbox),
@@ -420,17 +451,30 @@ class CorralRunner:
         max_parallel_by_environment: Mapping[str, int] | None = None,
         max_parallel_evaluations_by_environment: Mapping[str, int] | None = None,
         enable_surrender: bool = False,
+        evaluation_awareness: str = "off",
         evaluate: bool = True,
         retry_policy: RetryPolicy | None = None,
         include_dependencies: bool = True,
+        continuation_by_task: Mapping[str, ContinuationSource] | None = None,
     ) -> BenchmarkInput:
         """Build and validate the complete benchmark plan."""
+        continuations = dict(continuation_by_task or {})
+        unknown = set(continuations) - self.tasks.keys()
+        if unknown:
+            raise ValueError(f"unknown continuation tasks: {sorted(unknown)}")
+        tasks = {
+            key: replace(value, dependencies=()) if key in continuations else value
+            for key, value in self.tasks.items()
+        }
         selected = _selected_task_ids(
-            self.tasks,
+            tasks,
             task_ids,
             include_dependencies=include_dependencies,
         )
-        metadata = {task_id: self.tasks[task_id] for task_id in selected}
+        unselected = set(continuations) - set(selected)
+        if unselected:
+            raise ValueError(f"continuation tasks not selected: {sorted(unselected)}")
+        metadata = {task_id: tasks[task_id] for task_id in selected}
         iteration_limits: dict[str, int] = {}
         for task_id, task in metadata.items():
             agent: object = task.agent_id
@@ -450,6 +494,7 @@ class CorralRunner:
             )
         return BenchmarkInput(
             benchmark_run_id=benchmark_run_id,
+            continuation_by_task=continuations,
             task_ids=selected,
             trials_per_task=trials_per_task,
             agent_by_task={
@@ -477,6 +522,7 @@ class CorralRunner:
                 max_parallel_evaluations_by_environment or {}
             ),
             enable_surrender=enable_surrender,
+            evaluation_awareness=evaluation_awareness,
             evaluate=evaluate,
             retry_policy=retry_policy or RetryPolicy(),
             sandbox=sandbox,
@@ -534,6 +580,7 @@ class CorralRunner:
             if (
                 request.evaluate
                 and request.max_parallel_per_task == 1
+                and task_id not in request.continuation_by_task
                 and trial_index > 0
             ):
                 # The local launcher exposes the last score and state to reflective
@@ -573,6 +620,7 @@ class CorralRunner:
                     current = await execute_task(
                         task=RunTaskInput(
                             execution_id=execution_id,
+                            continuation=request.continuation_by_task.get(task_id),
                             task_id=task_id,
                             environment_id=environment_id,
                             agent_id=request.agent_by_task[task_id],
@@ -582,6 +630,7 @@ class CorralRunner:
                             max_iterations=request.max_iterations_by_task.get(task_id),
                             model=model,
                             enable_surrender=request.enable_surrender,
+                            evaluation_awareness=request.evaluation_awareness,
                             sandbox=request.sandbox,
                             agent_runtime=request.agent_runtime_by_task.get(task_id),
                             environment_runtime=request.environment_runtime_by_task.get(
@@ -738,9 +787,11 @@ class CorralRunner:
         max_parallel_by_environment: Mapping[str, int] | None = None,
         max_parallel_evaluations_by_environment: Mapping[str, int] | None = None,
         enable_surrender: bool = False,
+        evaluation_awareness: str = "off",
         evaluate: bool = True,
         retry_policy: RetryPolicy | None = None,
         include_dependencies: bool = True,
+        continuation_by_task: Mapping[str, ContinuationSource] | None = None,
         verbose: bool = False,
     ) -> BenchmarkResult:
         """Execute the benchmark and return its reporting projection."""
@@ -761,9 +812,11 @@ class CorralRunner:
                 max_parallel_evaluations_by_environment
             ),
             enable_surrender=enable_surrender,
+            evaluation_awareness=evaluation_awareness,
             evaluate=evaluate,
             retry_policy=retry_policy,
             include_dependencies=include_dependencies,
+            continuation_by_task=continuation_by_task,
         )
 
         started = perf_counter()

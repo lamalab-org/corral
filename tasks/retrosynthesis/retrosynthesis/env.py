@@ -82,9 +82,8 @@ def _retro_prompt(env: Environment, state: ExecutionState) -> str:
     """Task prompt that echoes each dependency's question and answer."""
     task = env.current_task
     prompt = (
-        f"Task {task.name}:\n"
         f"{task.description}\n\n"
-        "Required submission format:\n"
+        "Please return your answer in this format so I can use it directly:\n"
         f"{task.submission_format}\n\n"
     )
 
@@ -97,16 +96,17 @@ def _retro_prompt(env: Environment, state: ExecutionState) -> str:
             task_id=env.task_id,
             dependencies=sorted(task.dependencies()),
         )
-        prompt += "\nAvailable input data:\n"
+        prompt += "Here are the results from the earlier work:\n"
 
         # Display resolved inputs from dependencies
         resolved = env.resolve_inputs(state)
         for input_name, ref in task.input_map.items():
             dep_prompt = env.group_tasks[ref.task_id].description
-            prompt += f"- Input from '{ref.task_id}' with question: '{dep_prompt}' and answer: '{resolved[input_name]}'\n"
+            prompt += f"For '{dep_prompt}' ({ref.task_id}), the result was: {resolved[input_name]}\n"
 
     # Display initial input data
     if task.initial_input:
+        prompt += "\nI also have these inputs:\n"
         for key, value in task.initial_input.items():
             if key != "work_dir":
                 prompt += f"- {key}: {value}\n"

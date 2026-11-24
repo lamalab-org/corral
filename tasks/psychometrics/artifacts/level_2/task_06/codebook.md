@@ -1,6 +1,6 @@
 # Codebook - group comparison
 
-Tab-separated, one row per respondent. Responses are five-point ratings from 1 (Disagree) to 5 (Agree); `0` denotes a missing response.
+Tab-separated, one row per respondent. Responses are continuous and unbounded, centered around zero. Zero is valid; empty fields denote missing responses.
 
 | item | text |
 |---|---|

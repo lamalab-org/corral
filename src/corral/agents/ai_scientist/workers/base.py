@@ -212,13 +212,12 @@ class LiteLLMStructuredModel:
                     purpose,
                 )
                 feedback = (
-                    f"Your previous response could not be parsed or validated as "
-                    f"{response_model.__name__}. No action was executed from that "
-                    "response. Correct it using the original task and observations.\n\n"
+                    f"Your previous response could not be parsed or validated as {response_model.__name__}.\n"
+                    "No action was executed from that response.\n"
+                    "Correct it using the original task and observations.\n\n"
                     f"Validation error:\n{exc}\n\n"
-                    "Return one complete JSON object matching this schema, with "
-                    "no Markdown or surrounding prose. Properly escape JSON "
-                    "strings, including any JSON-encoded tool arguments.\n"
+                    "Return one complete JSON object matching this schema, with no Markdown or surrounding prose.\n"
+                    "Properly escape JSON strings, including any JSON-encoded tool arguments.\n"
                     f"{json.dumps(response_model.model_json_schema())}"
                 )
                 # Keep feedback local to this worker, including multimodal

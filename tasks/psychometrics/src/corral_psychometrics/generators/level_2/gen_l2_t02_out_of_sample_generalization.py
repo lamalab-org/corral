@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Level 2 Task 02 artifacts and scoring metadata.
-
-Generating model, training sample: two correlated HSNS factors (phi 0.35) plus
-a residual covariance between HSNS5 and HSNS10, which are worded alike.
-
-Each holdout changes one thing, which fixes the right verdict for it:
-
-    holdout_a   the same population                    generalizes
-    holdout_b   the factors correlate 0.78, not 0.35   relations differ
-    holdout_c   an extra 0.45 cross-loading            structure fails
-"""
+"""Generate the frozen-model generalization task and its holdout samples."""
 
 from __future__ import annotations
 
@@ -41,20 +31,16 @@ LOADINGS = {
 }
 PHI = 0.35
 
-# Two F1 items share wording, so a model without this covariance is rejected in
-# the training data. It is part of the structure carried into every holdout.
-RESIDUAL_CORR = (("HSNS5", "HSNS10"), 0.12)
-
 # What each holdout does to the population the training model was built on.
 HOLDOUTS = {
-    "holdout_a": {"phi": PHI, "extra_cross": 0.0},
-    "holdout_b": {"phi": 0.78, "extra_cross": 0.0},
-    "holdout_c": {"phi": PHI, "extra_cross": 0.45},
+    "holdout_b": {"phi": PHI, "extra_cross": 0.0},
+    "holdout_c": {"phi": 0.78, "extra_cross": 0.0},
+    "holdout_a": {"phi": PHI, "extra_cross": 0.45},
 }
 HOLDOUT_DECISIONS = {
-    "holdout_a": "generalizes",
-    "holdout_b": "measurement_structure_holds_relations_differ",
-    "holdout_c": "measurement_structure_fails",
+    "holdout_a": "measurement_structure_fails",
+    "holdout_b": "generalizes",
+    "holdout_c": "measurement_structure_holds_relations_differ",
 }
 
 # How far a standardised loading and the factor correlation may move before the
@@ -85,32 +71,30 @@ A single JSON object:
 {
   "model_syntax": "<complete frozen measurement model>",
   "holdout_conclusions": {
-    "holdout_a": "generalizes|measurement_structure_holds_relations_differ|measurement_structure_fails",
-    "holdout_b": "...",
-    "holdout_c": "..."
+    "holdout_a": "<classification>",
+    "holdout_b": "<classification>",
+    "holdout_c": "<classification>"
   }
 }
 
-The model must include every HSNS item. It is refitted in each holdout exactly
-as submitted, and the loadings and factor correlation it produces there are read
-from that refit, so the decisions must match what your own model does.
+Include every HSNS item. Fit the model in the training sample, then re-estimate
+its parameters in each holdout without changing the structure. Base each
+classification on the resulting standardised loadings and factor correlation.
 """
 
 
 def reference_syntax():
-    """The generating model: two correlated traits and one residual covariance."""
+    """The generating model: two correlated traits."""
     f1 = "+".join(item for item, (factor, _) in LOADINGS.items() if factor == F1)
     f2 = "+".join(item for item, (factor, _) in LOADINGS.items() if factor == F2)
-    pair = RESIDUAL_CORR[0]
-    return f"F1 =~ {f1}\nF2 =~ {f2}\nF1 ~~ F2\n{pair[0]} ~~ {pair[1]}"
+    return f"F1 =~ {f1}\nF2 =~ {f2}\nF1 ~~ F2"
 
 
 def cross_loading_syntax():
-    """A model that absorbs holdout C's change before validation."""
+    """A model that absorbs holdout A's change before validation."""
     f1 = "+".join(item for item, (factor, _) in LOADINGS.items() if factor == F1)
     f2 = "+".join(item for item, (factor, _) in LOADINGS.items() if factor == F2)
-    pair = RESIDUAL_CORR[0]
-    return f"F1 =~ {f1}+HSNS9\nF2 =~ {f2}\nF1 ~~ F2\n{pair[0]} ~~ {pair[1]}"
+    return f"F1 =~ {f1}+HSNS9\nF2 =~ {f2}\nF1 ~~ F2"
 
 
 def simulate(rng, n, phi=PHI, extra_cross=0.0, label=None):
@@ -122,7 +106,6 @@ def simulate(rng, n, phi=PHI, extra_cross=0.0, label=None):
     label        value for the country column; omitted when None
     """
     eta = rng.multivariate_normal([0.0, 0.0], [[1.0, phi], [phi, 1.0]], n)
-    shared = rng.normal(size=n)
     out = {}
     for item, (factor, loading) in LOADINGS.items():
         index = 0 if factor == F1 else 1
@@ -131,16 +114,13 @@ def simulate(rng, n, phi=PHI, extra_cross=0.0, label=None):
         if item == "HSNS9" and extra_cross:
             common += extra_cross * eta[:, 0]
             explained += extra_cross**2 + 2 * extra_cross * loading * phi
-        if item in RESIDUAL_CORR[0]:
-            common += np.sqrt(RESIDUAL_CORR[1]) * shared
-            explained += RESIDUAL_CORR[1]
         y = common + rng.normal(0, np.sqrt(max(1 - explained, 1e-6)), n)
-        out[item] = C.categorize(y, C.THRESHOLDS[item])
+        out[item] = C.continuous_response(y, C.INTERCEPTS[item])
     frame = pd.DataFrame(out)
     frame["age"] = np.clip(rng.normal(35, 11, n).round(), 18, 78).astype(int)
     frame["gender"] = rng.choice([1, 2], size=n, p=[0.61, 0.39])
     frame["accuracy"] = np.clip(rng.beta(8, 1.5, n) * 100, 1, 100).round().astype(int)
-    frame[ITEMS] = frame[ITEMS].mask(rng.random((n, len(ITEMS))) < 0.01, 0)
+    frame[ITEMS] = frame[ITEMS].mask(rng.random((n, len(ITEMS))) < 0.01, np.nan)
     columns = ITEMS + ["age", "gender", "accuracy"]
     if label is not None:
         frame["country"] = label
@@ -150,12 +130,15 @@ def simulate(rng, n, phi=PHI, extra_cross=0.0, label=None):
 
 def build_holdouts(rng):
     """The three anonymised holdouts, with no column identifying the population."""
-    return {name: simulate(rng, N_HOLDOUT, **spec) for name, spec in HOLDOUTS.items()}
+    # Drawn in HOLDOUTS order, so the draws do not depend on the names; returned
+    # in name order, so nothing downstream lists them in generating order.
+    drawn = {name: simulate(rng, N_HOLDOUT, **spec) for name, spec in HOLDOUTS.items()}
+    return dict(sorted(drawn.items()))
 
 
 def analysis_sample(df):
     """Complete responses."""
-    return df[ITEMS][(df[ITEMS] != 0).all(axis=1)].astype(float)
+    return df[ITEMS][df[ITEMS].notna().all(axis=1)].astype(float)
 
 
 def population_matrix(rng):
@@ -214,10 +197,11 @@ def classify(moved):
 
 
 def write_codebook(path, frames):
+    """Write the public variable and response-format descriptions."""
     path.write_text(
         "# Codebook - out-of-sample validation\n\n"
         "Each tab-separated file contains responses to the same ten HSNS items. "
-        "Ratings run from 1 (Disagree) to 5 (Agree); 0 denotes a missing response.\n\n"
+        "Responses are continuous and unbounded, centered around zero; empty fields denote missing responses.\n\n"
         "| item | text |\n|---|---|\n"
         + "\n".join(f"| `{item}` | {C.ITEM_TEXT[item]} |" for item in ITEMS)
         + "\n\n| variable | description |\n|---|---|\n"
@@ -233,6 +217,7 @@ def write_codebook(path, frames):
 
 
 def build_truth(floor, pop, data_sha, rows):
+    """Build the private answers, model parameters, and provenance."""
     return {
         "task_id": TASK_ID,
         "scored": {"holdout_conclusions": HOLDOUT_DECISIONS},
@@ -245,7 +230,7 @@ def build_truth(floor, pop, data_sha, rows):
             "item_order": ITEMS,
         },
         "generative_parameters": {
-            "training": {"phi": PHI, "residual_correlation": RESIDUAL_CORR},
+            "training": {"phi": PHI},
             "holdouts": HOLDOUTS,
             "decision_thresholds": THRESHOLDS,
         },
@@ -254,6 +239,7 @@ def build_truth(floor, pop, data_sha, rows):
 
 
 def build_task_json(data_sha):
+    """Build the task definition and private scoring configuration."""
     contract = C.scoring_contract(
         TASK,
         ITEMS,
@@ -273,7 +259,7 @@ def build_task_json(data_sha):
             },
         ],
     )
-    contract["holdout_datasets"] = {name: f"{name}.csv" for name in HOLDOUTS}
+    contract["holdout_datasets"] = {name: f"{name}.csv" for name in sorted(HOLDOUTS)}
     contract["holdout_thresholds"] = THRESHOLDS
     return [
         {
@@ -286,7 +272,6 @@ def build_task_json(data_sha):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "codebook.md",
                     "data.csv",
@@ -295,7 +280,7 @@ def build_task_json(data_sha):
                     "holdout_c.csv",
                 ],
                 "training_dataset": "data.csv",
-                "holdout_datasets": [f"{name}.csv" for name in HOLDOUTS],
+                "holdout_datasets": [f"{name}.csv" for name in sorted(HOLDOUTS)],
                 "codebook": "codebook.md",
                 "data_sha256": data_sha,
             },
@@ -310,7 +295,7 @@ def candidate_submissions(X):
     """The intended answer and the ways a validation stops short of it."""
     correct = {"model_syntax": reference_syntax(), "holdout_conclusions": dict(HOLDOUT_DECISIONS)}
     fit_only = dict(HOLDOUT_DECISIONS)
-    fit_only["holdout_b"] = "generalizes"
+    fit_only["holdout_c"] = "generalizes"
     return {
         "correct": correct,
         "judges on fit alone": {**correct, "holdout_conclusions": fit_only},
@@ -321,10 +306,6 @@ def candidate_submissions(X):
         "rejects everything": {
             **correct,
             "holdout_conclusions": {name: "measurement_structure_fails" for name in HOLDOUTS},
-        },
-        "misses the residual covariance": {
-            "model_syntax": "\n".join(reference_syntax().splitlines()[:3]),
-            "holdout_conclusions": dict(HOLDOUT_DECISIONS),
         },
         "pre-absorbs the holdout cross-loading": {
             "model_syntax": cross_loading_syntax(),
@@ -341,13 +322,8 @@ def verify(train, holdouts):
     """Confirm each holdout lands on its intended decision, by the stated rule."""
     X = analysis_sample(train)
     train_fit = standardised(X)
-    without = standardised(X, "\n".join(reference_syntax().splitlines()[:3]))
     print(
         f"training: n={train_fit['n']:,}, factor correlation={train_fit['factor_correlation']:.3f}"
-    )
-    print(
-        f"  dropping the residual covariance costs {train_fit['CFI'] - without['CFI']:.3f} CFI "
-        f"and raises RMSEA from {train_fit['RMSEA']:.3f} to {without['RMSEA']:.3f}"
     )
     print("\n  the frozen model refitted in each holdout:")
     print(f"    {'':11s} {'CFI':>6s} {'RMSEA':>7s} {'max dloading':>13s} {'dphi':>7s}  decision")
@@ -367,24 +343,20 @@ def verify(train, holdouts):
     return C.report(
         [
             ("the training sample is substantial", train_fit["n"] > 5_000),
-            (
-                "a model that misses the residual covariance fits clearly worse",
-                train_fit["CFI"] - without["CFI"] > 0.01,
-            ),
             ("the stated thresholds give the intended decisions", decisions == HOLDOUT_DECISIONS),
             (
-                "holdout A moves on neither measure",
-                moves["holdout_a"]["max_loading_shift"] < 0.07
-                and moves["holdout_a"]["factor_correlation_shift"] < 0.07,
-            ),
-            (
-                "holdout B keeps its loadings but moves its factor correlation",
+                "holdout B moves on neither measure",
                 moves["holdout_b"]["max_loading_shift"] < 0.07
-                and moves["holdout_b"]["factor_correlation_shift"] > 0.25,
+                and moves["holdout_b"]["factor_correlation_shift"] < 0.07,
             ),
             (
-                "holdout C moves a loading well past the threshold",
-                moves["holdout_c"]["max_loading_shift"] > 0.18,
+                "holdout C keeps its loadings but moves its factor correlation",
+                moves["holdout_c"]["max_loading_shift"] < 0.07
+                and moves["holdout_c"]["factor_correlation_shift"] > 0.25,
+            ),
+            (
+                "holdout A moves a loading well past the threshold",
+                moves["holdout_a"]["max_loading_shift"] > 0.18,
             ),
         ]
     )
@@ -406,19 +378,20 @@ def naive(train, holdouts):
         )
     wrong = [name for name in holdouts if verdicts[name] != HOLDOUT_DECISIONS[name]]
     print(f"\n  fit alone gets {len(wrong)} of {len(holdouts)} wrong: {', '.join(wrong)}")
-    print("  holdout_b fits beautifully and is not the same population.")
+    print("  holdout_c fits beautifully and is not the same population.")
     del train_fit
 
     return C.report(
         [
-            ("fit alone accepts holdout B", verdicts["holdout_b"] == "generalizes"),
-            ("but holdout B is not a replication", HOLDOUT_DECISIONS["holdout_b"] != "generalizes"),
+            ("fit alone accepts holdout C", verdicts["holdout_c"] == "generalizes"),
+            ("but holdout C is not a replication", HOLDOUT_DECISIONS["holdout_c"] != "generalizes"),
             ("so a fit-only validation reports a wrong decision", len(wrong) > 0),
         ]
     )
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     rng = np.random.default_rng(SEED)
     train = simulate(rng, N_TRAIN, label="US")

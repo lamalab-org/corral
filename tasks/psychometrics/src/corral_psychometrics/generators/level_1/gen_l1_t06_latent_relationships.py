@@ -1,19 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Task 06 artifacts and scoring metadata.
-
-Generating model, United States: five correlated factors, two from the HSNS and
-three from the Dirty Dozen.
-
-    VULN   HSNS2 HSNS3 HSNS7 HSNS9
-    EGO    HSNS1 HSNS4 HSNS5 HSNS6 HSNS8 HSNS10
-    MACH   PSYCH   NARC          one per Dirty Dozen subscale
-
-EGO and NARC correlate 0.86, above the 0.80 the prompt gives as the point where
-two dimensions cannot be told apart; every other pair sits well below it. EGO is
-measured poorly on purpose, so relating the instruments through scale scores
-instead of latent variables shrinks exactly the correlation that decides the
-answer.
-"""
+"""Generate the task estimating latent relationships between instruments."""
 
 from __future__ import annotations
 
@@ -102,28 +88,26 @@ You are given responses from an online personality survey. The codebook describe
 every column.
 
 Read the data and select participants from the United States. The survey contains two \
-instruments, each covering several dimensions. Examine how the dimensions of one \
+instruments. Examine how the dimensions of one \
 relate to the dimensions of the other, accounting for the fact that no dimension is \
 measured perfectly.
 
 Report the correlation between each pair of dimensions across the two instruments, and \
 say which of those pairs are too closely related to be treated as distinct - take a \
 correlation of 0.80 or above to mean the two dimensions cannot be told apart.
-
-Items are five-point ordinal ratings and 0 denotes a missing response.
 """
 
 SUBMISSION_FORMAT = """\
 A single JSON object:
 
 {
-  "model_syntax": "<complete lavaan/semopy model>",
+  "model_syntax": "<complete semopy model>",
   "correlations": [["<factor>", "<factor>", <float>], ...],
   "not_distinguishable": [["<factor>", "<factor>"], ...]
 }
 
-`model_syntax` is the model you used, in lavaan notation (`=~` loadings, `~~`
-(co)variances). It is re-fitted during evaluation, so it must be complete and runnable.
+`model_syntax` is the model you used, in semopy syntax (`=~` loadings, `~~`
+(co)variances). It must be complete and runnable so the fit can be reproduced.
 
 Name your factors whatever you like and refer to them by those names: dimensions are
 matched by which items they cover. Report one correlation for every pair of dimensions
@@ -143,7 +127,7 @@ def simulate(n, rng, scale=1.0):
         for item in ITEMS_OF[factor]:
             lam = LOADINGS[item] * scale
             ystar = lam * eta[:, FACTORS.index(factor)] + rng.normal(0, np.sqrt(1 - lam**2), n)
-            out[item] = C.categorize(ystar, C.THRESHOLDS[item])
+            out[item] = C.continuous_response(ystar, C.INTERCEPTS[item])
     return pd.DataFrame(out)[ITEMS]
 
 
@@ -223,7 +207,7 @@ def build_truth(targets, floor, pop, data_sha, rows):
                 "near_redundant_pair": ["EGO", "NARC"],
             },
             "non_us": {"loading_scale": LOADING_SCALE_NON_US},
-            "thresholds": C.THRESHOLDS,
+            "item_intercepts": C.INTERCEPTS,
         },
         "provenance": C.provenance(Path(__file__).name, SEED, rows, data_sha),
     }
@@ -269,7 +253,6 @@ def build_task_json(data_sha):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": [
                     "codebook.md",
                     "data.csv",
@@ -291,6 +274,7 @@ def candidate_submissions(X):
     scores = scale_score_correlations(X)
 
     def payload(source):
+        """Build correlations and discriminant-validity claims from one estimator."""
         corr = [[a, b, round(source[frozenset((a, b))], 3)] for a, b in CROSS_PAIRS]
         redundant = [
             [a, b] for a, b in CROSS_PAIRS if source[frozenset((a, b))] >= REDUNDANCY_THRESHOLD
@@ -363,8 +347,8 @@ def naive(df, targets, pop):
     return C.report(
         [
             (
-                "every scale-score correlation is outside tolerance",
-                all(abs(scores[frozenset(p)] - PHI[p]) > 0.06 for p in CROSS_PAIRS),
+                "scale-score correlations fail the required parameter accuracy",
+                any(abs(scores[frozenset(p)] - PHI[p]) > 0.06 for p in CROSS_PAIRS),
             ),
             (
                 "and the real spread is wider than the apparent one",
@@ -375,6 +359,7 @@ def naive(df, targets, pop):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     rng = np.random.default_rng(SEED)
     print("Simulating ...")

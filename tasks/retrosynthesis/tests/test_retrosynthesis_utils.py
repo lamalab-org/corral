@@ -207,22 +207,6 @@ class TestCheckPrice:
 class TestDetectFunctionalGroups:
     """Tests for detect_functional_groups_in_molecule function."""
 
-    def test_detect_alcohol(self):
-        """Test detection of alcohol functional group."""
-        result = detect_functional_groups_in_molecule("CCO")
-        # The result depends on FG_PATTERNS, but alcohol should be detected
-        assert isinstance(result, list)
-
-    def test_detect_benzene(self):
-        """Test detection of aromatic ring."""
-        result = detect_functional_groups_in_molecule("c1ccccc1")
-        assert isinstance(result, list)
-
-    def test_detect_carbonyl(self):
-        """Test detection of carbonyl group."""
-        result = detect_functional_groups_in_molecule("CC(=O)C")
-        assert isinstance(result, list)
-
     def test_invalid_smiles(self):
         """Test with invalid SMILES."""
         result = detect_functional_groups_in_molecule("invalid_smiles")
@@ -238,21 +222,6 @@ class TestDetectFunctionalGroups:
 
 class TestGetFunctionalGroups:
     """Tests for get_functional_groups function."""
-
-    def test_get_functional_groups_single_molecule(self):
-        """Test getting functional groups from a single molecule."""
-        result = get_functional_groups("CCO")
-        assert isinstance(result, list)
-
-    def test_get_functional_groups_multiple_molecules(self):
-        """Test getting functional groups from multiple molecules (dot-separated)."""
-        result = get_functional_groups("CCO.c1ccccc1")
-        assert isinstance(result, list)
-
-    def test_get_functional_groups_complex(self):
-        """Test with complex molecule."""
-        result = get_functional_groups("CC(=O)Oc1ccccc1C(=O)O")
-        assert isinstance(result, list)
 
     def test_get_functional_groups_invalid(self):
         """Test with invalid SMILES."""

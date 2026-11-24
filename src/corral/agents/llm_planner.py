@@ -126,6 +126,8 @@ class LLMPlanner(BaseAgent):
                         error=f"submit_answer failed: {submission.error}",
                         usage=usage.outcome(),
                     )
+                if session.submission_status == "surrendered":
+                    return AgentOutcome(status="surrendered", usage=usage.outcome())
                 return AgentOutcome(
                     status="completed",
                     answer=answer,
@@ -155,8 +157,8 @@ class LLMPlanner(BaseAgent):
                 LiteLLMMessage(
                     role="user",
                     content=(
-                        "Execute the following high-level plan while still solving "
-                        f"the original task:\n\n{plan}"
+                        "Execute the following high-level plan while still solving the original task:\n\n"
+                        f"{plan}"
                     ),
                     name="high-level-plan",
                 )

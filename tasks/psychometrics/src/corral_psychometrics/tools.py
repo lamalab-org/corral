@@ -16,13 +16,39 @@ import numpy as np
 from corral.core.tool import Tool, tool
 from corral.runtime.python_repl import Namespace, create_python_namespace
 from corral.tools.python_repl import create_python_repl_tool
-from corral.workspace import WorkspaceFilesystem, build_workspace_tools
+from corral.workspace import AbsoluteWorkspaceFilesystem, build_workspace_tools
 
 MAX_CODE_CHARS = 50_000
 MAX_OUTPUT_CHARS = 10_000
 
+#: How long one PythonREPL call may run. Override per run with the
+#: `repl_timeout_minutes` environment argument.
+DEFAULT_REPL_TIMEOUT_MINUTES = 15.0
 
-REPL_DESCRIPTION = "Execute Python code in the task's persistent public-data-only session."
+
+def repl_description(timeout_minutes: float | None) -> str:
+    """The REPL's tool description, which states its time limit, if any."""
+    text = (
+        "Execute Python code in a persistent Python session. "
+        "The working directory is /workspace, so open files "
+        "by relative path, e.g. 'data.csv'."
+    )
+    if timeout_minutes is None:
+        return text
+    return (
+        f"{text} Each call may run for at most {timeout_minutes:g} minutes; a call "
+        "that runs longer is stopped and the session returns to its state before it."
+    )
+
+
+def timeout_message(timeout_minutes: float) -> str:
+    """What the agent sees when a call is stopped at the time limit."""
+    return (
+        f"Stopped: this call ran longer than the {timeout_minutes:g}-minute limit and "
+        "produced no result. The session is back to its state before the call, so "
+        "variables defined earlier are still available; anything this call created "
+        "or changed is not."
+    )
 
 
 def _namespace(initial_data: Mapping[str, Any]) -> Namespace:
@@ -68,16 +94,14 @@ def _run_cell(code: str, namespace: Namespace) -> str:
 
 @dataclass(frozen=True)
 class _CellExecutor:
-    """Runs cells with the task's workspace as the working directory.
-
-    Must stay picklable: the local session sends it to a spawned process.
-    """
+    """Execute a cell in the task workspace in local or restricted workers."""
 
     workspace: str
 
     def __call__(self, code: str, namespace: Namespace) -> str:
         # A restricted worker already starts in its /workspace mount, where the
         # controller's path does not exist; a local session starts elsewhere.
+        """Execute a Python cell in its task workspace."""
         if os.path.isdir(self.workspace):
             os.chdir(self.workspace)
         return _run_cell(code, namespace)
@@ -85,7 +109,7 @@ class _CellExecutor:
 
 @tool
 def validate_model_syntax(syntax: str) -> dict[str, Any]:
-    """Check semopy model syntax without fitting a model or reading task data."""
+    """Check semopy syntax without fitting a model or reading data."""
     if not isinstance(syntax, str) or not syntax.strip():
         return {"valid": False, "error": "syntax must be a non-empty string"}
     try:
@@ -97,12 +121,17 @@ def validate_model_syntax(syntax: str) -> dict[str, Any]:
     return {"valid": True, "error": None}
 
 
-def workspace_tools(workspace: str) -> dict[str, Tool]:
-    """Every tool a psychometrics task exposes, bound to one workspace."""
-    files = build_workspace_tools(WorkspaceFilesystem(workspace))
+def workspace_tools(
+    workspace: str, repl_timeout_minutes: float | None = DEFAULT_REPL_TIMEOUT_MINUTES
+) -> dict[str, Tool]:
+    """Every tool a psychometrics task exposes, bound to one workspace.
+
+    `repl_timeout_minutes` limits each PythonREPL call; None removes the limit.
+    """
+    files = build_workspace_tools(AbsoluteWorkspaceFilesystem(workspace))
     repl = create_python_repl_tool(
         name="PythonREPL",
-        description=REPL_DESCRIPTION,
+        description=repl_description(repl_timeout_minutes),
         argument_name="input_code",
         argument_description="A valid Python command.",
         namespace_factory=_namespace,
@@ -113,6 +142,7 @@ def workspace_tools(workspace: str) -> dict[str, Tool]:
         # they need is online.
         workspace_access="read_write",
         network_access="none",
+        timeout_seconds=None if repl_timeout_minutes is None else repl_timeout_minutes * 60,
     )
     return {
         name: files[name]

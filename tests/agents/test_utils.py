@@ -1,26 +1,20 @@
 import asyncio
 import json
-import tempfile
-from pathlib import Path
 from typing import cast
 from unittest.mock import AsyncMock, Mock
 
-import openai
+import httpx
 import pytest
 
 from corral.agents.utils import (
-    RETRY_EXCEPTIONS,
     LiteLLMMessage,
     LLMResponse,
     _reasoning_tokens,
     before_sleep_loguru,
-    format_examples,
     llm_call,
-    save_agent_messages,
-    serialize_messages,
 )
 
-from .conftest import MockFunction, MockToolCall
+from .conftest import MockFunction
 
 
 # Shared mock classes for LiteLLM testing
@@ -136,15 +130,73 @@ class MockSerializableMessage:
         self.id = msg_id
 
 
-def test_retry_exceptions_are_openai_exceptions():
-    """Test that RETRY_EXCEPTIONS contains valid OpenAI exception types."""
-    # Test that all exceptions in RETRY_EXCEPTIONS are OpenAI exceptions
-    for exception_type in RETRY_EXCEPTIONS:
-        assert hasattr(openai, exception_type.__name__)
-        assert issubclass(exception_type, Exception)
+@pytest.mark.parametrize(
+    ("status", "retryable"),
+    [
+        (400, False),
+        (401, False),
+        (403, False),
+        (408, True),
+        (429, True),
+        (500, True),
+        (503, True),
+    ],
+)
+def test_unwrapped_httpx_provider_errors_retry_only_transient_statuses(
+    status, retryable
+):
+    from corral.agents.utils import _should_retry
 
-    # Test that the tuple is not empty
-    assert len(RETRY_EXCEPTIONS) > 0
+    response = httpx.Response(
+        status, request=httpx.Request("POST", "https://example.org")
+    )
+    error = httpx.HTTPStatusError(
+        "provider error", request=response.request, response=response
+    )
+    assert _should_retry(error) is retryable
+
+
+@pytest.mark.anyio
+async def test_serialized_retry_policy_survives_worker_import_and_preserves_routing(
+    monkeypatch,
+):
+    mock, response = setup_mock_litellm(monkeypatch)
+    request = httpx.Request("POST", "https://example.org")
+    error = httpx.HTTPStatusError(
+        "rate limited", request=request, response=httpx.Response(429, request=request)
+    )
+    mock.acompletion.side_effect = [error] * 4 + [MockAsyncStream(["chunk"])]
+    sleep = AsyncMock()
+    monkeypatch.setattr(llm_call.retry, "sleep", sleep)
+    provider = {
+        "only": ["together"],
+        "allow_fallbacks": False,
+        "zdr": True,
+        "data_collection": "deny",
+    }
+    options = json.loads(
+        json.dumps(
+            {
+                "extra_body": {"provider": provider},
+                "llm_retry_policy": {
+                    "max_attempts": 12,
+                    "min_wait_s": 15,
+                    "max_wait_s": 300,
+                    "multiplier": 15,
+                },
+            }
+        )
+    )
+    result = await llm_call(
+        model="openrouter/moonshotai/kimi-k3", messages=[], temperature=1.0, **options
+    )
+    assert result.content == response.choices[0].message.content
+    assert mock.acompletion.await_count == 5
+    assert [call.args[0] for call in sleep.await_args_list] == [15, 30, 60, 120]
+    for call in mock.acompletion.await_args_list:
+        assert call.kwargs["extra_body"] == {"provider": provider}
+        assert "llm_retry_policy" not in call.kwargs
+        assert "reasoning_effort" not in call.kwargs
 
 
 def test_reasoning_tokens_support_responses_usage_shape():
@@ -166,26 +218,6 @@ def test_before_sleep_loguru_logs_retry_info(monkeypatch):
     mock_logger.warning.assert_called_once_with(
         "LLM call retry 2/3 after ValueError: boom; waiting 30s"
     )
-
-
-def test_litellm_message_structure():
-    """Test that LiteLLMMessage has expected structure."""
-    # Test with minimal required fields
-    msg1: LiteLLMMessage = {"role": "user", "content": "Hello"}
-    assert msg1["role"] == "user"
-    assert msg1["content"] == "Hello"
-
-    # Test with optional fields
-    msg2: LiteLLMMessage = {
-        "role": "assistant",
-        "content": "Hi there",
-        "tool_call_id": "call_123",
-        "name": "assistant",
-        "id": "msg_123",
-    }
-    assert msg2["tool_call_id"] == "call_123"
-    assert msg2["name"] == "assistant"
-    assert msg2["id"] == "msg_123"
 
 
 @pytest.mark.anyio
@@ -213,6 +245,42 @@ async def test_llm_call_basic(monkeypatch):
     mock_litellm.stream_chunk_builder.assert_called_once_with(
         ["chunk"], messages=messages
     )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("content", "expected_content"),
+    [
+        (None, "Provider-returned reasoning summary."),
+        ("", "Provider-returned reasoning summary."),
+        (" \n", " \n"),
+        ("Visible justification.", "Visible justification."),
+    ],
+)
+async def test_reasoning_fallback_preserves_existing_text_and_tool_calls(
+    monkeypatch, content, expected_content
+):
+    _, raw = setup_mock_litellm(monkeypatch)
+    message = raw.choices[0].message
+    message.content = content
+    message.reasoning_content = "Provider-returned reasoning summary."
+    message.tool_calls = [{"id": "finish", "function": {"name": "submit_answer"}}]
+    result = await llm_call(model="test-model", messages=[], temperature=None)
+    assert result.content == expected_content
+    assert result.content_source == "text"
+    assert result.tool_calls == message.tool_calls
+    assert result.message.reasoning_content == "Provider-returned reasoning summary."
+
+
+@pytest.mark.anyio
+async def test_empty_response_preserves_finish_reason_and_usage(monkeypatch):
+    _, raw = setup_mock_litellm(monkeypatch, return_usage=True)
+    raw.choices[0].message.content = None
+    raw.choices[0].finish_reason = "length"
+    result = await llm_call(model="test-model", messages=[], temperature=None)
+    assert result.content is None
+    assert result.finish_reason == "length"
+    assert result.usage["completion_tokens"] == 20
 
 
 @pytest.mark.anyio
@@ -452,6 +520,49 @@ async def test_llm_call_rejects_an_empty_stream(monkeypatch):
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("content", [None, ""])
+async def test_llm_call_uses_reasoning_when_content_is_empty(monkeypatch, content):
+    _, response = setup_mock_litellm(monkeypatch, return_usage=True)
+    response.choices[0].message.content = content
+    response.choices[0].message.reasoning_content = "<action>submit_answer</action>"
+
+    result = await llm_call(model="model", messages=[], temperature=1.0)
+
+    assert result.content == "<action>submit_answer</action>"
+    assert result.usage["completion_tokens"] == 20
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("content", [None, ""])
+@pytest.mark.parametrize("reasoning", [None, ""])
+async def test_llm_call_keeps_usage_when_both_fields_are_empty(
+    monkeypatch, content, reasoning
+):
+    _, response = setup_mock_litellm(monkeypatch, return_usage=True)
+    response.choices[0].message.content = content
+    response.choices[0].message.reasoning_content = reasoning
+
+    result = await llm_call(model="model", messages=[], temperature=1.0)
+
+    assert not result.content
+    assert result.usage == {
+        "prompt_tokens": 10,
+        "completion_tokens": 20,
+        "total_tokens": 30,
+    }
+
+
+@pytest.mark.anyio
+async def test_llm_call_preserves_content_when_reasoning_is_present(monkeypatch):
+    _, response = setup_mock_litellm(monkeypatch)
+    response.choices[0].message.reasoning_content = "reasoning"
+
+    result = await llm_call(model="model", messages=[], temperature=1.0)
+
+    assert result.content == "This is a response"
+
+
+@pytest.mark.anyio
 async def test_llm_call_cannot_be_downgraded_to_non_streaming(monkeypatch):
     """The shared helper keeps streaming enabled for every caller."""
     mock_litellm, _ = setup_mock_litellm(monkeypatch)
@@ -462,246 +573,41 @@ async def test_llm_call_cannot_be_downgraded_to_non_streaming(monkeypatch):
     assert mock_litellm.acompletion.await_args.kwargs["stream"] is True
 
 
-def test_format_examples_none():
-    """Test format_examples with None input."""
-    result = format_examples(None)
-    assert result == ""
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("message", "quota_exhausted"),
+    [
+        (
+            "You have reached your specified API usage limits. You will regain access on 2026-11-01 at 00:00 UTC.",
+            True,
+        ),
+        ("Your credit balance is too low to access the Anthropic API.", True),
+        ("thinking.budget_tokens must be less than max_tokens", False),
+        ("Invalid tool arguments in the request", False),
+    ],
+)
+async def test_http_400_account_limit_stops_benchmark_without_retry(
+    monkeypatch, message, quota_exhausted
+):
+    import httpx
 
+    from corral.agents.schema import BudgetExhaustedError
 
-def test_format_examples_empty_list():
-    """Test format_examples with empty list."""
-    result = format_examples([])
-    assert (
-        result
-        == "To help you in understanding this task, the next 0 examples are provided:\n\n"
+    response = httpx.Response(
+        400,
+        request=httpx.Request("POST", "https://provider.test/v1/messages"),
+        json={"error": {"type": "invalid_request_error", "message": message}},
     )
-
-
-def test_format_examples_single_example():
-    """Test format_examples with single example."""
-    examples = ["This is an example."]
-    result = format_examples(examples)
-    expected = "To help you in understanding this task, the next 1 examples are provided:\n\nThis is an example."
-    assert result == expected
-
-
-def test_format_examples_multiple_examples():
-    """Test format_examples with multiple examples."""
-    examples = ["Example 1", "Example 2", "Example 3"]
-    result = format_examples(examples)
-    expected = "To help you in understanding this task, the next 3 examples are provided:\n\nExample 1\n\nExample 2\n\nExample 3"
-    assert result == expected
-
-
-def test_serialize_messages_dict_messages():
-    """Test serializing dictionary messages."""
-    messages = cast(
-        "list[LiteLLMMessage]",
-        [
-            {"role": "user", "content": "Hello"},
-            {"role": "assistant", "content": "Hi there"},
-        ],
+    error = httpx.HTTPStatusError(
+        "HTTP 400", request=response.request, response=response
     )
-
-    result = serialize_messages(messages)
-
-    assert result == messages
-
-
-def test_serialize_messages_with_tool_calls():
-    """Test serializing messages with tool calls."""
-    mock_tool_call = MockToolCall("call_123", "test_function", {"arg": "value"})
-    mock_message = MockSerializableMessage(tool_calls=[mock_tool_call])
-
-    result = serialize_messages([mock_message])
-
-    assert len(result) == 1
-    message = result[0]
-    assert message["role"] == "assistant"
-    assert message["content"] == "I'll help you"
-    assert len(message["tool_calls"]) == 1
-    assert message["tool_calls"][0]["id"] == "call_123"
-    assert message["tool_calls"][0]["function"]["name"] == "test_function"
-    assert message["tool_calls"][0]["function"]["arguments"] == '{"arg": "value"}'
-
-
-def test_serialize_messages_with_id():
-    """Test serializing messages with id field."""
-    mock_message = MockSerializableMessage(
-        role="assistant", content="Hi there", msg_id="msg_12345"
-    )
-
-    result = serialize_messages([mock_message])
-
-    assert len(result) == 1
-    message = result[0]
-    assert message["role"] == "assistant"
-    assert message["content"] == "Hi there"
-    assert message["id"] == "msg_12345"
-
-
-def test_save_agent_messages_basic():
-    """Test basic save_agent_messages functionality."""
-    with tempfile.TemporaryDirectory() as temp_dir:
-        messages = cast(
-            "list[LiteLLMMessage]",
-            [
-                {"role": "user", "content": "Hello"},
-                {"role": "assistant", "content": "Hi there"},
-            ],
-        )
-
-        result_path = save_agent_messages(
-            messages=messages,
-            task_id="test_task",
-            agent_name="test_agent",
-            model="test_model",
-            output_dir=temp_dir,
-        )
-
-        assert Path(result_path).exists()
-        assert Path(result_path).parent == Path(temp_dir)
-
-        # Check file content
-        with open(result_path) as f:
-            data = json.load(f)
-
-        assert data["task_id"] == "test_task"
-        assert data["agent"] == "test_agent"
-        assert "timestamp" in data
-        assert data["messages"] == messages
-
-
-def test_save_agent_messages_with_tools(tmp_path):
-    """Test save_agent_messages with tools."""
-    messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
-    tools = [{"name": "test_tool", "description": "A test tool"}]
-
-    result_path = save_agent_messages(
-        messages=messages,
-        task_id="test_task",
-        agent_name="test_agent",
-        model="test_model",
-        output_dir=str(tmp_path),
-        tools=tools,
-    )
-
-    with open(result_path) as f:
-        data = json.load(f)
-
-    assert data["tools"] == tools
-
-
-def test_save_agent_messages_keeps_trace_metadata_outside_messages(tmp_path):
-    """Graph annotations must never become provider message keys."""
-    messages = cast(
-        "list[LiteLLMMessage]",
-        [
-            {"role": "user", "content": "Hello"},
-            {
-                "role": "assistant",
-                "content": "Result",
-                "name": "evaluate_node_0001",
-            },
-        ],
-    )
-    original_messages = [message.copy() for message in messages]
-    trace_metadata = {
-        "schema": "corral.ai_scientist.graph",
-        "nodes": [{"id": "node_0001", "label": "recognizable node"}],
-        "edges": [],
-    }
-
-    result_path = save_agent_messages(
-        messages=messages,
-        task_id="test_task",
-        agent_name="test_agent",
-        model="test_model",
-        output_dir=str(tmp_path),
-        trace_metadata=trace_metadata,
-    )
-
-    with open(result_path) as f:
-        data = json.load(f)
-
-    assert data["messages"] == original_messages
-    assert data["trace_metadata"] == trace_metadata
-    assert messages == original_messages
-
-
-def test_save_agent_messages_creates_directory():
-    """Test that save_agent_messages creates output directory."""
-    with tempfile.TemporaryDirectory() as temp_dir:
-        output_dir = Path(temp_dir) / "new_logs"
-
-        messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
-
-        result_path = save_agent_messages(
-            messages=messages,
-            task_id="test_task",
-            agent_name="test_agent",
-            model="test_model",
-            output_dir=str(output_dir),
-        )
-
-        assert output_dir.exists()
-        assert Path(result_path).exists()
-
-
-def test_save_agent_messages_filename_format(monkeypatch):
-    """Test that save_agent_messages generates correct filename format."""
-    with tempfile.TemporaryDirectory() as temp_dir:
-        messages = cast("list[LiteLLMMessage]", [{"role": "user", "content": "Hello"}])
-
-        class MockDatetime:
-            @staticmethod
-            def now(tz=None):
-                class MockNow:
-                    def strftime(self, fmt):
-                        return "20240101_120000"
-
-                return MockNow()
-
-        mock_datetime = MockDatetime()
-        monkeypatch.setattr("corral.agents.utils.datetime", mock_datetime)
-
-        result_path = save_agent_messages(
-            messages=messages,
-            task_id="test_task",
-            agent_name="test_agent",
-            model="test_model",
-            output_dir=temp_dir,
-        )
-
-        expected_filename = "test_task_20240101_120000.json"
-        assert Path(result_path).name == expected_filename
-
-
-def test_message_serialization_and_saving():
-    """Test message serialization and saving working together."""
-    with tempfile.TemporaryDirectory() as temp_dir:
-        # Create mock messages with various types
-        mock_message1 = MockSerializableMessage(
-            role="user", content="Hello", tool_calls=None
-        )
-        mock_message2 = {"role": "assistant", "content": "Hi there"}
-
-        messages = [mock_message1, mock_message2]
-
-        # Save messages
-        result_path = save_agent_messages(
-            messages=messages,
-            task_id="integration_test",
-            agent_name="test_agent",
-            model="test_model",
-            output_dir=temp_dir,
-        )
-
-        # Load and verify
-        with open(result_path) as f:
-            data = json.load(f)
-
-        assert len(data["messages"]) == 2
-        assert data["messages"][0]["role"] == "user"
-        assert data["messages"][0]["content"] == "Hello"
-        assert data["messages"][1] == mock_message2
+    completion = AsyncMock(side_effect=error)
+    monkeypatch.setattr("corral.agents.utils.litellm.acompletion", completion)
+    expected = BudgetExhaustedError if quota_exhausted else httpx.HTTPStatusError
+    with pytest.raises(expected) as caught:
+        await llm_call(model="anthropic/claude-opus-5-5", messages=[], temperature=1.0)
+    if quota_exhausted:
+        assert message in str(caught.value)
+    else:
+        assert caught.value is error
+    completion.assert_awaited_once()

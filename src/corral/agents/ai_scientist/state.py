@@ -6,11 +6,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from corral.agents.ai_scientist.journal import ResearchJournal
 from corral.agents.ai_scientist.search.nodes import (
+    ExecutedAction,
     MeasuredMetric,
     ResearchStage,
     SubstagePlan,
 )
 from corral.agents.ai_scientist.search.tree import ExperimentTree
+from corral.agents.ai_scientist.tools.execution_pool import ReplayResult
 
 
 class Hypothesis(BaseModel):
@@ -114,3 +116,54 @@ class ScientistState:
 
     def stage_progress(self, stage: ResearchStage) -> StageProgress:
         return self.stages[stage]
+
+    @classmethod
+    def from_snapshot(
+        cls,
+        snapshot: dict[str, Any],
+        *,
+        task_prompt: str,
+        tools: list[dict[str, Any]],
+    ) -> "ScientistState":
+        state = cls(
+            task_prompt=task_prompt,
+            tools=tools,
+            formulation=TaskFormulation.model_validate(snapshot["formulation"]),
+        )
+        state.tree = ExperimentTree.from_dict(snapshot["tree"])
+        state.journal = ResearchJournal.from_dict(snapshot["journal"])
+        state.current_stage = ResearchStage(snapshot["current_stage"])
+        state.stages = {
+            ResearchStage(stage): StageProgress.model_validate(progress)
+            for stage, progress in snapshot["stages"].items()
+        }
+        usage = snapshot.get("usage", {})
+        for name in (
+            "tool_calls",
+            "scientific_tool_calls",
+            "replay_tool_calls",
+            "executions_created",
+            "executions_cloned",
+            "peak_simultaneous_executions",
+            "llm_calls",
+            "llm_tokens",
+        ):
+            setattr(state, name, int(usage.get(name, 0)))
+        state.replay_results = [
+            ReplayResult(
+                branch_id=item["branch_id"],
+                exact=item["exact"],
+                equivalent=item["equivalent"],
+                original=ExecutedAction.model_validate(item["original"]),
+                replayed=ExecutedAction.model_validate(item["replayed"]),
+            )
+            for item in snapshot.get("replay_results", [])
+        ]
+        artifacts = snapshot.get("artifacts", {})
+        state.artifact_source_workspace = artifacts.get("source_workspace")
+        state.artifact_destination_workspace = artifacts.get("destination_workspace")
+        state.promoted_artifacts = list(artifacts.get("promoted", []))
+        state.experimental_search_terminated_reason = snapshot.get(
+            "experimental_search_terminated_reason"
+        )
+        return state
