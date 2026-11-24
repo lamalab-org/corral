@@ -14,6 +14,7 @@ from time import perf_counter
 from typing import Any, Literal
 
 import anyio
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from corral.report.logging import logger
 
@@ -38,6 +39,7 @@ try:
         SystemPromptEvent,
     )
     from openhands.sdk.event.conversation_error import ConversationErrorEvent
+    from openhands.sdk.llm.exceptions import LLMNoResponseError
     from openhands.sdk.mcp import MCPServer
     from openhands.sdk.mcp.client import MCPClient
     from openhands.sdk.mcp.config import to_fastmcp_mcp_config
@@ -69,7 +71,13 @@ from corral.agents.schema import (
 )
 from corral.agents.session import AgentSession, AgentSessionCapabilities
 from corral.agents.usage import usage_field
-from corral.agents.utils import LiteLLMMessage
+from corral.agents.utils import (
+    QUOTA_EXHAUSTED_KEYWORDS,
+    STOP_BENCHMARK_EXCEPTIONS,
+    LiteLLMMessage,
+    _should_retry,
+    before_sleep_loguru,
+)
 
 # Name under which the corral MCP server is registered with the OpenHands
 # harness (the `mcp_config` table key).
@@ -81,6 +89,42 @@ _MCP_SERVER_NAME = "corral"
 _INCLUDED_DEFAULT_TOOLS = [tool.__name__ for tool in BUILT_IN_TOOLS]
 
 _OPENHANDS_DEFAULT_EXECUTOR_TIMEOUT_S = float(MCP_TOOL_TIMEOUT_SECONDS)
+
+
+def _should_retry_provider_error(exc: BaseException) -> bool:
+    """Include generic provider errors without retrying permanent failures."""
+    if isinstance(exc, STOP_BENCHMARK_EXCEPTIONS):
+        return False
+    if getattr(exc, "status_code", None) == 429 and any(
+        keyword in str(exc).lower() for keyword in QUOTA_EXHAUSTED_KEYWORDS
+    ):
+        return False
+    return isinstance(exc, LLMNoResponseError) or _should_retry(exc)
+
+
+class _RetryingLLM(LLM):
+    """Apply Corral's provider classification at the SDK request boundary."""
+
+    def _make_retry_decorator(self):
+        """Keep the SDK backoff and callbacks when retrying generic API errors."""
+        return retry(
+            retry=retry_if_exception(_should_retry_provider_error),
+            stop=stop_after_attempt(self.num_retries),
+            wait=wait_exponential(
+                multiplier=self.retry_multiplier,
+                min=self.retry_min_wait,
+                max=self.retry_max_wait,
+            ),
+            before_sleep=self._build_before_sleep(
+                self.num_retries, self._retry_listener_fn
+            ),
+            reraise=True,
+        )
+
+    def log_retry_attempt(self, retry_state):
+        """Retain SDK retry metadata and expose the cause in Corral's logs."""
+        super().log_retry_attempt(retry_state)
+        before_sleep_loguru(retry_state)
 
 
 class _TranscriptMCPToolExecutor(MCPToolExecutor):
@@ -396,7 +440,7 @@ class OpenHandsAgent(BaseAgent):
         ):
             if name in self.kwargs:
                 llm_kwargs[name] = self.kwargs[name]
-        return LLM(**llm_kwargs)
+        return _RetryingLLM(**llm_kwargs)
 
     def _build_agent(
         self,
