@@ -118,3 +118,26 @@ their sessions (`build_index.py --verify`).
   wetlab and stargazer pools; wall-clock durations are not comparable with other runs.
 - **Comparison with the October full runs.** The full v4 runs cover all 10
   tasks per level; compare per task only.
+
+## Denario (claude-opus-4-7)
+
+`denario__claude-opus-4-7` in each level folder (k = 5, 30 trials). The reports
+are `report.json.xz`: gzip compressed Denario's repetitive sessions about 50
+times worse.
+
+| Level | Passes (of 15) | Hit the 100-request limit |
+|---|---:|---:|
+| 1 | 6 | 3 |
+| 2 | 2 | 7 |
+
+8 of 30 trials pass; 10 ended at the model-request limit before
+submitting. One L1 trial ended with a Denario `KeyError: 'name'`.
+
+Settings: `--agent denario --model anthropic/claude-opus-4-7`, agent kwargs
+`{"reasoning_effort": "medium"}`, `--max-iterations 100` (Denario's
+model-request budget, including planning and review), surrender off, Docker
+sandbox (2 CPUs, 6 GB, 4096 PIDs; guardrails on, evaluation notice off).
+Code: `main` 9269652a4 merged with PR #482 (b1a7783b8), not merged to `main`.
+Worker-response limit 256 MiB (`CORRAL_MAX_WORKER_RESPONSE_BYTES`). Run
+2026-11-24/25; trials that crashed on infrastructure (a full disk, connection
+loss) were rerun. Single-trial runs merged with `scripts/merge_trial_reports.py`.

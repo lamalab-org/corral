@@ -64,3 +64,26 @@ Large requests followed agents reading whole CSV files into context.
 provisional:** the saved error is only “Provider returned error”; its cause
 is unconfirmed. These are included as zero scores, with the original errors
 preserved. No explicit credit/quota rejection appears in the saved trial records.
+
+## Denario (claude-opus-4-7)
+
+`denario__claude-opus-4-7` in each level folder (k = 5, 30 trials). The reports
+are `report.json.xz`: gzip compressed Denario's repetitive sessions about 50
+times worse.
+
+| Level | Passes (of 15) | Hit the 100-request limit |
+|---|---:|---:|
+| 1 | 1 | 5 |
+| 2 | 0 | 5 |
+
+1 of 30 trials pass; 10 ended at the model-request limit before
+submitting. One L1 trial ended with a Denario `UnboundLocalError`.
+
+Settings: `--agent denario --model anthropic/claude-opus-4-7`, agent kwargs
+`{"reasoning_effort": "medium"}`, `--max-iterations 100` (Denario's
+model-request budget, including planning and review), surrender off, Docker
+sandbox (2 CPUs, 6 GB, 4096 PIDs; guardrails on, evaluation notice off). Env kwarg `repl_timeout_minutes: 15`. Two `psy_l1_t01` trials ran with a 1 GiB worker-response limit (their sessions were about 281 MB).
+Code: `main` 9269652a4 merged with PR #482 (b1a7783b8), not merged to `main`.
+Worker-response limit 256 MiB (`CORRAL_MAX_WORKER_RESPONSE_BYTES`). Run
+2026-11-24/25; trials that crashed on infrastructure (a full disk, connection
+loss) were rerun. Single-trial runs merged with `scripts/merge_trial_reports.py`.
