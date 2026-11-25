@@ -181,3 +181,42 @@ trials that finished before about 2026-11-11 21:10 have no `benchmark_score`
   so wall-clock durations are not comparable with other runs.
 - **Comparison with the October runs.** The October runs in [`../`](..)
   cover all tasks per level; compare per task only.
+
+## AI Scientist (claude-opus-4-7)
+
+`ai-scientist__claude-opus-4-7` in each level folder (k = 5, 30 trials).
+
+| Level | Task | Passes (of 5) |
+|---|---|---:|
+| 1 | `math_counting_probability_b` | 0 |
+| 1 | `math_geometry_d` | 4 |
+| 1 | `math_number_theory_b` | 0 |
+| 2 | `gsm_p1_c` | 0 |
+| 2 | `gsm_p2_b` | 0 |
+| 2 | `gsm_symbolic_c` | 0 |
+
+4 of 30 trials pass (level 1: 4/15, level 2: 0/15). No trial had an error,
+and no trial state records a refused reply. All 30 submitted a policy; none
+reached the 100-call budget (41–62 LLM calls per trial). 6 level 2 trials
+(`gsm_p1_c` and `gsm_symbolic_c`, k2–k4) score 0 because their final run hit
+the one-hour run limit before recording any answer (see "Level 2 final-run
+timeouts" above); their policies used 8–12 samples per question, and their
+150-question experiments used 900–1,800 student calls.
+
+Settings: `--max-iterations 100` (the AI Scientist's LLM-call budget), agent
+kwargs `{"config_profile": "default", "config": {"max_tool_calls": 256,
+"max_actions_per_node": 256, "max_search_nodes": 8, "max_validation_nodes": 8,
+"final_actions": [{"name": "submit_policy", "arguments": {"policy_path":
+"policy"}}]}, "reasoning_effort": "medium"}`, surrender off, Docker sandbox
+(2 CPUs, 6 GB, 4096 PIDs; guardrails on, evaluation notice off), image built
+from `main` 9269652a4 with the mini-v2 package pins. `final_actions` submits
+the promoted policy on the main session, which is what the scorer reads; the
+full inference_opt AI Scientist runs set the same action. Students served by
+OpenRouter. Run 2026-11-25, 10 trials at a time. These runs did not include
+the refusal-retry change used for the other environments' AI Scientist runs.
+Single-trial runs merged with `scripts/merge_trial_reports.py`.
+
+A first attempt at the 6 k1 trials without `final_actions` (all 6 scored 0,
+"no policy was submitted with submit_policy") is not included; the k1 trials
+here are the rerun. Their Langfuse sessions hold both attempts; `trials.csv`
+gives each kept trial's trace ID.
