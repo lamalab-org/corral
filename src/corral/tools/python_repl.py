@@ -24,8 +24,8 @@ DEFAULT_DESCRIPTION = (
     "A persistent Python REPL with no per-call execution timeout. "
     "Use print(...) to see results. Normal Python builtins and installed packages "
     "are available; file, process, and network access follow the runtime's permissions. "
-    "Thread pools are limited (pandas and numerical libraries use one thread by "
-    "default) and memory is capped."
+    "Thread pools are limited to using one thread by "
+    "default. Memory is also capped."
 )
 
 
