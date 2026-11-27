@@ -6,7 +6,7 @@ runs cover only the four new tasks: `seed111_diff3`, `seed610696_diff5`,
 [`../full/level_1`](../full/level_1), they give the v4 Level 1. The October
 reports in `../full/` stay on the v3 bank. Level 2 is unchanged.
 
-12 runs, 240 trials (4 tasks × k = 5 per run), **204 passes**, 0 errors.
+13 runs, 260 trials (4 tasks × k = 5 per run), **217 passes**, 0 errors.
 
 [Run index](runs.csv) · [Trial index with Langfuse links](trials.csv)
 
@@ -29,13 +29,20 @@ Passes out of 5 per task (`seed111_diff3`, `seed610696_diff5`,
 | react | gpt-6.1-sol | 5 · 5 · 5 · 5 | 20 |
 | react | gpt-5.6-sol | 5 · 5 · 5 · 5 | 20 |
 | react | gpt-5-2025-08-07 | 3 · 1 · 0 · 1 | 5 |
+| ai-scientist | claude-opus-4-7 | 2 · 5 · 2 · 4 | 13 |
 
 gpt-5 failures are model answers: most fit and submit two or three planets.
 One Codex trial submitted its plan text instead of JSON.
 
-ReAct claude-opus-5-5 had no empty or refused turns. Not run yet: AI Scientist
-claude-opus-5-5 (refusal risk on claude-opus-5-5) and the Kimi models
-(OpenRouter credit).
+ReAct claude-opus-5-5 had no empty or refused turns.
+
+AI Scientist ran with claude-opus-4-7 instead of claude-opus-5-5 (refusal risk
+on claude-opus-5-5). Its 7 failures are wrong answers; no trial errored or ran
+out of budget. The October AI Scientist runs on the six unchanged tasks used
+claude-opus-5-5, so a v4 Level 1 AI Scientist column built from both mixes the
+two models.
+
+Not run yet: the Kimi models (OpenRouter credit).
 
 ## Settings
 
@@ -48,6 +55,9 @@ claude-opus-5-5 (refusal risk on claude-opus-5-5) and the Kimi models
   gpt-5.6-sol, react claude-opus-5-5): memory as in October, 12 GB, 4 GB, 16 GB
   and 4 GB respectively.
 - **Other models:** mini-v2 settings, 6 GB.
+- **AI Scientist claude-opus-4-7:** 100 iterations, agent kwargs
+  `{"config": {"max_tool_calls": 256}, "reasoning_effort": "medium"}`, image
+  `corral-stargazer:l1v4-9269652a4-base`, 6 GB. Run 2026-11-27.
 - **Merging:** each trial ran as its own `corral bench --trials 1` run; the reports
   are merged with `scripts/merge_trial_reports.py` (run IDs
   `stargazer-l1v4-l1-<agent>-<model>`, source runs in `provenance.json`).
