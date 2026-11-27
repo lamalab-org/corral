@@ -205,6 +205,50 @@ async def run_analysis(args) -> int:
     return await run(args, validate_options(args))
 
 
+def add_motif_arguments(parser):
+    from .patterns import MOTIFS
+
+    names = [motif.name for motif in MOTIFS]
+    parser.add_argument(
+        "--input", type=Path, required=True, help="Trace JSON with a messages array."
+    )
+    parser.add_argument(
+        "--output", type=Path, required=True, help="Destination report JSON file."
+    )
+    parser.add_argument(
+        "--motifs",
+        nargs="+",
+        choices=names,
+        metavar="NAME",
+        help="Defaults to all registered motifs. Choices: " + ", ".join(names),
+    )
+    parser.add_argument("--model", help="Decisions classifier model.")
+    parser.add_argument("--base-url", help="Decisions API base URL.")
+    parser.add_argument(
+        "--explain", action="store_true", help="Verify and explain active candidates."
+    )
+    parser.set_defaults(_handler=run_motifs)
+
+
+async def run_motifs(args):
+    from .decisions import DEFAULT_DECISIONS_MODEL, DecisionsAnnotator, saved_trajectory
+    from .storage import atomic_save
+
+    if args.input.resolve() == args.output.resolve():
+        raise ValueError("Choose a report output separate from the input trace")
+    document = json.loads(args.input.read_text(encoding="utf-8"))
+    messages, task = saved_trajectory(document)
+    annotator = DecisionsAnnotator(
+        model=args.model or DEFAULT_DECISIONS_MODEL,
+        base_url=args.base_url,
+        motif_names=args.motifs,
+        include_explanations=args.explain,
+    )
+    report = await annotator.annotate(messages, task=task)
+    atomic_save(args.output, report.to_dict())
+    return 0
+
+
 def add_check_arguments(parser):
     parser.add_argument(
         "--input",

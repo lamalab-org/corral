@@ -32,6 +32,7 @@ from .graph import (
     validate_support_quotes,
 )
 from .graph_semantics import GRAPH_SEMANTICS_VERSION, annotate_node_semantics
+from .overflow import long_message_view
 from .schema import (
     ANALYZABLE_COMPLETION_STATUSES,
     ANNOTATION_VERSION,
@@ -109,6 +110,13 @@ def annotation_fingerprint(
     }
 
 
+def _graph_view(trace, config, cap, *, stop_at_submission):
+    view = build_annotation_view(
+        trace, config, cap, stop_at_submission=stop_at_submission
+    )
+    return long_message_view(trace, view)
+
+
 def can_reuse(
     graph: AnnotatedGraph,
     trace: NormalizedTrace,
@@ -118,7 +126,7 @@ def can_reuse(
     requested = annotation_fingerprint(trace, annotator, config)
     saved = graph.provenance.get("fingerprint")
     try:
-        view = build_annotation_view(
+        view = _graph_view(
             trace,
             config,
             graph.provenance["effective_tool_output_max_chars"],
@@ -301,14 +309,14 @@ async def annotate_trace(
     )
     if prepared_view is not None and stop_at_submission:
         prepared_view = through_submission(prepared_view, trace)
+    if prepared_view is not None:
+        prepared_view = long_message_view(trace, prepared_view)
     failed_view_hash = None
     for index, cap in enumerate(caps):
         view = (
             prepared_view
             if prepared_view is not None
-            else build_annotation_view(
-                trace, config, cap, stop_at_submission=stop_at_submission
-            )
+            else _graph_view(trace, config, cap, stop_at_submission=stop_at_submission)
         )
         if content_hash(view.messages) == failed_view_hash:
             continue
@@ -331,7 +339,7 @@ async def annotate_trace(
             failed_view_hash = content_hash(view.messages)
             if not any(
                 content_hash(
-                    build_annotation_view(
+                    _graph_view(
                         trace, config, remaining, stop_at_submission=stop_at_submission
                     ).messages
                 )
@@ -354,7 +362,7 @@ async def annotate_trace(
         )
     if view.coverage["reduced_context"]:
         warnings.append(
-            "Annotation used reduced tool context. Omitted middle text is unknown; absence-based measurements may change."
+            "Annotation used source excerpts. Omitted text is unknown; absence-based measurements may change."
         )
     fingerprint = annotation_fingerprint(trace, annotator, config)
     if prepared_view is not None:

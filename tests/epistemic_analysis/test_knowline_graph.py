@@ -442,7 +442,10 @@ def test_cross_window_edges_remain_explicitly_unexamined(tmp_path):
 
 
 def test_graph_queue_refills_before_slow_trace_finishes(tmp_path, monkeypatch):
-    path = Path(__file__).resolve().parents[2] / "scripts/run_graph_annotation_batch.py"
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "scripts/annotations/run_graph_annotation_batch.py"
+    )
     spec = importlib.util.spec_from_file_location("rolling_graph_queue", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -502,7 +505,10 @@ def test_graph_queue_refills_before_slow_trace_finishes(tmp_path, monkeypatch):
 
 
 def test_queue_waits_for_both_stages_and_matching_inputs(tmp_path):
-    path = Path(__file__).resolve().parents[2] / "scripts/run_graph_annotation_batch.py"
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "scripts/annotations/run_graph_annotation_batch.py"
+    )
     spec = importlib.util.spec_from_file_location("graph_queue", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -538,3 +544,47 @@ def test_queue_waits_for_both_stages_and_matching_inputs(tmp_path):
     )
     with pytest.raises(ValueError, match="fingerprint changed"):
         module.predecessor_status(request)
+
+
+def test_window_retries_skip_only_identical_message_ranges(monkeypatch):
+    monkeypatch.syspath_prepend(
+        str(Path(__file__).resolve().parents[2] / "scripts/annotations")
+    )
+    from run_graph_annotation_batch import next_window
+
+    cfg = AnnotationConfig("local", window=254, overlap=1)
+    smaller = next_window(cfg, 45)
+    assert (smaller.window, smaller.overlap) == (31, 15)
+    assert next_window(cfg, 1) is None
+    assert next_window(cfg, 300).window == 127
+
+
+@pytest.mark.parametrize(
+    ("fit_sizes", "raises"), [({4}, False), (set(), True), ({1}, False)]
+)
+def test_window_preflight_checks_actual_split_path(tmp_path, fit_sizes, raises):
+    async def run():
+        checked = []
+
+        async def fits(body):
+            checked.append(len(body["questions"]))
+            return checked[-1] in fit_sizes
+
+        provider = SimpleNamespace(
+            config=config(),
+            fits=fits,
+            question_body=lambda model, state, qs: {"questions": qs},
+        )
+        client = GraphQuestionClient(provider, tmp_path, {})
+        call = client.preflight_large_window(
+            "local", {}, {key: {} for key in "abcdefgh"}
+        )
+        if raises:
+            with pytest.raises(RequestBudgetExceeded):
+                await call
+            assert checked == [1, 8, 4, 2]
+        else:
+            await call
+            assert checked[-1] in fit_sizes
+
+    asyncio.run(run())

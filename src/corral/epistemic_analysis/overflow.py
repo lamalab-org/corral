@@ -13,11 +13,14 @@ import re
 from dataclasses import asdict, replace
 from itertools import pairwise
 
+from .annotation_transcript import SAVED_FIELDS
 from .context import AnnotationView, RetainedRange, is_tool_result, task_message_indices
 from .decision_units import fragment, full_fragments
 from .schema import content_hash
 
-OVERFLOW_VERSION = "overflow-exact-instructions-v3"
+OVERFLOW_VERSION = "overflow-exact-repetition-v4"
+MIN_REPEAT_CHARS = 4096
+REPEAT_SAMPLE_CHARS = 512
 OVERFLOW_SCOPE = "whole_conversation_with_preprocessed_tool_outputs"
 WINDOW_SCOPE = "preprocessed_windows_with_code_or"
 OVERFLOW_RULES = """Source excerpts preserve chronological order. Tool outputs and,
@@ -286,8 +289,76 @@ def _subtract(spans, cuts):
     return result
 
 
+def _repeated_blocks(text, start, end):
+    """Find exact tandem repeats, including phrases and multi-line blocks.
+
+    A run of eight periods contains a repeated probe starting on a stride
+    boundary when stride/2 < period <= stride. Search progressively larger
+    strides so ordinary long messages do not need a search at every character.
+    """
+    stride = MIN_REPEAT_CHARS // 8
+    while stride // 2 * 8 <= end - start:
+        anchor = start
+        while anchor + 2 * stride < end:
+            probe = text[anchor : anchor + 2 * stride]
+            match = text.find(probe, anchor + 1, min(end, anchor + 3 * stride))
+            if match < 0:
+                anchor += stride
+                continue
+            period = match - anchor
+            low, high = anchor, match + len(probe)
+            while low > start and text[low - 1] == text[low - 1 + period]:
+                low -= 1
+            while high < end and text[high] == text[high - period]:
+                high += 1
+            count = (high - low) // period
+            if count >= 8 and count * period >= MIN_REPEAT_CHARS:
+                yield {
+                    "start": low,
+                    "end": low + count * period,
+                    "kind": "repeated_ngram",
+                    "sample": text[low : low + min(period, 200)],
+                    "period_chars": period,
+                    "repetitions": count,
+                }
+            anchor = max(anchor + stride, high - 2 * stride)
+        stride *= 2
+
+
+def _repeated_lines(text):
+    """Count successive identical nonblank lines, allowing spacing to vary."""
+    offset = start = end = count = 0
+    previous = first = None
+    varied = False
+    for line in [*text.splitlines(keepends=True), None]:
+        low = offset
+        if line is not None:
+            offset += len(line)
+            key = line.strip()
+            if not key:
+                continue
+        else:
+            key = None
+        if key != previous:
+            if count >= 8 and end - start >= MIN_REPEAT_CHARS:
+                yield {
+                    "start": start,
+                    "end": low if varied else end,
+                    "kind": "repeated_line_with_spacing" if varied else "repeated_line",
+                    "sample": first[:200],
+                    "repetitions": count,
+                }
+            previous, first, start, count, varied = key, line, low, 0, False
+        elif count:
+            varied |= low != end or line != first
+        count += 1
+        end = offset
+
+
 def repetition_runs(text):
     """Find verifiable long runs without interpreting the agent's claims."""
+    if len(text) < MIN_REPEAT_CHARS:
+        return []
     runs = [
         {
             "start": m.start(),
@@ -298,30 +369,25 @@ def repetition_runs(text):
         }
         for m in re.finditer(r"(.)\1{4095,}", text, re.DOTALL)
     ]
-    offset, previous, start, count = 0, None, 0, 0
-    for line in [*text.splitlines(keepends=True), None]:
-        if line != previous:
-            if previous and previous.strip() and count >= 8 and offset - start >= 4096:
-                runs.append(
-                    {
-                        "start": start,
-                        "end": offset,
-                        "kind": "repeated_line",
-                        "sample": previous[:200],
-                        "repetitions": count,
-                    }
-                )
-            previous, start, count = line, offset, 0
-        if line is not None:
-            offset += len(line)
-            count += 1
+    runs.extend(_repeated_lines(text))
     # A character run inside a repeated line is already represented by that line.
     selected, end = [], -1
     for run in sorted(runs, key=lambda r: (r["start"], -r["end"])):
         if run["start"] >= end:
             selected.append(run)
             end = run["end"]
-    return selected
+    gaps = _subtract([(0, len(text))], [(r["start"], r["end"]) for r in selected])
+    for low, high in gaps:
+        if high - low >= MIN_REPEAT_CHARS:
+            blocks = sorted(
+                _repeated_blocks(text, low, high), key=lambda r: (r["start"], -r["end"])
+            )
+            cursor = low
+            for block in blocks:
+                if block["start"] >= cursor:
+                    selected.append(block)
+                    cursor = block["end"]
+    return sorted(selected, key=lambda r: r["start"])
 
 
 def long_message_view(trace, tool_view, *, cap=None):
@@ -330,13 +396,14 @@ def long_message_view(trace, tool_view, *, cap=None):
     Complete retained catalog records and embedded tool results are protected.
     Every range maps directly to the original source, never an earlier excerpt.
     """
-    view = copy.deepcopy(tool_view)
-    view.policy = "tool-excerpts-then-repetition-and-long-message-excerpts"
-    for index, mapping in enumerate(view.mappings):
+    view = tool_view
+    for index, mapping in enumerate(tool_view.mappings):
         text = trace.messages[index]["content"]
         if trace.messages[index]["role"] in {"system", "developer", "user"}:
             continue  # Never shorten the instructions used to assess behavior.
         if mapping["is_tool_result"] and "tool_original_chars" not in mapping:
+            continue
+        if cap is None and len(text) - mapping["omitted_chars"] < MIN_REPEAT_CHARS:
             continue
         spans = [
             (r["original_start"], r["original_end"]) for r in mapping["retained_ranges"]
@@ -347,16 +414,34 @@ def long_message_view(trace, tool_view, *, cap=None):
             else []
         )
         cuts, signals = [], []
-        for run in repetition_runs(text):
-            low, high = run["start"], run["end"]
-            if any(low < b and high > a for a, b in protected):
+        # Serialized dispatch fields must stay parseable by graph extraction.
+        prose_end = len(text)
+        boundary = text.rfind(SAVED_FIELDS)
+        if boundary >= 0:
+            try:
+                saved_fields = json.loads(text[boundary + len(SAVED_FIELDS) :])
+            except ValueError:
+                saved_fields = None
+            if isinstance(saved_fields, dict):
+                prose_end = boundary
+        for start, end in _subtract(spans, protected):
+            limit = min(end, prose_end)
+            if limit - start < MIN_REPEAT_CHARS:
                 continue
-            if any(a <= low and high <= b for a, b in spans):
-                # Hundreds of actual repetitions remain visible on both sides.
-                cuts.append((low + 512, high - 512))
+            for run in repetition_runs(text[start:limit]):
+                low, high = start + run["start"], start + run["end"]
+                cuts.append((low + REPEAT_SAMPLE_CHARS, high - REPEAT_SAMPLE_CHARS))
                 signals.append(
-                    {**run, "original_chars": high - low, "retained_sample_chars": 1024}
+                    {
+                        **run,
+                        "start": low,
+                        "end": high,
+                        "original_chars": high - low,
+                        "retained_sample_chars": 2 * REPEAT_SAMPLE_CHARS,
+                    }
                 )
+        if not cuts and cap is None:
+            continue
         spans = _subtract(spans, cuts)
         if cap is not None and sum(b - a for a, b in spans) > cap:
             mutable = _subtract(spans, protected)
@@ -376,8 +461,10 @@ def long_message_view(trace, tool_view, *, cap=None):
                             kept.append((start + a - offset, start + b - offset))
                     offset += end - start
                 # Keep repetition samples even if they fall outside the prose samples.
-                kept.extend((r["start"], r["start"] + 512) for r in signals)
-                kept.extend((r["end"] - 512, r["end"]) for r in signals)
+                kept.extend(
+                    (r["start"], r["start"] + REPEAT_SAMPLE_CHARS) for r in signals
+                )
+                kept.extend((r["end"] - REPEAT_SAMPLE_CHARS, r["end"]) for r in signals)
                 kept.extend(
                     (max(a, low), min(b, high))
                     for a, b in spans
@@ -402,15 +489,30 @@ def long_message_view(trace, tool_view, *, cap=None):
             offset = len(rendered)
             rendered += text[start:end]
             ranges.append(asdict(RetainedRange(start, end, offset, len(rendered))))
-        mapping.update(
-            tool_omitted_chars=mapping["omitted_chars"]
-            if mapping["is_tool_result"]
-            else 0,
-            message_omitted_chars=additional,
+        if view is tool_view:
+            view = replace(
+                tool_view,
+                messages=list(tool_view.messages),
+                mappings=list(tool_view.mappings),
+                policy="tool-excerpts-then-repetition-and-long-message-excerpts",
+                policy_version=OVERFLOW_VERSION,
+            )
+        view.mappings[index] = dict(
+            mapping,
+            tool_omitted_chars=mapping.get(
+                "tool_omitted_chars",
+                mapping["omitted_chars"] if mapping["is_tool_result"] else 0,
+            ),
+            message_omitted_chars=mapping.get("message_omitted_chars", 0) + additional,
             omitted_chars=omitted,
             retained_ranges=ranges,
-            repetition_signals=signals,
-            long_message_cap=cap,
+            repetition_signals=sorted(
+                [*mapping.get("repetition_signals", []), *signals],
+                key=lambda r: r["start"],
+            ),
+            long_message_cap=cap
+            if cap is not None
+            else mapping.get("long_message_cap"),
         )
         view.messages[index] = {**trace.messages[index], "content": rendered}
     return view

@@ -12,7 +12,9 @@ from corral.epistemic_analysis.storage import atomic_save, save_record
 def test_export_preserves_labels_and_evidence_without_repeating_facts(
     tmp_path, monkeypatch
 ):
-    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "scripts"))
+    monkeypatch.syspath_prepend(
+        str(Path(__file__).resolve().parents[2] / "scripts/annotations")
+    )
     from export_annotation_batch import export_batch
 
     root = tmp_path / "batch"
@@ -129,7 +131,9 @@ def test_export_preserves_labels_and_evidence_without_repeating_facts(
 
 
 def test_empty_batch_does_not_publish_export(tmp_path, monkeypatch):
-    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "scripts"))
+    monkeypatch.syspath_prepend(
+        str(Path(__file__).resolve().parents[2] / "scripts/annotations")
+    )
     from export_annotation_batch import export_batch
 
     root = tmp_path / "batch"

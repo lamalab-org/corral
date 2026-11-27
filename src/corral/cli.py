@@ -337,15 +337,28 @@ def _print_results(run_id: str, result: Any) -> None:
     sys.stdout.write("\n".join(lines) + "\n")
 
 
-def _configured_agent(
+def _agent_configuration(
     args: argparse.Namespace,
     *,
     agent_name: str | None = None,
     agent_kwargs: Mapping[str, Any] | None = None,
-) -> tuple[str, Any, str]:
+) -> tuple[str, dict[str, Any]]:
     canonical = normalise_agent_name(agent_name or args.agent)
     configured_kwargs = dict(getattr(args, "agent_kwargs", {}) or {})
     configured_kwargs.update(dict(agent_kwargs or {}))
+    backend = getattr(args, "epistemic_backend", None)
+    if backend is not None:
+        if canonical in {"react", "tool-calling"}:
+            configured_kwargs["epistemic"] = True
+        elif canonical != "epistemic":
+            raise ValueError(f"{canonical} does not support --epistemic-backend")
+        configured_kwargs["epistemic_backend"] = backend
+    return canonical, configured_kwargs
+
+
+def _configured_agent(
+    args: argparse.Namespace, canonical: str, configured_kwargs: Mapping[str, Any]
+) -> tuple[Any, str]:
     agent = create_agent(
         canonical,
         model=args.model,
@@ -356,7 +369,7 @@ def _configured_agent(
     model = getattr(agent, "model", None)
     if not isinstance(model, str) or not model:
         raise ValueError(f"{type(agent).__name__} did not define a model")
-    return canonical, agent, model
+    return agent, model
 
 
 def _retry_policy(args: argparse.Namespace) -> Any:
@@ -421,11 +434,9 @@ async def run_benchmark(
         _list_tasks(environments)
         return 0
 
-    canonical_agent = normalise_agent_name(agent_name or args.agent)
-    runtime_options = {
-        **dict(getattr(args, "agent_kwargs", {}) or {}),
-        **dict(agent_kwargs or {}),
-    }
+    canonical_agent, runtime_options = _agent_configuration(
+        args, agent_name=agent_name, agent_kwargs=agent_kwargs
+    )
     harness = canonical_agent
     if harness == "reflexion":
         harness = normalise_agent_name(runtime_options.get("actor", "tool-calling"))
@@ -473,11 +484,7 @@ async def run_benchmark(
             docker=resolved,
         )
     else:
-        canonical_agent, agent, model = _configured_agent(
-            args,
-            agent_name=agent_name,
-            agent_kwargs=agent_kwargs,
-        )
+        agent, model = _configured_agent(args, canonical_agent, runtime_options)
         agents[canonical_agent] = agent
 
     requested_task_ids = tuple(args.tasks or environments)
@@ -640,7 +647,8 @@ async def run_task(args: argparse.Namespace) -> int:
             "independent task, so use `corral bench` for dependency graphs"
         )
 
-    canonical_agent, agent, model = _configured_agent(args)
+    canonical_agent, runtime_options = _agent_configuration(args)
+    agent, model = _configured_agent(args, canonical_agent, runtime_options)
     execution_id = args.execution_id or (
         f"run-{_slug(canonical_agent)}-{_slug(args.environment)}-"
         f"{_slug(args.task)}-{uuid4().hex[:12]}"
@@ -717,6 +725,15 @@ def _add_agent_arguments(parser: argparse.ArgumentParser) -> None:
     )
     agent.add_argument("--api-endpoint")
     agent.add_argument("--temperature", type=float)
+    agent.add_argument(
+        "--epistemic-backend",
+        choices=("graph", "direct"),
+        help=(
+            "Select how epistemic feedback is generated. 'graph' extracts nodes and "
+            "edges (EpistemicAgent default). 'direct' classifies motifs from the trace. "
+            "Specifying this option also enables feedback for react and tool-calling."
+        ),
+    )
     agent.add_argument(
         "--agent-kwargs",
         type=_json_object,
@@ -876,7 +893,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     analyze = commands.add_parser("analyze", help="Annotate epistemic nodes and edges.")
     add_analysis_arguments(analyze)
-    from corral.epistemic_analysis.cli import add_check_arguments
+    from corral.epistemic_analysis.cli import add_check_arguments, add_motif_arguments
+
+    motifs = commands.add_parser(
+        "annotate-motifs", help="Classify epistemic patterns directly from a trace."
+    )
+    add_motif_arguments(motifs)
 
     checks = commands.add_parser(
         "annotate-checks",

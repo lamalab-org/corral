@@ -359,8 +359,10 @@ class EpistemicReport:
         present = self.present_antipatterns
         if not present:
             return "No present unconstructive epistemic patterns detected."
+        direct = (self.selection_policy or {}).get("backend") == "decisions"
+        heading = "Present" if direct else "Graph-matched"
         lines = [
-            "Graph-matched unconstructive epistemic patterns (check against the observations):"
+            f"{heading} unconstructive epistemic patterns (check against the observations):"
         ]
         lines.extend(f"- {a.name}: {a.explanation}" for a in present)
         if self.graph is not None:

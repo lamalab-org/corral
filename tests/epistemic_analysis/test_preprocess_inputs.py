@@ -14,7 +14,9 @@ from corral.epistemic_analysis.schema import content_hash
 def test_retro_import_preserves_execution_provenance_and_source(
     tmp_path, monkeypatch, error
 ):
-    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "scripts"))
+    monkeypatch.syspath_prepend(
+        str(Path(__file__).resolve().parents[2] / "scripts/annotations")
+    )
     preprocess = importlib.import_module("preprocess_trace_inputs")
     monkeypatch.setattr(preprocess, "ROOT", tmp_path)
     monkeypatch.setattr(

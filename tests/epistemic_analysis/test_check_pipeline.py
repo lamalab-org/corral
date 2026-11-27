@@ -1104,7 +1104,9 @@ def test_native_token_endpoint_uses_server_renderer_without_model_execution(
     from pathlib import Path
     from types import SimpleNamespace
 
-    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "scripts"))
+    monkeypatch.syspath_prepend(
+        str(Path(__file__).resolve().parents[2] / "scripts/annotations")
+    )
     server = importlib.import_module("serve_knowline_benchmark")
 
     class Handler:

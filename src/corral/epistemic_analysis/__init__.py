@@ -4,6 +4,7 @@ __all__ = [
     "AnnotatedGraph",
     "AnnotationBackend",
     "AnnotationConfig",
+    "DecisionsAnnotator",
     "EpistemicReport",
     "GraphAnnotator",
     "GroupingMetadata",
@@ -22,6 +23,7 @@ def __getattr__(name):
     modules = {
         "AnnotationBackend": "annotators.graph",
         "annotate_trace": "pipeline",
+        "DecisionsAnnotator": "decisions",
         "GraphAnnotator": "annotators.local",
     }
     if name in __all__:

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from corral.agents.schema import SURRENDER_SENTINEL, AgentOutcome, BudgetExhaustedError
 from corral.agents.tool_calling import ToolCallingAgent
 from corral.core.action import SUBMIT_ANSWER_TOOL_NAME, Action
 from corral.core.errors import concise_error_message
 from corral.epistemic_analysis.annotation_transcript import scientific_messages
+from corral.epistemic_analysis.decisions import DecisionsAnnotator
 from corral.epistemic_analysis.schema import SUBMISSION_REVIEW_MESSAGE_NAME
 
 if TYPE_CHECKING:
@@ -74,7 +75,7 @@ class EpistemicAgent(ToolCallingAgent):
     """Annotate public activity and review proposed answers before submission.
 
     Reports are persisted as named session messages with full structured metadata.
-    The actor sees graph-matched feedback; no reports are sent to the annotator.
+    The actor sees feedback from the selected annotator.
     All mutable trajectory/report state belongs to the session, so an
     agent instance can be reused across concurrent trials.
     """
@@ -83,6 +84,7 @@ class EpistemicAgent(ToolCallingAgent):
         self,
         model: str | None = None,
         *,
+        epistemic_backend: Literal["graph", "direct"] = "graph",
         system_prompt: str | None = None,
         user_prompt: str | None = None,
         **kwargs: Any,
@@ -94,6 +96,7 @@ class EpistemicAgent(ToolCallingAgent):
             ),
             user_prompt=user_prompt or "epistemic/user_prompt",
             epistemic=True,
+            epistemic_backend=epistemic_backend,
             **kwargs,
         )
         self.system_prompt += "\n\n" + EPISTEMIC_PROMPT
@@ -104,13 +107,18 @@ class EpistemicAgent(ToolCallingAgent):
             function = tool.get("function", {})
             if function.get("name") == SUBMIT_ANSWER_TOOL_NAME:
                 # The base method creates a fresh submission schema on every call.
+                qualifier = (
+                    ""
+                    if isinstance(self.annotator, DecisionsAnnotator)
+                    else "graph-matched "
+                )
                 function["description"] = (
                     "Submit the final answer and end the task.\n"
                     "First write a concise evidence-based justification in visible assistant text, then call this tool in the same response when the answer is complete.\n"
                     "Put only the complete answer in the answer argument.\n"
                     "Text alone does not complete the task.\n"
                     "The proposed answer is reviewed before acceptance.\n"
-                    "If graph-matched unconstructive epistemic patterns remain, address the feedback, validate or revise the answer, and call submit_answer again."
+                    f"If {qualifier}unconstructive epistemic patterns remain, address the feedback, validate or revise the answer, and call submit_answer again."
                 )
         return tools
 

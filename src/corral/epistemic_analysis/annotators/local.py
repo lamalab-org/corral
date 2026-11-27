@@ -686,6 +686,37 @@ class GraphQuestionClient:
             "max_retries": self.provider.config.retries,
         }
 
+    async def preflight_large_window(self, model, state, questions):
+        """Prove that a real question cannot fit, before scoring earlier windows."""
+        if not questions or self.provider.config.provider != "knowline":
+            return
+        state = {**state, "trace_context": self.public_context}
+        items = list(questions.items())
+        context = current_context()
+        limit = context.config.max_request_tokens if context else 0
+
+        async def fits(selected):
+            body = self.provider.question_body(model, state, dict(selected))
+            return (
+                not limit or await self.provider.count(body) <= limit
+            ) and await self.provider.fits(body)
+
+        # A successful singleton needs no further probe. An oversized singleton
+        # only proves failure if every parent on its actual split path also fails.
+        if await fits(items[:1]):
+            return
+        while len(items) > 1:
+            if await fits(items):
+                return
+            items = items[: len(items) // 2]
+        raise RequestBudgetExceeded(
+            {
+                "backend": "graph",
+                "reason": "request_context_limit",
+                "budget_tokens": limit or self.provider.config.context_tokens,
+            }
+        )
+
     async def evaluate(self, model, state, questions):
         if model != self.provider.config.model:
             raise ValueError("Graph model differs from the configured provider")

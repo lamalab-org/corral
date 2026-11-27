@@ -4,15 +4,18 @@ import math
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
+from importlib.util import find_spec
 from types import SimpleNamespace
 
 import pytest
 
 
-@pytest.fixture
-def adapter(monkeypatch):
-    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "scripts"))
+@pytest.fixture(scope="module")
+def adapter():
+    if find_spec("serve_knowline_vllm") is None:
+        pytest.skip(
+            "Set PYTHONPATH to a frozen KnowLine vLLM adapter to run these tests"
+        )
     import serve_knowline_vllm
 
     return serve_knowline_vllm
@@ -219,3 +222,103 @@ def test_context_admission_is_fifo_and_releases_tokens_after_failure(adapter):
     assert not capacity.waiting
     with pytest.raises(ValueError, match="context budget"), capacity.reserve(11):
         pass
+
+
+def test_only_warm_identical_prefixes_share_capacity(adapter):
+    cap = adapter.ContextCapacity(4, 12)
+    prefix = (b"same", 8)
+    cap.remember(prefix)
+    with cap.reserve(10, prefix):
+        with cap.reserve(10, prefix):
+            assert cap.tokens == 12
+            assert cap.active == 2
+        assert cap.tokens == 10
+    assert cap.tokens == 0
+    assert not cap.references
+
+
+def test_preflight_and_score_reuse_exact_token_ids(adapter):
+    scorer, captured = fixture_scorer(adapter)
+    scorer.cache_limit = 16
+    calls = []
+    encode = scorer.tokenizer.encode
+
+    def counted(text, **kwargs):
+        calls.append(text)
+        return encode(text, **kwargs)
+
+    scorer.tokenizer.encode = counted
+    first = scorer.encode("native").tolist()
+    scorer.score("native", [], [0, 1, 2])
+    assert calls == ["native"]
+    assert len(captured) == 1
+    assert captured[0]["prompt"] == first
+    assert scorer.cache_bytes == 16
+
+
+def test_render_count_and_score_share_long_trace_tokens(adapter):
+    calls = []
+
+    def encode(text, *, add_special_tokens):
+        assert not add_special_tokens
+        calls.append(text)
+        return list(text.encode())
+
+    native = SimpleNamespace(encode=encode, apply_chat_template=object())
+    scorer = adapter.VLLMScorer(
+        "http://local", "model", native, token_cache_bytes=2**20, split_turns=True
+    )
+    template = adapter.CachedTemplate(native, scorer.encode)
+    assert template.apply_chat_template is native.apply_chat_template
+    prefix = "猫" * adapter.LONG_CONTEXT_CHARS + "<|turn>"
+    for question in ("is this a node?", "is this an edge?", "is this present?"):
+        text = prefix + "user\n" + question
+        expected = list(text.encode())
+        assert (
+            list(template.tokenizer.encode(text, add_special_tokens=False)) == expected
+        )
+        assert list(scorer.encode(text)) == expected
+    assert calls.count(prefix) == 1
+    assert len(calls) == 4
+    for text in ("short<|turn>user\n", "long without a native boundary" * 2048):
+        assert list(scorer.encode(text)) == list(text.encode())
+        assert calls[-1] == text
+
+
+def test_context_groups_rotate_after_bounded_native_batches(adapter):
+    groups = adapter.ContextGroups(64)
+    entered = []
+
+    def batch(key, n):
+        with groups.reserve(key, n):
+            entered.append(key)
+            if key == "B":
+                raise ValueError("failed batch")
+
+    def queued(key):
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            with groups.condition:
+                if key in groups.pending:
+                    return
+            time.sleep(0.001)
+        pytest.fail("Batch never queued")
+
+    with ThreadPoolExecutor(3) as pool:
+        with groups.reserve("A", 32):
+            other = pool.submit(batch, "B", 32)
+            queued("B")
+            same = pool.submit(batch, "A", 32)
+            same.result(timeout=3)
+            next_turn = pool.submit(batch, "A", 1)
+            queued("A")
+            assert entered == ["A"]
+        with pytest.raises(ValueError, match="failed batch"):
+            other.result(timeout=3)
+        next_turn.result(timeout=3)
+    assert entered == ["A", "B", "A"]
+    assert groups.active == 0
+    assert not groups.pending
+
+    with groups.reserve("A", 64), groups.for_request({"m1": "short"}, {"q": {}}):
+        assert groups.active == 1

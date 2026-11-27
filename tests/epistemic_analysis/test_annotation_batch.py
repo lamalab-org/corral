@@ -10,7 +10,9 @@ import pytest
 def test_trace_explanations_roll_up_saved_text_without_model_calls(
     tmp_path, monkeypatch
 ):
-    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "scripts"))
+    monkeypatch.syspath_prepend(
+        str(Path(__file__).resolve().parents[2] / "scripts/annotations")
+    )
     import run_annotation_batch as batch
 
     from corral.epistemic_analysis.storage import atomic_save, save_record
@@ -65,7 +67,9 @@ def test_trace_explanations_roll_up_saved_text_without_model_calls(
 
 
 def test_explanation_queue_does_not_retry_one_failed_attempt(tmp_path, monkeypatch):
-    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "scripts"))
+    monkeypatch.syspath_prepend(
+        str(Path(__file__).resolve().parents[2] / "scripts/annotations")
+    )
     import run_annotation_batch as batch
 
     from corral.epistemic_analysis.storage import atomic_save
@@ -109,7 +113,9 @@ def test_explanation_queue_does_not_retry_one_failed_attempt(tmp_path, monkeypat
 def test_evidence_trace_parallelism_preserves_finished_and_blocked_jobs(
     tmp_path, monkeypatch
 ):
-    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "scripts"))
+    monkeypatch.syspath_prepend(
+        str(Path(__file__).resolve().parents[2] / "scripts/annotations")
+    )
     import run_annotation_batch as batch
 
     def save(path, data):
@@ -188,7 +194,9 @@ def test_evidence_trace_parallelism_preserves_finished_and_blocked_jobs(
 def test_label_queue_refills_before_slow_trace_finishes(
     tmp_path, monkeypatch, concurrency
 ):
-    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "scripts"))
+    monkeypatch.syspath_prepend(
+        str(Path(__file__).resolve().parents[2] / "scripts/annotations")
+    )
     import run_annotation_batch as batch
 
     def save(path, value):
@@ -235,7 +243,9 @@ def test_label_queue_refills_before_slow_trace_finishes(
 
 
 def test_trace_concurrency_must_be_positive(tmp_path, monkeypatch):
-    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "scripts"))
+    monkeypatch.syspath_prepend(
+        str(Path(__file__).resolve().parents[2] / "scripts/annotations")
+    )
     import run_annotation_batch as batch
 
     with pytest.raises(ValueError, match="positive"):
@@ -245,7 +255,9 @@ def test_trace_concurrency_must_be_positive(tmp_path, monkeypatch):
 def test_check_handoff_runs_before_trace_labels_finish_and_is_idempotent(
     tmp_path, monkeypatch
 ):
-    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "scripts"))
+    monkeypatch.syspath_prepend(
+        str(Path(__file__).resolve().parents[2] / "scripts/annotations")
+    )
     import run_annotation_batch as batch
 
     save = batch.atomic_save

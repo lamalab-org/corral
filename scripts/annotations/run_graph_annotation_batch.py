@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-# ruff: noqa: T201
+# ruff: noqa: E402, T201
 import argparse
 import asyncio
 import fcntl
@@ -14,7 +14,10 @@ from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+# Run snapshots may place this file directly under scripts/.
+SCRIPT_DIR = Path(__file__).resolve().parent
+ROOT = SCRIPT_DIR.parents[1] if SCRIPT_DIR.name == "annotations" else SCRIPT_DIR.parent
+sys.path.insert(0, str(ROOT / "src"))
 
 from corral.epistemic_analysis.annotators.graph import GraphExtractor
 from corral.epistemic_analysis.annotators.local import (
@@ -23,7 +26,12 @@ from corral.epistemic_analysis.annotators.local import (
     create_provider,
 )
 from corral.epistemic_analysis.budget import RequestBudgetExceeded
-from corral.epistemic_analysis.context import AnnotationView, through_submission
+from corral.epistemic_analysis.context import (
+    AnnotationView,
+    submission_end,
+    through_submission,
+)
+from corral.epistemic_analysis.graph import iter_windows
 from corral.epistemic_analysis.overflow import excerpt_state, view_fragments
 from corral.epistemic_analysis.pipeline import annotate_trace
 from corral.epistemic_analysis.scheduling import DEFAULT_TRACE_CONCURRENCY, rolling_map
@@ -78,9 +86,20 @@ def predecessor_status(request):
 def verify_code(root, manifest_path=None):
     manifest = read(manifest_path or root / "code-manifest.json")
     for item in manifest:
-        path = Path(__file__).resolve().parents[1] / item["path"]
+        path = ROOT / item["path"]
         if hashlib.sha256(path.read_bytes()).hexdigest() != item["sha256"]:
             raise ValueError(f"Frozen graph implementation changed: {item['path']}")
+
+
+def next_window(config, message_count):
+    """Keep the first halved window that actually changes the failed plan."""
+    failed = iter_windows(message_count, config.window, config.overlap)
+    window = config.window
+    while window > 1:
+        window = max(1, window // 2)
+        if iter_windows(message_count, window, window // 2) != failed:
+            return replace(config, window=window, overlap=window // 2)
+    return None
 
 
 async def process_job(
@@ -154,6 +173,7 @@ async def process_job(
     record = {
         "id": job["id"],
         "gpu": gpu,
+        "queue_runner_runtime": str(ROOT),
         "input_fingerprint": inputs.fingerprint,
         "profile_fingerprint": configuration,
         "started_at": now(),
@@ -175,11 +195,12 @@ async def process_job(
                     record["attempts"].append(
                         {"window": config.window, "error": str(exc)}
                     )
-                    if config.window == 1:
+                    smaller = next_window(config, submission_end(inputs.trace))
+                    if smaller is None:
                         raise
-                    window = max(1, config.window // 2)
-                    config = replace(config, window=window, overlap=window // 2)
+                    config = smaller
             graph.qc["native_window_reductions"] = record["attempts"]
+            graph.provenance["queue_runner_runtime"] = record["queue_runner_runtime"]
             graph.provenance["behavioral_results"] = {
                 "directory": (request.get("predecessor") or {}).get("directory"),
                 "trace_id": job.get("parent_id", job["id"]),
@@ -232,6 +253,7 @@ async def run(
     check_ready=False,
     trace_concurrency=DEFAULT_TRACE_CONCURRENCY,
     code_manifest=None,
+    replica=None,
 ):
     if trace_concurrency < 1:
         raise ValueError("trace_concurrency must be positive")
@@ -263,7 +285,18 @@ async def run(
             },
         )
         await asyncio.sleep(20)
-    provider = create_provider(ProviderConfig(**profile["replicas"][str(gpu)]))
+    if replica is None:
+        replica = profile["replicas"][str(gpu)]
+    else:
+        original = next(iter(profile["replicas"].values()))
+        endpoints = {"endpoint", "metadata_endpoint", "token_endpoint"}
+        if {k: v for k, v in replica.items() if k not in endpoints} != {
+            k: v for k, v in original.items() if k not in endpoints
+        }:
+            raise ValueError(
+                "An additional replica must match the frozen model and scoring configuration"
+            )
+    provider = create_provider(ProviderConfig(**replica))
     try:
         verify_code(root, code_manifest)
         await provider.preflight()

@@ -9,6 +9,7 @@ import math
 import re
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
+from itertools import islice
 from typing import TYPE_CHECKING, Any
 
 from corral.epistemic_analysis.context import (
@@ -401,6 +402,15 @@ def window_state(
     }
     if view_instructions():
         state["annotation_view_instructions"] = view_instructions()
+        context = current_context()
+        if context is not None and messages is context.view.messages:
+            signals = {
+                f"m{i}": context.view.mappings[i]["repetition_signals"]
+                for i in range(start, end)
+                if context.view.mappings[i].get("repetition_signals")
+            }
+            if signals:
+                state["repetition_signals"] = signals
     return state
 
 
@@ -409,6 +419,19 @@ class GraphExtractor:
     def submission_span(span):
         return span.tool_name == "submit_answer" or (
             span.kind == "action" and SUBMIT_ANSWER_ACTION.match(span.quote)
+        )
+
+    @classmethod
+    def eligible_node_types(cls, span: Span) -> tuple[str, ...]:
+        """Labels permitted by the ontology, before any model decision."""
+        if span.kind in {"observation", "task"}:
+            return ("E",)
+        return tuple(
+            node_type
+            for node_type in NODE_TYPES
+            if node_type != "E"
+            and (node_type != "N" or span.kind == "action")
+            and (node_type != "F" or span.kind == "final" or cls.submission_span(span))
         )
 
     def __init__(
@@ -432,6 +455,7 @@ class GraphExtractor:
                 "stop_at_submission": stop_at_submission,
                 "node_postprocessing": "test_precedence_neutral_fallback_v1",
                 "node_decisions": "independent_choices_v1",
+                "node_eligibility": "pre_question_type_constraints_v1",
                 "judgment_consolidation": "same_assessment_complete_link_v1",
                 "final_claim_scope_sha1": sha1_hex(
                     json.dumps(graph_final_claim_question("final"), sort_keys=True)
@@ -484,30 +508,47 @@ class GraphExtractor:
             if context is not None:
                 context.review_issues.append(message)
 
-        for start, end in iter_windows(len(messages), window, overlap):
-            current = [
-                s for s in spans if start <= s.msg_idx < end and s.key not in seen
-            ]
-            if not current:
-                continue
+        def node_state(start, end, current):
             state = window_state(messages, start, end)
             state["annotation_rules"] = PASS_A_SYSTEM
             state["candidates"] = {
                 s.key: {"msg_idx": s.msg_idx, "kind": s.kind, "quote": s.quote}
                 for s in current
             }
-            questions = {}
+            return state
+
+        def node_questions(current):
             for span in current:
-                for node_type in (
-                    ("E",) if span.kind in {"task", "observation"} else NODE_TYPES
-                ):
-                    questions[f"{span.key}_{node_type}"] = graph_node_question(
-                        span.key, node_type
+                for kind in self.eligible_node_types(span):
+                    yield f"{span.key}_{kind}", graph_node_question(span.key, kind)
+
+        windows = []
+        for start, end in iter_windows(len(messages), window, overlap):
+            current = [
+                s for s in spans if start <= s.msg_idx < end and s.key not in seen
+            ]
+            if not current:
+                continue
+            seen.update(s.key for s in current)
+            windows.append((start, end, current))
+            preflight = getattr(self.client, "preflight_large_window", None)
+            if preflight is not None:
+                chars = sum(len(m["content"]) for m in messages[start:end]) + sum(
+                    len(s.quote) for s in current
+                )
+                if chars >= self.client.provider.config.context_tokens:
+                    await preflight(
+                        model,
+                        node_state(start, end, current),
+                        dict(islice(node_questions(current), self.client.batch_size)),
                     )
+
+        for start, end, current in windows:
+            state = node_state(start, end, current)
+            questions = dict(node_questions(current))
             answers = await self.client.evaluate(model, state, questions)
             extracted = []
             for span in current:
-                seen.add(span.key)
                 selected = {}
                 submission = self.submission_span(span)
                 test_over_neutral = (
@@ -539,17 +580,7 @@ class GraphExtractor:
                             f"Low node confidence; omitted {span.key} ({node_type})."
                         )
                         continue
-                    if (
-                        (span.kind in {"observation", "task"} and node_type != "E")
-                        or (
-                            node_type == "E"
-                            and span.kind not in {"observation", "task"}
-                        )
-                        or (node_type == "N" and span.kind != "action")
-                        or (
-                            node_type == "F" and span.kind != "final" and not submission
-                        )
-                    ):
+                    if node_type not in self.eligible_node_types(span):
                         review(
                             f"Rejected {span.key} ({node_type}): violates node type constraints."
                         )

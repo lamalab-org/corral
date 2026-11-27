@@ -115,7 +115,7 @@ def test_current_definitions_are_sent_for_every_node_decision():
                 )
                 == ontology.NODE_CRITERIA[key.rsplit("_", 1)[1]]
             )
-    assert all_types == set(ontology.NODE_TYPES)
+    assert all_types == {"H", "T", "J", "C"}
     assert "commitment_threshold" not in graph.provenance
 
 
@@ -385,21 +385,26 @@ def test_defaults_bounded_windows_clipping_and_full_decision_artifacts(tmp_path)
     assert not can_reuse(graph, trace, typesafe, config)
 
 
-@pytest.mark.parametrize(
-    ("text", "types"),
-    [
-        ("<final_answer>X</final_answer>", {"H"}),
-        ("Ordinary prose.", {"N"}),
-    ],
-)
-def test_invalid_annotations_require_review(text, types):
+def test_invalid_annotations_require_review():
     graph, trace, backend, config = annotate(
-        [{"role": "assistant", "content": text}], Decisions(lambda c: types)
+        [{"role": "assistant", "content": "<final_answer>X</final_answer>"}],
+        Decisions(lambda c: {"H"}),
     )
     assert graph.annotation_status == "incomplete"
     assert graph.qc["review_issues"] or graph.qc["uncovered_messages"]
     assert not can_reuse(graph, trace, backend, config)
     assert not any(n["type"] == "N" for n in graph.nodes)
+
+
+def test_impossible_neutral_label_on_prose_never_requires_review():
+    graph, trace, backend, config = annotate(
+        [{"role": "assistant", "content": "Ordinary prose."}],
+        Decisions(lambda c: {"N"}),
+    )
+    assert graph.nodes == []
+    assert graph.annotation_status == "complete"
+    assert graph.qc["review_issues"] == []
+    assert can_reuse(graph, trace, backend, config)
 
 
 @pytest.mark.parametrize("confidence", [0.04, 0.9])

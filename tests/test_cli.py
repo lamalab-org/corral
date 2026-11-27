@@ -264,6 +264,43 @@ def test_benchmark_parser_accepts_agent_environment_model_and_json_options():
     assert args.max_parallel_evaluations_by_environment == {"samplemath": 2}
 
 
+@pytest.mark.parametrize(
+    ("command", "agent_name", "backend"),
+    [
+        ("run", "epistemic", "graph"),
+        ("bench", "epistemic", "direct"),
+        ("run", "react", "direct"),
+        ("bench", "tool-calling", "graph"),
+    ],
+)
+def test_epistemic_backend_flag_selects_live_annotator(command, agent_name, backend):
+    from corral.epistemic_analysis import DecisionsAnnotator, GraphAnnotator
+
+    other = "direct" if backend == "graph" else "graph"
+    args = cli.build_parser().parse_args(
+        [
+            command,
+            "--agent",
+            agent_name,
+            "--environment",
+            "samplemath",
+            "--task",
+            "task1",
+            "--agent-kwargs",
+            json.dumps({"epistemic_backend": other}),
+            "--epistemic-backend",
+            backend,
+        ]
+    )
+    name, options = cli._agent_configuration(args)
+    agent, _ = cli._configured_agent(args, name, options)
+    assert options["epistemic_backend"] == backend
+    assert isinstance(
+        agent.annotator, GraphAnnotator if backend == "graph" else DecisionsAnnotator
+    )
+    assert "epistemic_backend" not in agent._call_kwargs()
+
+
 def test_benchmark_parser_has_safe_docker_defaults():
     args = cli.build_parser().parse_args(
         ["bench", "--agent", "react", "--environment", "samplemath"]
@@ -397,7 +434,8 @@ def test_benchmark_preserves_explicit_custom_image(monkeypatch, build, environme
 
 
 @pytest.mark.parametrize(
-    "agent", ["ai-scientist", "claude-code", "codex", "openhands", "reflexion"]
+    "agent",
+    ["ai-scientist", "claude-code", "codex", "epistemic", "openhands", "reflexion"],
 )
 @pytest.mark.parametrize("max_iterations", [None, 7])
 @pytest.mark.parametrize(
@@ -476,6 +514,7 @@ def test_docker_benchmark_does_not_import_agent_on_host(
             "--output-dir",
             str(tmp_path),
             *model_args,
+            *(["--epistemic-backend", "direct"] if agent == "epistemic" else []),
             *(
                 []
                 if max_iterations is None
@@ -498,7 +537,10 @@ def test_docker_benchmark_does_not_import_agent_on_host(
     )
     assert request.agent_runtime.model == expected_model
     assert request.agent_runtime.reasoning_effort == expected_effort
-    assert request.agent_runtime.options == {**args.agent_kwargs, **options}
+    expected_options = {**args.agent_kwargs, **options}
+    if agent == "epistemic":
+        expected_options["epistemic_backend"] = "direct"
+    assert request.agent_runtime.options == expected_options
     (report_path,) = tmp_path.rglob("report.json")
     report = json.loads(report_path.read_text())
     assert report["metadata"]["model"]["by_task"] == {"task1": expected_model}

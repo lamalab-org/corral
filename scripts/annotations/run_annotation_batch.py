@@ -8,7 +8,7 @@ label replica and one evidence process. This script never starts or stops server
 from __future__ import annotations
 
 # Worker progress is intentionally written to the durable session log.
-# ruff: noqa: T201
+# ruff: noqa: E402, T201
 import argparse
 import asyncio
 import fcntl
@@ -18,7 +18,10 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+# Run snapshots may place this file directly under scripts/.
+SCRIPT_DIR = Path(__file__).resolve().parent
+ROOT = SCRIPT_DIR.parents[1] if SCRIPT_DIR.name == "annotations" else SCRIPT_DIR.parent
+sys.path.insert(0, str(ROOT / "src"))
 
 from corral.epistemic_analysis.annotators.local import (
     OpenAIClient,

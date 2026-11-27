@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from corral.agents.base_agent import _UsageAccumulator
     from corral.agents.session import AgentSession
     from corral.core.action import Action
+    from corral.epistemic_analysis.decisions import DecisionsAnnotator
 
 
 class EpistemicSupport(BaseAgent):
@@ -29,7 +30,8 @@ class EpistemicSupport(BaseAgent):
         self,
         *,
         epistemic: bool = False,
-        annotator: GraphAnnotator | None = None,
+        annotator: GraphAnnotator | DecisionsAnnotator | None = None,
+        epistemic_backend: str = "graph",
         actor_refusal_max_retries: int = 1,
         epistemic_provider_config: Mapping[str, Any] | None = None,
         epistemic_explanation_config: Mapping[str, Any] | None = None,
@@ -51,12 +53,55 @@ class EpistemicSupport(BaseAgent):
             raise ValueError("actor_refusal_max_retries must be a non-negative integer")
         if not isinstance(epistemic, bool):
             raise TypeError("epistemic must be a boolean")
+        if epistemic_backend not in {"graph", "direct"}:
+            raise ValueError("epistemic_backend must be 'graph' or 'direct'")
+        if epistemic_backend == "direct":
+            if any(
+                config is not None
+                for config in (
+                    epistemic_provider_config,
+                    epistemic_explanation_config,
+                    epistemic_graph_config,
+                    epistemic_explanation_base_url,
+                )
+            ):
+                raise ValueError(
+                    "The direct backend uses epistemic_base_url for Decisions and explanations"
+                )
+            from corral.epistemic_analysis.decision_thresholds import (
+                CALIBRATED_THRESHOLD_POLICY,
+            )
+            from corral.epistemic_analysis.decisions import DecisionsAnnotator
+
+            direct_options = {
+                name: kwargs.pop(f"epistemic_{name}")
+                for name in (
+                    "api_key",
+                    "pattern_thresholds",
+                    "stream_explanations",
+                    "explanation_concurrency",
+                    "motif_names",
+                    "include_explanations",
+                )
+                if f"epistemic_{name}" in kwargs
+            }
+            direct_options.setdefault("pattern_thresholds", CALIBRATED_THRESHOLD_POLICY)
+            if epistemic_model is not None:
+                direct_options["model"] = epistemic_model
+            if epistemic_timeout_s is not None:
+                direct_options["timeout_s"] = epistemic_timeout_s
+            if epistemic_max_retries is not None:
+                direct_options["max_retries"] = epistemic_max_retries
+            if epistemic and annotator is None:
+                annotator = DecisionsAnnotator(
+                    base_url=epistemic_base_url,
+                    explanation_model=epistemic_explanation_model,
+                    **direct_options,
+                )
         obsolete = [key for key in kwargs if key.startswith("epistemic_")]
         if obsolete:
             raise TypeError(
-                f"Unsupported epistemic options: {', '.join(obsolete)}. "
-                "Annotation uses nodes and edges; configure epistemic_provider_config "
-                "and epistemic_explanation_config. Direct pattern annotation was removed."
+                f"Unsupported options for the {epistemic_backend} backend: {', '.join(obsolete)}"
             )
         if kwargs.get("model") is None:
             if epistemic:

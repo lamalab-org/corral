@@ -9,7 +9,9 @@ import pytest
 def test_native_validation_preserves_probability_tolerance(monkeypatch):
     import torch
 
-    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "scripts"))
+    monkeypatch.syspath_prepend(
+        str(Path(__file__).resolve().parents[2] / "scripts/annotations")
+    )
     monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
     from decision_hf_backend import HFScorer
 

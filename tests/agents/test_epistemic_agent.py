@@ -100,9 +100,25 @@ def test_local_actor_default_and_explicit_actor_override(agent_type):
     assert explicit.kwargs["api_key"] == "custom"
 
 
-def test_removed_direct_options_fail_before_reaching_actor():
-    with pytest.raises(TypeError, match="Direct pattern annotation was removed"):
-        EpistemicAgent(epistemic_backend="direct")
+@pytest.mark.parametrize("agent_type", [EpistemicAgent, ToolCallingAgent, ReActAgent])
+def test_direct_backend_is_opt_in_and_uses_independent_config(agent_type):
+    from corral.epistemic_analysis import DecisionsAnnotator
+
+    agent = make_agent(
+        agent_type,
+        model="test-actor",
+        epistemic_backend="direct",
+        epistemic_model="classifier",
+        epistemic_explanation_model="verifier",
+        epistemic_motif_names=["untested_claim"],
+    )
+    assert isinstance(agent.annotator, DecisionsAnnotator)
+    assert agent.annotator.model == "classifier"
+    assert agent.annotator.explanation_model == "verifier"
+    assert [m.name for m in agent.annotator.motifs] == ["untested_claim"]
+    assert not any(key.startswith("epistemic_") for key in agent._call_kwargs())
+    with pytest.raises(TypeError, match="epistemic_motif_names"):
+        make_agent(agent_type, epistemic_motif_names=["untested_claim"])
 
 
 def test_annotation_and_explanation_overrides_are_independent():
