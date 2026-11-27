@@ -228,7 +228,7 @@ the default. Git LFS index pointers are reported as unscanned, with unknown
 trial counts; download them to include the affected environment.
 
 Add the `infra-failures` label to a same-repository pull request to scan its added and
-modified full and mini-v2 reports, including Git LFS reports. The workflow
+modified full, mini-v2, and mini-v2 ablation reports, including Git LFS reports. The workflow
 updates its PR comment when new commits arrive and attaches a CSV of findings.
 For a broader scan, comment `/infra-failures [lfs] [mini-v2] [<environment> ...]`
 or run the workflow from the Actions tab. Use `lfs` to include Git LFS reports

@@ -161,3 +161,51 @@ def test_iteration_limit_with_refusal_and_empty_response():
         "agent_limit",
         "empty_response",
     }
+
+
+def test_ablation_report_can_be_scanned_without_csv_index(
+    tmp_path, monkeypatch, capsys
+):
+    report = (
+        tmp_path
+        / "ablations/mini-v2/eval-aware/wetlab/level_2"
+        / "codex__gpt-6.1-sol/report.json.gz"
+    )
+    report.parent.mkdir(parents=True)
+    with gzip.open(report, "wt") as source:
+        json.dump(
+            {
+                "metadata": {"benchmark_run_id": "ablation-run"},
+                "task_results": {
+                    "task": {
+                        "trials": [
+                            {
+                                "trial_id": "execution",
+                                "success": False,
+                                "error_message": "Provider returned error",
+                                "token_usage": {"llm_calls": 1},
+                            }
+                        ]
+                    }
+                },
+            },
+            source,
+        )
+    output = tmp_path / "findings.csv"
+    monkeypatch.setattr(infra, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["find_infra_failures.py", "--csv", str(output), "--report", str(report)],
+    )
+
+    assert infra.main() == 0
+    assert (
+        "ablations/mini-v2/eval-aware/wetlab: 1 trials, 1 failed"
+        in capsys.readouterr().out
+    )
+    with output.open(newline="") as source:
+        (row,) = csv.DictReader(source)
+    assert row["category"] == "provider_error"
+    assert row["environment"] == "ablations/mini-v2/eval-aware/wetlab"
+    assert row["execution_id"] == "execution"
+    assert row["run_id"] == "ablation-run"

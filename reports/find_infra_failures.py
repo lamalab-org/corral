@@ -314,11 +314,16 @@ def trial_findings(trial: dict) -> list[dict]:
 
 
 def scan(
-    env_dir: Path, reports: list[Path] | None = None
+    env_dir: Path,
+    reports: list[Path] | None = None,
+    *,
+    ablation: str | None = None,
 ) -> tuple[list[dict], list[str], int]:
     """Return findings, skipped Git LFS paths, and the number of trials scanned."""
-    with (env_dir / "trials.csv").open(newline="", encoding="utf-8") as f:
-        index = {row["execution_id"]: row for row in csv.DictReader(f)}
+    index = None
+    if ablation is None:
+        with (env_dir / "trials.csv").open(newline="", encoding="utf-8") as f:
+            index = {row["execution_id"]: row for row in csv.DictReader(f)}
     rows, skipped, scanned = [], [], 0
     if reports is None:
         reports = list(env_dir.glob("level_*/*/report.json.[gx]z"))
@@ -327,9 +332,28 @@ def scan(
             skipped.append(report.relative_to(env_dir).as_posix())
             continue
         data = load_report(report)
-        for task in data["task_results"].values():
-            for trial in task["trials"]:
-                row = index[trial["trial_id"]]
+        if index is None:
+            agent, model = report.parent.name.split("__", 1)
+            run = {
+                "environment": ablation,
+                "level": report.parents[1].name.removeprefix("level_"),
+                "agent": agent,
+                "model": model,
+                "run_id": data["metadata"]["benchmark_run_id"],
+            }
+        for task_id, task in data["task_results"].items():
+            for slot, trial in enumerate(task["trials"]):
+                execution_id = trial["trial_id"]
+                if index is None:
+                    row = run | {
+                        "task_id": task_id,
+                        "trial": slot,
+                        "execution_id": execution_id,
+                        "score": trial.get("score", ""),
+                        "success": str(trial.get("success")),
+                    }
+                else:
+                    row = index[execution_id]
                 scanned += 1
                 rows.extend(
                     {key: row.get(key, "") for key in FIELDS} | finding
@@ -403,12 +427,15 @@ def finding_table(rows: list[dict]) -> list[str]:
         "| Environment | Level | Run | Task | Trial | Cause | Evidence | Trace |",
         "|---|---:|---|---|---:|---|---|---|",
     ]
-    lines.extend(
-        f"| {r['environment']} | {r['level']} | {r['agent']} / {r['model']} "
-        f"| {cell(r['task_id'])} | {r['trial']} | {r['category']} "
-        f"| {cell(r['evidence'], 140)} | [trace]({r['langfuse_trace_url']}) |"
-        for r in rows[:MARKDOWN_ROWS]
-    )
+    for row in rows[:MARKDOWN_ROWS]:
+        url = row["langfuse_trace_url"]
+        trace = f"[trace]({url})" if url else "—"
+        lines.append(
+            f"| {cell(row['environment'])} | {row['level']} "
+            f"| {cell(row['agent'])} / {cell(row['model'])} "
+            f"| {cell(row['task_id'])} | {row['trial']} | {row['category']} "
+            f"| {cell(row['evidence'], 140)} | {trace} |"
+        )
     if len(rows) > MARKDOWN_ROWS:
         lines.append(
             f"\n{len(rows) - MARKDOWN_ROWS} more rows are in the CSV artifact."
@@ -526,7 +553,8 @@ def main() -> int:
             parser.error("--report cannot be combined with environments or --mini-v2")
         for report in sorted({path.resolve() for path in args.report}):
             if not report.is_relative_to(reports_dir) or not re.fullmatch(
-                r"[^/]+/(?:full|mini-v2)/level_\d+/[^/]+/report\.json\.(?:gz|xz)",
+                r"(?:[^/]+/(?:full|mini-v2)|ablations/mini-v2/[^/]+/[^/]+)"
+                r"/level_\d+/[^/]+/report\.json\.(?:gz|xz)",
                 report.relative_to(reports_dir).as_posix(),
             ):
                 parser.error(f"invalid report path: {report}")
@@ -549,12 +577,14 @@ def main() -> int:
     )
     all_rows, results = [], []
     for env_dir in env_dirs:
-        name = env_dir.relative_to(reports_dir).as_posix()
+        relative = env_dir.relative_to(reports_dir)
+        name = relative.as_posix()
+        ablation = name if len(relative.parts) == 4 else None
+        indexes = ("trials.csv", "runs.csv") if args.report is None else ("trials.csv",)
+        if ablation is not None:
+            indexes = ()
         index_pointers = [
-            filename
-            for filename in ("trials.csv", "runs.csv")
-            if filename == "trials.csv" or args.report is None
-            if is_lfs_pointer(env_dir / filename)
+            filename for filename in indexes if is_lfs_pointer(env_dir / filename)
         ]
         if index_pointers:
             sys.stdout.write(
@@ -565,7 +595,7 @@ def main() -> int:
             # Unknown coverage must not be presented as zero infrastructure failures.
             results.append((name, "unknown", [], index_pointers, []))
             continue
-        rows, skipped, trials = scan(env_dir, selected.get(env_dir))
+        rows, skipped, trials = scan(env_dir, selected.get(env_dir), ablation=ablation)
         missing = missing_runs(env_dir) if args.report is None else []
         summarize(name, rows, trials, skipped)
         for run in missing:
