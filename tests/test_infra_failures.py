@@ -209,3 +209,17 @@ def test_ablation_report_can_be_scanned_without_csv_index(
     assert row["environment"] == "ablations/mini-v2/eval-aware/wetlab"
     assert row["execution_id"] == "execution"
     assert row["run_id"] == "ablation-run"
+
+
+def test_denario_model_request_budget_is_an_agent_limit():
+    trial = {
+        "error_message": (
+            "Denario exhausted the model-request budget (including planning and execution)."
+        ),
+        "token_usage": {"llm_calls": 5},
+    }
+
+    (finding,) = infra.trial_findings(trial)
+    assert finding["category"] == "agent_limit"
+    assert not infra.is_rerun(finding | {"success": "False"})
+    assert not infra.is_review(finding | {"success": "False"})
