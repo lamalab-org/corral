@@ -31,8 +31,8 @@ def repl_description(timeout_minutes: float | None) -> str:
     text = (
         "Execute Python code in a persistent Python session. "
         "The working directory is /workspace, so open files "
-        "by relative path, e.g. 'data.csv'. Thread pools are limited (pandas and "
-        "numerical libraries use one thread by default) and memory is capped."
+        "by relative path, e.g. 'data.csv'. Thread pools are limited to using one thread by "
+    "default. Memory is also capped."
     )
     if timeout_minutes is None:
         return text
