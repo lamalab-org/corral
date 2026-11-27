@@ -245,7 +245,7 @@ reports with the expected 18 agent/model pairs per level. Full reports remain
 the default. Git LFS index pointers are reported as unscanned, with unknown
 trial counts; download them to include the affected environment.
 
-Add the `infra-failures` label to a same-repository pull request to scan its
+Add the `check-infra-failure` label to a same-repository pull request to scan its
 added and modified full, mini-v2, mini-v2 ablation, and Stargazer L1 additions
 reports, including Git LFS reports. The workflow
 updates its PR comment when new commits arrive and attaches a CSV of findings.
