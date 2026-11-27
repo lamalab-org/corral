@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 import numpy as np
+import pytest
 
 from corral.core.tool import ToolConcurrency, WorkspaceAccess
 from corral.runtime import permissions
@@ -110,6 +111,27 @@ def test_local_worker_bounds_native_thread_pools(monkeypatch):
             " os.environ.get('CORRAL_TEST_SECRET'))"
         )
     assert output == "1 4 None\n"
+
+
+def test_local_worker_caps_pandas_threads(tmp_path):
+    pd = pytest.importorskip("pandas")
+    try:
+        pd.get_option("mode.max_threads")
+    except Exception:  # pandas < 3.1: no option and no parallel read_csv
+        pytest.skip("this pandas has no parallel read_csv")
+    # Above pandas' 5 MB threshold for its parallel CSV reader, whose threads
+    # would otherwise fail under the worker's address-space limit.
+    path = tmp_path / "large.csv"
+    rows = "\n".join(f"{i},{i * 0.5},item_{i}" for i in range(400_000))
+    path.write_text("a,b,c\n" + rows + "\n")
+    assert path.stat().st_size > 5 * 1024 * 1024
+    with PythonREPLSession({}) as session:
+        output = session.execute(
+            "import pandas as pd\n"
+            f"frame = pd.read_csv({str(path)!r})\n"
+            "print(pd.get_option('mode.max_threads'), len(frame))"
+        )
+    assert output == "1 400000\n"
 
 
 def test_checkpoint_preserves_incomplete_dynamic_pydantic_models():

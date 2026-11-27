@@ -95,6 +95,24 @@ def _clear_worker_environment() -> None:
     os.environ.update(numerical_environment)
 
 
+def _cap_pandas_threads() -> None:
+    """Keep pandas' own thread pool to one thread, like the BLAS libraries above.
+
+    pandas' parallel `read_csv` starts a thread pool that no BLAS/OpenMP
+    variable controls. Under the worker's address-space limit thread creation
+    fails, so an ordinary `pd.read_csv` raises "can't start new thread".
+    `mode.max_threads` is pandas' switch for it; older pandas has no such
+    option and no parallel reader, so a missing option is fine. Imported before
+    RLIMIT_AS is applied, like NumPy.
+    """
+    try:
+        import pandas as pd
+    except ImportError:
+        return
+    with suppress(Exception):  # pandas.errors.OptionError on older versions
+        pd.set_option("mode.max_threads", 1)
+
+
 def _session_builtins() -> dict[str, Any]:
     """Return a detached builtin namespace for one REPL."""
     return dict(vars(builtins))
@@ -683,6 +701,7 @@ def _python_repl_worker(
     try:
         os.chdir(working_directory)
         _clear_worker_environment()
+        _cap_pandas_threads()
         namespace = _materialize_namespace(initial_data, namespace_factory)
         # NumPy loads the legacy RNG extension lazily. Map it before applying
         # RLIMIT_AS so snapshotting does not fail merely by importing it.
@@ -781,6 +800,7 @@ class _RestrictedPythonREPLTool(Tool):
         if hasattr(os, "geteuid") and os.geteuid() == 0:
             raise RuntimeError("Docker Python REPL must run as an unprivileged worker")
         _clear_worker_environment()
+        _cap_pandas_threads()
         np.random.get_state()  # noqa: NPY002 - preload before RLIMIT_AS
         apply_worker_resource_limits(self.address_space_bytes)
         data = json.loads(public_data)
