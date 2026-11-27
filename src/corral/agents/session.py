@@ -6,6 +6,7 @@ import asyncio
 import json
 import shutil
 import tempfile
+import threading
 from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -494,6 +495,33 @@ class AgentSession:
         ) and self.capabilities.native_workspace:
             return self.workspace
         return None
+
+    async def execute_denario_code(self, *, arguments: dict) -> dict:
+        """Run the SDK executor under a separate tool identity in the assigned mount."""
+        from corral.agents.denario.agent import DenarioCodeExecutor
+
+        workspace = self.native_tool_workspace
+        if workspace is None:
+            raise PermissionError("Denario code execution requires a native workspace")
+        cancel = threading.Event()
+        worker = asyncio.create_task(
+            asyncio.to_thread(
+                permissions.run_worker,
+                "tool",
+                (DenarioCodeExecutor, arguments),
+                workspace,
+                workspace_access="read_write",
+                share_workspace_outputs=True,
+                cancel=cancel,
+            )
+        )
+        try:
+            return (await asyncio.shield(worker))["content"]
+        except asyncio.CancelledError:
+            cancel.set()
+            with anyio.CancelScope(shield=True):
+                await asyncio.gather(worker, return_exceptions=True)
+            raise
 
     async def _capture_native_workspace(self) -> None:
         """Checkpoint direct SDK writes without scheduling them for replay."""

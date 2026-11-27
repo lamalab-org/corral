@@ -549,6 +549,43 @@ def _allow_workspace_group(descriptor: int, gid: int) -> None:
         )
 
 
+def public_worker_environment() -> dict[str, str]:
+    """Return the runtime settings shared with uncredentialed workers."""
+    return {
+        name: os.environ[name]
+        for name in (
+            "HOME",
+            "TMPDIR",
+            "XDG_CACHE_HOME",
+            "LANG",
+            "LC_ALL",
+            "LD_LIBRARY_PATH",
+            # Retain the launcher's GPU assignment across tool workers.
+            "CUDA_VISIBLE_DEVICES",
+            "CUDA_HOME",
+            "CUDA_PATH",
+            "NVIDIA_VISIBLE_DEVICES",
+            # Numeric libraries may be imported only after this boundary.
+            # Keep resource controls while stripping provider credentials.
+            "OPENBLAS_NUM_THREADS",
+            "OPENBLAS_DEFAULT_NUM_THREADS",
+            "OMP_NUM_THREADS",
+            "OMP_THREAD_LIMIT",
+            "MKL_NUM_THREADS",
+            "BLIS_NUM_THREADS",
+            "VECLIB_MAXIMUM_THREADS",
+            "NUMEXPR_NUM_THREADS",
+            "NUMEXPR_MAX_THREADS",
+            "CORRAL_REPL_ADDRESS_SPACE_BYTES",
+            "PATH",
+            "PYTHONPATH",
+            "REQUESTS_CA_BUNDLE",
+            "SSL_CERT_FILE",
+        )
+        if name in os.environ
+    }
+
+
 def drop_privileges(
     uid: int,
     gid: int,
@@ -577,36 +614,7 @@ def drop_privileges(
     if scratch is None:
         scratch = tempfile.mkdtemp(prefix=SCRATCH_PREFIX, dir=workspace)
     if not preserve_environment:
-        public_environment = {
-            name: os.environ[name]
-            for name in (
-                "LANG",
-                "LC_ALL",
-                "LD_LIBRARY_PATH",
-                # Retain the launcher's GPU assignment across tool workers.
-                "CUDA_VISIBLE_DEVICES",
-                "CUDA_HOME",
-                "CUDA_PATH",
-                "NVIDIA_VISIBLE_DEVICES",
-                # Numeric libraries may be imported only after this boundary.
-                # Keep resource controls while stripping provider credentials.
-                "OPENBLAS_NUM_THREADS",
-                "OPENBLAS_DEFAULT_NUM_THREADS",
-                "OMP_NUM_THREADS",
-                "OMP_THREAD_LIMIT",
-                "MKL_NUM_THREADS",
-                "BLIS_NUM_THREADS",
-                "VECLIB_MAXIMUM_THREADS",
-                "NUMEXPR_NUM_THREADS",
-                "NUMEXPR_MAX_THREADS",
-                "CORRAL_REPL_ADDRESS_SPACE_BYTES",
-                "PATH",
-                "PYTHONPATH",
-                "REQUESTS_CA_BUNDLE",
-                "SSL_CERT_FILE",
-            )
-            if name in os.environ
-        }
+        public_environment = public_worker_environment()
         os.environ.clear()
         os.environ.update(public_environment)
     os.environ.update(HOME=scratch, TMPDIR=scratch, XDG_CACHE_HOME=scratch + "/.cache")
@@ -648,6 +656,7 @@ def run_worker(
     cancel: threading.Event | None = None,
     max_response_bytes: int | None = None,
     workspace_access: str | None = None,
+    share_workspace_outputs: bool = False,
     resource_mounts: dict[str, tuple[str, str]] | None = None,
     service: Callable[[Any], Any] | None = None,
     service_workers: int = 16,
@@ -657,6 +666,8 @@ def run_worker(
     ``service``, when given, answers requests the worker sends with
     :func:`corral.runtime.service_channel.call` while it runs. It runs on a
     controller thread, so it can hold what the worker must never see.
+    Set `share_workspace_outputs` when a running agent needs direct access
+    to files written by this worker under its separate identity.
     """
     result, _ = run_worker_with_bulk(
         kind,
@@ -665,6 +676,7 @@ def run_worker(
         cancel=cancel,
         max_response_bytes=max_response_bytes,
         workspace_access=workspace_access,
+        share_workspace_outputs=share_workspace_outputs,
         resource_mounts=resource_mounts,
         service=service,
         service_workers=service_workers,
@@ -680,6 +692,7 @@ def run_worker_with_bulk(
     cancel: threading.Event | None = None,
     max_response_bytes: int | None = None,
     workspace_access: str | None = None,
+    share_workspace_outputs: bool = False,
     resource_mounts: dict[str, tuple[str, str]] | None = None,
     service: Callable[[Any], Any] | None = None,
     service_workers: int = 16,
@@ -714,9 +727,9 @@ def run_worker_with_bulk(
     finally:
         try:
             root = Path(workspace)
-            if root in _node_parents:
+            if root in _node_parents or (share_workspace_outputs and root in _groups):
                 # A tool may create mode-0600 outputs. Once it and its children
-                # have stopped, restore the main agent's access to node files.
+                # have stopped, restore the running agent's workspace access.
                 _allow_workspace_group(descriptor, _groups[root])
         finally:
             os.close(descriptor)

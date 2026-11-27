@@ -38,6 +38,7 @@ _METHODS = frozenset(
     {
         "execute",
         "execute_many",
+        "execute_denario_code",
         "record_message",
         "record_messages",
         "get_agent_state",
@@ -210,7 +211,7 @@ class RemoteSession:
             chunks.extend(data)
         return bytes(chunks)
 
-    def _sync_call(self, method: str, arguments: dict[str, Any]) -> Any:
+    def _request(self, method: str, arguments: dict[str, Any]) -> bytes:
         request = json.dumps(
             {
                 "token": self._token,
@@ -221,12 +222,37 @@ class RemoteSession:
         ).encode()
         if len(request) > _max_message():
             raise ValueError("session request is too large")
+        return struct.pack("!I", len(request)) + request
+
+    def _sync_call(self, method: str, arguments: dict[str, Any]) -> Any:
+        request = self._request(method, arguments)
         with socket.create_connection(self._endpoint) as stream:
-            stream.sendall(struct.pack("!I", len(request)) + request)
+            stream.sendall(request)
             length = struct.unpack("!I", self._read(stream, 4))[0]
             if length > _max_message():
                 raise RuntimeError("session response is too large")
             response = json.loads(self._read(stream, length))
+        return self._result(method, response)
+
+    async def execute_denario_code(self, *, arguments: dict) -> dict:
+        # A native block may still be running when the SDK run times out.
+        # Keep the socket cancellable so the agent can exit and the controller
+        # can reap the tool worker before releasing the workspace.
+        method = "execute_denario_code"
+        request = self._request(method, {"arguments": arguments})
+        reader, writer = await asyncio.open_connection(*self._endpoint)
+        try:
+            writer.write(request)
+            await writer.drain()
+            length = struct.unpack("!I", await reader.readexactly(4))[0]
+            if length > _max_message():
+                raise RuntimeError("session response is too large")
+            return self._result(method, json.loads(await reader.readexactly(length)))
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    def _result(self, method: str, response: dict) -> Any:
         if not response["ok"]:
             raise RuntimeError(response["error"])
         self._update(response["snapshot"])
@@ -271,6 +297,14 @@ async def run_agent(agent: Any, session: AgentSession) -> AgentOutcome:
     async def serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         task = asyncio.current_task()
         tasks.add(task)
+        try:
+            await reply(reader, writer)
+        finally:
+            writer.close()
+            await writer.wait_closed()
+            tasks.discard(task)
+
+    async def reply(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
             length = struct.unpack("!I", await reader.readexactly(4))[0]
             if length > _max_message():
@@ -354,21 +388,16 @@ async def run_agent(agent: Any, session: AgentSession) -> AgentOutcome:
             }
         except Exception as exc:
             response = {"ok": False, "error": str(exc)}
-        try:
-            data = json.dumps(response).encode()
-            if len(data) > _max_message():
-                detail = (
-                    f"session response is {len(data):,} bytes, over the "
-                    f"{_max_message():,} byte limit; raise "
-                    "$CORRAL_MAX_WORKER_RESPONSE_BYTES"
-                )
-                data = json.dumps({"ok": False, "error": detail}).encode()
-            writer.write(struct.pack("!I", len(data)) + data)
-            await writer.drain()
-        finally:
-            writer.close()
-            await writer.wait_closed()
-            tasks.discard(task)
+        data = json.dumps(response).encode()
+        if len(data) > _max_message():
+            detail = (
+                f"session response is {len(data):,} bytes, over the "
+                f"{_max_message():,} byte limit; raise "
+                "$CORRAL_MAX_WORKER_RESPONSE_BYTES"
+            )
+            data = json.dumps({"ok": False, "error": detail}).encode()
+        writer.write(struct.pack("!I", len(data)) + data)
+        await writer.drain()
 
     server = await asyncio.start_server(serve, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
@@ -398,10 +427,10 @@ async def run_agent(agent: Any, session: AgentSession) -> AgentOutcome:
         with anyio.CancelScope(shield=True):
             await asyncio.gather(worker, return_exceptions=True)
         server.close()
-        await server.wait_closed()
         for task in tuple(tasks):
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        await server.wait_closed()
         for selected in sessions.values():
             if selected is not session:
                 await anyio.to_thread.run_sync(selected.environment.shutdown_jobs)
