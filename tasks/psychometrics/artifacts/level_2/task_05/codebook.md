@@ -1,6 +1,6 @@
 # Codebook - panel delivery
 
-Tab-separated, one row per delivered record. Responses run from 1 (Disagree) to 5 (Agree). Every item was answered; there are no missing responses.
+Tab-separated, one row per delivered record. Responses are continuous and unbounded, centered around zero. Every item was answered; there are no missing responses.
 
 | item | text |
 |---|---|
@@ -25,4 +25,6 @@ Tab-separated, one row per delivered record. Responses run from 1 (Disagree) to 
 | `accuracy` | self-rated response accuracy, 0-100 |
 | `country` | collection country; all rows are US |
 
-Rows delivered: 12,965.
+Matching item values alone do not establish respondent identity. Assess repeated deliveries using all available evidence.
+
+Rows delivered: 13,050.

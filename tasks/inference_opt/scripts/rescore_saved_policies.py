@@ -157,7 +157,7 @@ def write_summary(args, jobs):
             writer.writerows(rows)
         temporary.replace(destination)
     replacements = {r["execution_id"]: r for r in rows if r["status"] == "completed"}
-    scores = list(csv.DictReader((REPO / "reports/inference_opt/trials.csv").open()))
+    scores = list(csv.DictReader((REPO / "reports/inference_opt/full/trials.csv").open()))
     by_run = collections.defaultdict(list)
     originals = {job["execution_id"]: job["original_score"] for job in jobs}
     for row in scores:

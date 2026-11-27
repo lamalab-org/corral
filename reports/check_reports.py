@@ -57,10 +57,12 @@ class Problems(list):
 
 def environments() -> list[Path]:
     return sorted(
-        p
-        for p in REPORTS_DIR.iterdir()
-        if p.is_dir() and p.name != "figures" and not p.name.startswith((".", "_"))
+        p for p in REPORTS_DIR.iterdir() if p.is_dir() and (p / "full").is_dir()
     )
+
+
+def location(env_dir: Path) -> str:
+    return f"reports/{env_dir.relative_to(REPORTS_DIR).as_posix()}"
 
 
 def read_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
@@ -84,12 +86,15 @@ def check_layout(env_dir: Path, problems: Problems, warnings: Problems) -> list[
     Only the reports and the two index files are required. Anything else, such
     as a README, notes or figures, is reported as a warning, not an error.
     """
-    where = f"reports/{env_dir.name}"
+    where = location(env_dir)
     names = {p.name for p in env_dir.iterdir()}
     for missing in sorted(ENV_FILES - names):
         problems.add(where, f"missing {missing}")
     for extra in sorted(names - ENV_FILES - {"README.md"}):
-        if not re.fullmatch(r"level_\d+", extra) or not (env_dir / extra).is_dir():
+        if (
+            not re.fullmatch(r"level_\d+|mini-v\d+", extra)
+            or not (env_dir / extra).is_dir()
+        ):
             warnings.add(where, f"'{extra}' is not part of the convention")
 
     reports = []
@@ -124,7 +129,7 @@ def check_layout(env_dir: Path, problems: Problems, warnings: Problems) -> list[
 
 def check_indexes(env_dir: Path, reports: list[Path], problems: Problems) -> None:
     """Check runs.csv and trials.csv against each other and the reports."""
-    where = f"reports/{env_dir.name}"
+    where = location(env_dir)
     run_fields, runs = read_csv(env_dir / "runs.csv")
     trial_fields, trials = read_csv(env_dir / "trials.csv")
     if run_fields != build_index.RUN_FIELDS:
@@ -150,11 +155,15 @@ def check_indexes(env_dir: Path, reports: list[Path], problems: Problems) -> Non
     seen: set[str] = set()
     overrides = {}
     session_overrides = {}
+    trial_sessions: dict[str, str] = {}
     for report in reports:
         rel = report.relative_to(env_dir).as_posix()
         ids = {r["execution_id"] for r in trials if r["report_file"] == rel}
-        session_override, report_overrides = build_index.langfuse_overrides(report, ids)
+        session_override, report_overrides, report_sessions = (
+            build_index.langfuse_overrides(report, ids)
+        )
         session_overrides[rel] = session_override
+        trial_sessions.update(report_sessions)
         overrides.update(report_overrides)
     for row in trials:
         execution_id = row["execution_id"]
@@ -162,8 +171,10 @@ def check_indexes(env_dir: Path, reports: list[Path], problems: Problems) -> Non
         if execution_id in seen:
             problems.add(row_where, "duplicate execution_id")
         seen.add(execution_id)
-        session = session_overrides.get(row["report_file"]) or build_index.session_id(
-            execution_id, row["run_id"]
+        session = (
+            trial_sessions.get(execution_id)
+            or session_overrides.get(row["report_file"])
+            or build_index.session_id(execution_id, row["run_id"])
         )
         trace = overrides.get(
             execution_id,
@@ -206,7 +217,9 @@ def check_indexes(env_dir: Path, reports: list[Path], problems: Problems) -> Non
         if rel not in runs_by_file or is_lfs_pointer(report):
             continue
         try:
-            run, run_trials = build_index.index_run(env_dir, report, env_dir.name)
+            run, run_trials = build_index.index_run(
+                env_dir, report, build_index.environment_name(env_dir)
+            )
         except Exception as error:
             problems.add(f"{where}/{rel}", f"cannot be indexed: {error}")
             continue
@@ -281,7 +294,7 @@ def check_hf(env_dirs: list[Path], problems: Problems) -> None:
         all_runs += runs
         all_trials += trials
         for level in sorted({r["level"] for r in trials}):
-            config = f"{env_dir.name}-level_{level}"
+            config = f"{build_index.environment_name(env_dir)}-level_{level}"
             expected = sum(r["level"] == level for r in trials)
             if full.get(config) != expected:
                 problems.add(
@@ -311,7 +324,7 @@ def check_hf(env_dirs: list[Path], problems: Problems) -> None:
     hf_runs = {(r["environment"], r["run_id"]): r for r in table(SUMMARY_REPO, "runs")}
     for env_dir in env_dirs:
         for run in read_csv(env_dir / "runs.csv")[1]:
-            hf = hf_runs.get((env_dir.name, run["run_id"]))
+            hf = hf_runs.get((build_index.environment_name(env_dir), run["run_id"]))
             if hf is None or hf["report_sha256"] != run["report_sha256"]:
                 problems.add(
                     SUMMARY_REPO,
@@ -344,19 +357,24 @@ def main() -> int:
     env_dirs = environments()
     if not env_dirs:
         problems.add("reports", "no environment folders found")
-    for env_dir in env_dirs:
+    # corral-mini runs in reports/<env>/mini-v<N>/ are checked like an environment.
+    folders = [
+        d for e in env_dirs for d in (e / "full", *sorted(e.glob("mini-v[0-9]*")))
+    ]
+    for env_dir in folders:
         reports = check_layout(env_dir, problems, warnings)
         if not (env_dir / "runs.csv").exists() or not (env_dir / "trials.csv").exists():
             continue
         check_indexes(env_dir, reports, problems)
         skipped = sum(is_lfs_pointer(r) for r in reports)
         sys.stdout.write(
-            f"{env_dir.name}: {len(reports)} reports checked"
+            f"{location(env_dir).removeprefix('reports/')}: "
+            f"{len(reports)} reports checked"
             + (f" ({skipped} Git LFS pointers not rebuilt)" if skipped else "")
             + "\n"
         )
     if args.hf and not problems:
-        check_hf(env_dirs, problems)
+        check_hf([e / "full" for e in env_dirs], problems)
         if not problems:
             sys.stdout.write("Hugging Face datasets match the reports\n")
 

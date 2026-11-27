@@ -254,7 +254,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
-    rows, candidates, details, history, summary = audit(ROOT / "reports/corral_md")
+    rows, candidates, details, history, summary = audit(ROOT / "reports/corral_md/full")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     for name, values in [("trials.csv", rows), ("rescore_candidates.csv", candidates)]:
         with (args.output_dir / name).open("w", newline="") as handle:

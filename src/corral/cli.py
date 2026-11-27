@@ -381,6 +381,8 @@ def _sandbox_profile(
     # whose Namespace predates the explicit sandbox options. Local execution
     # remains available only through an explicit `--sandbox local` selection.
     if getattr(args, "sandbox", "docker") == "local":
+        if getattr(args, "sandbox_guardrails", "on") != "on":
+            raise ValueError("--sandbox-guardrails off requires --sandbox docker")
         return orchestration.SandboxProfile.local()
     spec = orchestration.DockerSandboxSpec(
         image=getattr(args, "sandbox_image", None) or default_image,
@@ -389,6 +391,7 @@ def _sandbox_profile(
         pids_limit=getattr(args, "sandbox_pids_limit", 256),
         gpus=getattr(args, "sandbox_gpus", None),
         network=getattr(args, "sandbox_network", "bridge"),
+        guardrails=getattr(args, "sandbox_guardrails", "on"),
         private_directories=tuple(
             str(Path(path).expanduser().resolve())
             for path in getattr(args, "sandbox_private_directory", ())
@@ -627,6 +630,7 @@ async def run_benchmark(
                 args, "max_parallel_evaluations_by_environment", None
             ),
             enable_surrender=args.enable_surrender,
+            evaluation_awareness=getattr(args, "evaluation_awareness", "off"),
             evaluate=not args.no_evaluate,
             verbose=args.verbose,
             retry_policy=_retry_policy(args),
@@ -777,6 +781,7 @@ async def run_task(args: argparse.Namespace) -> int:
                     args.max_iterations, canonical_agent
                 ),
                 enable_surrender=args.enable_surrender,
+                evaluation_awareness=getattr(args, "evaluation_awareness", "off"),
             ),
         )
     finally:
@@ -841,6 +846,12 @@ def _add_agent_arguments(parser: argparse.ArgumentParser) -> None:
         help=(
             "Per-task trial budget; default: 100 for AI Scientist, 50 for other agents."
         ),
+    )
+    agent.add_argument(
+        "--evaluation-awareness",
+        choices=("on", "off"),
+        default="off",
+        help="Prepend an evaluation notice and the iteration limit to task prompts; default: off.",
     )
     agent.add_argument(
         "--enable-surrender",
@@ -924,13 +935,27 @@ def _add_benchmark_arguments(parser: argparse.ArgumentParser) -> None:
         default_commit_file=str(Path(".corral") / "benchmark-commits.sqlite3"),
     )
     execution.add_argument("--report")
-    execution.add_argument("--verbose", action="store_true")
+    execution.add_argument(
+        "--verbose",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Include agent messages and tool calls in the report "
+            "(default: on; --no-verbose turns it off)."
+        ),
+    )
     sandbox = parser.add_argument_group("sandbox")
     sandbox.add_argument(
         "--sandbox",
         choices=("docker", "local"),
         default="docker",
         help="Trial isolation mode; default: docker.",
+    )
+    sandbox.add_argument(
+        "--sandbox-guardrails",
+        choices=("on", "off"),
+        default="on",
+        help="Docker worker isolation and agent sandboxing; off grants container-wide access. Default: on.",
     )
     sandbox.add_argument(
         "--sandbox-image",

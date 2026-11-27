@@ -11,8 +11,7 @@ from pathlib import Path
 #: ``gen_l<level>_t<number>_<slug>.py``
 GENERATOR_NAME = re.compile(r"gen_l(?P<level>\d+)_t(?P<number>\d+)_(?P<slug>.+)\.py")
 
-#: Optional data-root override. this is useful if we install without the generated data.
-# we can also think about moving all data to HF
+#: Data-root override for installations without bundled artifacts.
 ROOT_VARIABLE = "CORRAL_PSYCHOMETRICS_ROOT"
 
 _GENERATORS = "generators"
@@ -68,6 +67,7 @@ class Task:
 
     @property
     def stem(self) -> str:
+        """Return the generator filename stem."""
         return f"gen_l{self.level}_t{self.number:02d}_{self.slug}"
 
     @property

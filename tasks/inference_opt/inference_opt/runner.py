@@ -162,6 +162,7 @@ def run_policy(
     time_limit_s: int | None = None,
     backends: dict[str, Backend] | None = None,
     save_private: Callable[[Path], str] | None = None,
+    before_execution: Callable[[], None] | None = None,
 ) -> dict[str, ModelRun]:
     """Run ``policy_dir`` on one split for each model, side by side, and grade it.
 
@@ -187,6 +188,10 @@ def run_policy(
     limit = int(
         time_limit_s or config.get("run_time_limit_s", DEFAULT_RUN_TIME_LIMIT_S)
     )
+    # Reserve scarce submission capacity only after the preflight reads succeed.
+    if before_execution is not None:
+        before_execution()
+
     def one(model: str) -> ModelRun:
         concurrency = student_concurrency(config, model)
         model_spec = str((config.get("model_specs") or {}).get(model, model))

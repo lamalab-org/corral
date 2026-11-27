@@ -1,20 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Level 2 Task 04 artifacts and scoring metadata.
-
-Four HSNS populations, each with its own structure, and three case samples
-drawn from some of them.
-
-    population_a   two correlated factors
-    population_b   two correlated factors plus a residual covariance on HSNS5, HSNS10
-    population_c   the same model as population_a, sampled independently
-    population_d   two factors, stronger loadings, phi 0.72, HSNS9 cross-loads
-
-The agent describes each population with a model and places each case. a and c
-are one population under two identifiers, so a case from either could have come
-from both. b and d each differ from a by one detail, which the submitted model
-has to carry: every model is refitted on its population's reference sample and
-has to fit as well as the generating model does.
-"""
+"""Generate HSNS reference populations and case-classification samples."""
 
 from __future__ import annotations
 
@@ -24,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from corral_psychometrics.scoring_policy import POLICY_NAME, comparative_rules
 from corral_psychometrics import paths
 from corral_psychometrics.generators import common as C
 
@@ -57,7 +43,8 @@ CASE_SOURCES = ["population_b", "population_c", "population_d"]
 # when the case's mean Gaussian log-likelihood under it is within this margin of
 # the best-fitting population's. The agent is not told it.
 COMPATIBILITY_MARGIN = 0.04
-RESIDUAL_PAIR = ("HSNS5", "HSNS10")
+METHOD_ITEMS = ("HSNS2", "HSNS5", "HSNS7", "HSNS10")
+CONTROL_PAGE_ITEMS = ("HSNS1", "HSNS3", "HSNS6", "HSNS8")
 
 PROMPT = (
     "You have large HSNS response samples from four reference populations, `population_a` to "
@@ -86,7 +73,8 @@ identifiers, in any order.
 """
 
 
-def ordinal_block(rng, n, factors, phi, loadings, residual_pair=None, residual=0.0):
+def continuous_block(rng, n, factors, phi, loadings, method_items=None, method_variance=0.0):
+    """Draw continuous items from correlated traits and an optional method factor."""
     eta = rng.multivariate_normal(np.zeros(len(factors)), phi, n)
     index = {name: i for i, name in enumerate(factors)}
     shared = rng.normal(size=n)
@@ -94,15 +82,16 @@ def ordinal_block(rng, n, factors, phi, loadings, residual_pair=None, residual=0
     for item in ITEMS:
         score = sum(loading * eta[:, index[factor]] for factor, loading in loadings[item])
         explained = sum(loading**2 for _, loading in loadings[item])
-        if residual_pair and item in residual_pair:
-            score = score + np.sqrt(residual) * shared
-            explained += residual
+        if method_items and item in method_items:
+            score = score + np.sqrt(method_variance) * shared
+            explained += method_variance
         noise = rng.normal(0, np.sqrt(max(1 - explained, 0.08)), n)
-        out[item] = C.categorize(score + noise, C.THRESHOLDS[item])
+        out[item] = C.continuous_response(score + noise, C.INTERCEPTS[item])
     return pd.DataFrame(out)[ITEMS]
 
 
 def two_factor(rng, n, loading_scale=1.0, phi=0.35, cross_loading=None):
+    """Draw a two-trait population with optional loading differences."""
     loading = {
         item: [(factor, value * loading_scale)]
         for item, (factor, value) in {
@@ -112,25 +101,26 @@ def two_factor(rng, n, loading_scale=1.0, phi=0.35, cross_loading=None):
     if cross_loading:
         item, factor, value = cross_loading
         loading[item].append((factor, value))
-    return ordinal_block(rng, n, ["F1", "F2"], [[1, phi], [phi, 1]], loading)
+    return continuous_block(rng, n, ["F1", "F2"], [[1, phi], [phi, 1]], loading)
 
 
-def residual_dependence(rng, n):
-    return ordinal_block(
+def method_dependence(rng, n):
+    """Draw the population with a shared matrix-page method effect."""
+    return continuous_block(
         rng,
         n,
         ["F1", "F2"],
         [[1, 0.35], [0.35, 1]],
         {item: [(FACTOR_OF[item], value)] for item, value in LOADINGS.items()},
-        residual_pair=RESIDUAL_PAIR,
-        residual=0.70,
+        method_items=METHOD_ITEMS,
+        method_variance=0.22,
     )
 
 
 # a and c share one model; the rest are separable.
 POPULATIONS = {
     "population_a": two_factor,
-    "population_b": residual_dependence,
+    "population_b": method_dependence,
     "population_c": two_factor,
     "population_d": lambda rng, n: two_factor(
         rng, n, loading_scale=1.10, phi=0.72, cross_loading=("HSNS9", "F1", 0.35)
@@ -138,7 +128,7 @@ POPULATIONS = {
 }
 STRUCTURES = {
     "population_a": "two correlated factors, phi .35",
-    "population_b": f"population_a plus residual covariance .70 on {RESIDUAL_PAIR}",
+    "population_b": f"population_a plus a shared presentation factor with variance .22 on {METHOD_ITEMS}",
     "population_c": "the same model as population_a, sampled independently",
     "population_d": "two factors, loadings x1.10, phi .72, HSNS9 cross-loads .35 on F1",
 }
@@ -148,7 +138,7 @@ TWO_FACTORS = f"F1 =~ {'+'.join(F1)}\nF2 =~ {'+'.join(F2)}"
 # submitted model is held to on that population's reference sample.
 MODEL_SYNTAX = {
     "population_a": TWO_FACTORS,
-    "population_b": f"{TWO_FACTORS}\n{RESIDUAL_PAIR[0]} ~~ {RESIDUAL_PAIR[1]}",
+    "population_b": TWO_FACTORS + "\n" + C.method_syntax("Format", METHOD_ITEMS, ["F1", "F2"]),
     "population_c": TWO_FACTORS,
     "population_d": f"F1 =~ {'+'.join(F1)}+HSNS9\nF2 =~ {'+'.join(F2)}",
 }
@@ -157,16 +147,12 @@ MODEL_SYNTAX = {
 ALTERNATIVE_SYNTAX = {
     "one factor": f"G =~ {'+'.join(ITEMS)}",
     "two factors": TWO_FACTORS,
-    "two factors + residual": MODEL_SYNTAX["population_b"],
+    "two factors + method": MODEL_SYNTAX["population_b"],
     "two factors + cross-loading": MODEL_SYNTAX["population_d"],
 }
 # The same margins Level 1 holds a model to, without the population-matrix term.
-TIER_2 = [
-    {"key": "CFI", "direction": "higher", "eps": 0.005},
-    {"key": "RMSEA", "direction": "lower", "eps": 0.005},
-    {"key": "SRMR", "direction": "lower", "eps": 0.005},
-    {"key": "BIC", "direction": "lower", "eps": 10.0},
-]
+TIER_2 = comparative_rules()
+
 MAX_FACTORS = 3
 
 
@@ -191,6 +177,7 @@ def model_verdict(spec, frame, floor):
 
 
 def reference_models(references):
+    """Estimate the Gaussian mean and covariance of each reference sample."""
     return {
         name: (
             frame[ITEMS].values.astype(float).mean(axis=0),
@@ -201,6 +188,7 @@ def reference_models(references):
 
 
 def log_likelihood(case, models):
+    """Compute mean Gaussian log-likelihood under a reference population."""
     from scipy.stats import multivariate_normal
 
     values = case[ITEMS].values.astype(float)
@@ -213,6 +201,7 @@ def log_likelihood(case, models):
 
 
 def compatible(case, models):
+    """Find reference populations within the likelihood compatibility margin."""
     scores = log_likelihood(case, models)
     best = max(scores.values())
     return sorted(name for name, value in scores.items() if best - value <= COMPATIBILITY_MARGIN)
@@ -224,21 +213,31 @@ def same_model(source):
 
 
 def build_references(rng):
+    """Draw the labeled reference samples."""
     return {name: recipe(rng, N_REFERENCE) for name, recipe in POPULATIONS.items()}
 
 
 def build_cases(rng):
+    """Draw case samples from the configured populations."""
     return {
         f"case_{i}": POPULATIONS[source](rng, CASE_SIZE) for i, source in enumerate(CASE_SOURCES, 1)
     }
 
 
 def write_codebook(path):
+    """Write the public variable and response-format descriptions."""
     path.write_text(
         "# Codebook - anonymised HSNS population comparison\n\n"
-        "Every file is tab-separated. Responses run from 1 (Disagree) to 5 (Agree); all responses are complete.\n\n"
+        "Every file is tab-separated. Responses are continuous and unbounded, centered around zero; all responses are complete.\n\n"
         "The reference files hold large samples from four populations, named only by identifier. How they differ is not supplied. `cases.csv` holds three case samples of "
         f"{CASE_SIZE} respondents each, identified by `case_id`; each case comes from one of the four populations.\n\n"
+        "Items "
+        + ", ".join(METHOD_ITEMS)
+        + " were presented together on one matrix page; "
+        + ", ".join(CONTROL_PAGE_ITEMS)
+        + " shared a separate matrix page. "
+        "Other items appeared individually. This format was used in every population; "
+        "whether it produces a shared response influence must be assessed from the data.\n\n"
         "| item | text |\n|---|---|\n"
         + "\n".join(f"| `{item}` | {C.ITEM_TEXT[item]} |" for item in ITEMS)
         + "\n"
@@ -246,6 +245,7 @@ def write_codebook(path):
 
 
 def build_task_json(shas):
+    """Build the task definition and private scoring configuration."""
     return [
         {
             "id": TASK_ID,
@@ -257,7 +257,6 @@ def build_task_json(shas):
             "description": PROMPT,
             "submission_format": SUBMISSION_FORMAT,
             "initial_input": {
-                # Exactly the files copied into the agent's workspace.
                 "public_inputs": ["cases.csv", "codebook.md"]
                 + [f"{name}.csv" for name in POPULATIONS],
                 "reference_datasets": {name: f"{name}.csv" for name in POPULATIONS},
@@ -269,6 +268,7 @@ def build_task_json(shas):
             "scoring_function": "score_population_classification",
             "scoring_params": {
                 "task_type": "population_classification",
+                "model_quality_policy": POLICY_NAME,
                 "data_dir": TASK.artifacts_relpath,
                 "truth_path": TASK.truth_relpath,
                 "items": ITEMS,
@@ -284,6 +284,7 @@ def build_task_json(shas):
 
 
 def candidate_submissions():
+    """Return the reference answer and competing analyses for scoring checks."""
     expected = json.loads(TASK.truth.read_text())["scored"]["classifications"]
     overlapping = next(k for k, value in expected.items() if len(value) > 1)
     correct = {"models": dict(MODEL_SYNTAX), "classifications": expected}
@@ -307,7 +308,7 @@ def candidate_submissions():
             **correct,
             "models": {name: TWO_FACTORS for name in POPULATIONS},
         },
-        "misses the residual covariance": {
+        "omits the method factor": {
             **correct,
             "models": {**MODEL_SYNTAX, "population_b": TWO_FACTORS},
         },
@@ -320,6 +321,7 @@ def candidate_submissions():
 
 
 def verify(references, cases, expected):
+    """Check that the data support the intended scientific conclusions."""
     models = reference_models(references)
     rng = np.random.default_rng(SEED + 7717)
     trials = 25
@@ -399,6 +401,7 @@ def verify(references, cases, expected):
 
 
 def naive(references, cases, expected):
+    """Check that the specified shortcut leads to an incorrect conclusion."""
     means = {
         name: frame[ITEMS].values.astype(float).mean(axis=0) for name, frame in references.items()
     }
@@ -426,6 +429,7 @@ def naive(references, cases, expected):
 
 
 def main():
+    """Generate task files or run the requested validation mode."""
     action = C.mode()
     rng = np.random.default_rng(SEED)
     references = build_references(rng)

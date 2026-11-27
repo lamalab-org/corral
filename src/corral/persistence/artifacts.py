@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import os
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -13,6 +14,23 @@ from typing import Protocol, runtime_checkable
 from corral.core.workspace import blob_ref_for_sha256, sha256_from_blob_ref
 
 _COPY_CHUNK_SIZE = 1024 * 1024
+
+
+def iter_blob_refs(value):
+    """Yield content addresses nested in a portable JSON checkpoint."""
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            if (
+                key == "blob_ref"
+                and isinstance(child, str)
+                and child.startswith("sha256:")
+            ):
+                yield child
+            else:
+                yield from iter_blob_refs(child)
+    elif isinstance(value, tuple | list):
+        for child in value:
+            yield from iter_blob_refs(child)
 
 
 class ArtifactStoreError(RuntimeError):

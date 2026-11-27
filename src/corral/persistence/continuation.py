@@ -15,9 +15,10 @@ from corral.core.actors import ActorRef
 from corral.core.commit import CommitRequest
 from corral.core.events import ExecutionForked
 from corral.core.tool_catalog import state_tool_policy
-from corral.persistence.artifacts import LocalArtifactStore
+from corral.persistence.artifacts import LocalArtifactStore, iter_blob_refs
 from corral.persistence.base import CommitConflictError
 from corral.persistence.sqlite import SQLiteCommitStore
+from corral.runtime.evaluation_awareness import awareness_metadata
 
 if TYPE_CHECKING:
     from corral.orchestration.models import ContinuationSource, RunTaskInput
@@ -112,22 +113,6 @@ async def read_checkpoint(source: ContinuationSource) -> ExecutionForked:
     )
 
 
-def _blob_refs(value):
-    if isinstance(value, Mapping):
-        for key, child in value.items():
-            if (
-                key == "blob_ref"
-                and isinstance(child, str)
-                and child.startswith("sha256:")
-            ):
-                yield child
-            else:
-                yield from _blob_refs(child)
-    elif isinstance(value, tuple | list):
-        for child in value:
-            yield from _blob_refs(child)
-
-
 def validate_destination(request: RunTaskInput, store_path: Path | None = None) -> None:
     """Reject reuse of the parent's identity before a destination is opened."""
     source = request.continuation
@@ -205,6 +190,7 @@ async def import_checkpoint(
             model["reasoning_effort"] = request.agent_runtime.reasoning_effort
     scaffold = {
         "sandbox": request.sandbox.mode,
+        **awareness_metadata(request.evaluation_awareness, request.max_iterations),
         **(
             {"max_iterations": request.max_iterations}
             if request.max_iterations is not None
@@ -216,6 +202,7 @@ async def import_checkpoint(
         scaffold.update(
             sandbox_image_digest=docker.image_digest,
             sandbox_network=docker.network,
+            sandbox_guardrails=docker.guardrails,
             sandbox_resources={
                 "cpus": docker.cpus,
                 "memory": docker.memory,
@@ -231,7 +218,7 @@ async def import_checkpoint(
         }
     )
     root = Path(event.source_trial) / "artifacts"
-    refs = set(_blob_refs(event.source.model_dump(mode="python")))
+    refs = set(iter_blob_refs(event.source.model_dump(mode="python")))
     if refs:
         if not root.is_dir():
             raise FileNotFoundError(f"source artifacts are missing: {root}")

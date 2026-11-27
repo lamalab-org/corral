@@ -343,7 +343,7 @@ class QualitativeAnalysisEnvironment(Environment):
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self.shared_inventory = bool(kwargs.pop("shared_inventory", False))
+        self.shared_inventory = bool(kwargs.pop("shared_inventory", True))
         adapters = dict(kwargs.pop("resource_adapters", {}) or {})
         adapters.setdefault("wetlab", WetlabResourceAdapter())
         super().__init__(*args, resource_adapters=adapters, **kwargs)
@@ -521,16 +521,21 @@ class QualitativeAnalysisEnvironment(Environment):
             raise TypeError("WetlabState is not configured")
         return WetlabState.from_dict(raw_wetlab)
 
+    def capture_environment(self, environment: Mapping[str, Any]) -> Mapping[str, Any]:
+        captured = dict(super().capture_environment(environment))
+        resources = dict(captured.get("resources", {}))
+        if self.shared_inventory and self.workspace_path and "wetlab" in resources:
+            # Include branch consumption in main-session submission/checkpoints.
+            resources["wetlab"] = self._shared_store().read()
+            captured["resources"] = resources
+        return captured
+
     def get_task_output(self, state: ExecutionState) -> TaskOutput | None:
         """Publish the answer and current inventory for chained task execution."""
         output = super().get_task_output(state)
         if output is None:
             return None
-        wetlab_state = (
-            WetlabState.from_dict(self._shared_store().read())
-            if self.shared_inventory
-            else self._wetlab_from_state(state)
-        )
+        wetlab_state = self._wetlab_from_state(state)
         return TaskOutput(
             output=output.output,
             metadata={**dict(output.metadata), "wetlab": wetlab_state.to_dict()},
@@ -541,7 +546,7 @@ def create_qualysis_environments(
     level: int = 2,
     subtask: bool = False,
     work_dir: str = "",
-    shared_inventory: bool = False,
+    shared_inventory: bool = True,
 ) -> dict[str, Environment]:
     """Create WetLab environments with optional per-execution scratch workspaces."""
     started = perf_counter()

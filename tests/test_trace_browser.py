@@ -69,9 +69,14 @@ def test_reads_only_requested_trial_and_preserves_saved_fields(
         browser.read_trial(path, "task", 8)
 
 
-def write_index(root, report_file="level_1/react__model/report.json.gz", agent="react"):
-    env = root / "environment"
-    env.mkdir()
+def write_index(
+    root,
+    report_file="level_1/react__model/report.json.gz",
+    agent="react",
+    collection="full",
+):
+    env = root / "environment" / collection
+    env.mkdir(parents=True)
     row = {
         "environment": "environment",
         "level": "1",
@@ -94,6 +99,15 @@ def write_index(root, report_file="level_1/react__model/report.json.gz", agent="
     return env / report_file
 
 
+def test_browser_keeps_full_and_mini_collections_separate(tmp_path):
+    write_index(tmp_path, agent="react")
+    write_index(tmp_path, agent="codex", collection="mini-v2")
+    full, _ = browser.load_index(tmp_path)
+    mini, _ = browser.load_index(tmp_path, "mini-v2")
+    assert [t["agent"] for t in full] == ["react"]
+    assert [t["agent"] for t in mini] == ["codex"]
+
+
 def test_index_preserves_unscored_outcomes_and_reports_lfs(tmp_path):
     path = write_index(tmp_path)
     path.parent.mkdir(parents=True)
@@ -108,15 +122,15 @@ def test_index_preserves_unscored_outcomes_and_reports_lfs(tmp_path):
 
 
 def test_index_rejects_paths_outside_reports(tmp_path):
-    write_index(tmp_path, "../../outside.json")
+    write_index(tmp_path, "../../../outside.json")
     with pytest.raises(ValueError, match="escapes reports directory"):
         browser.load_index(tmp_path)
 
 
 def test_index_skips_lfs_indexes_and_keeps_available_environments(tmp_path, capsys):
     write_index(tmp_path)
-    missing = tmp_path / "missing"
-    missing.mkdir()
+    missing = tmp_path / "missing/full"
+    missing.mkdir(parents=True)
     index = missing / "trials.csv"
     pointer = browser.LFS_POINTER + b"\noid sha256:test\nsize 10\n"
     index.write_bytes(pointer)
@@ -137,8 +151,8 @@ def test_index_skips_lfs_indexes_and_keeps_available_environments(tmp_path, caps
 @pytest.mark.parametrize("contents", ["", "task_id,trial\ntask,0\n"])
 def test_index_skips_incomplete_headers(tmp_path, capsys, contents):
     write_index(tmp_path)
-    invalid = tmp_path / "invalid"
-    invalid.mkdir()
+    invalid = tmp_path / "invalid/full"
+    invalid.mkdir(parents=True)
     index = invalid / "trials.csv"
     index.write_text(contents)
 
@@ -155,7 +169,7 @@ def test_startup_with_only_lfs_indexes_gives_recovery_instructions(
     tmp_path, capsys, monkeypatch
 ):
     write_index(tmp_path)
-    (tmp_path / "environment/trials.csv").write_bytes(
+    (tmp_path / "environment/full/trials.csv").write_bytes(
         browser.LFS_POINTER + b"\noid sha256:test\nsize 10\n"
     )
     monkeypatch.setattr(

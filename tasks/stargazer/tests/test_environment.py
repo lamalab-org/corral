@@ -168,7 +168,29 @@ def test_original_level_one_is_available_only_by_explicit_selector(tmp_path):
         row["task_id"]
         for row in manifest["historical_selections"]["level_1_original"]["tasks"]
     }
-    assert set(original) & set(current) == {"seed15_diff5", "seed21_diff5"}
+    v3 = create_environments(
+        selector_path=DEFAULT_DATA_ROOT / "selectors/level_1_v3.json",
+        work_dir=tmp_path / "v3",
+        development_mode=True,
+    )
+    assert set(v3) == {
+        row["task_id"]
+        for row in manifest["historical_selections"]["level_1_v3"]["tasks"]
+    }
+    assert set(original).isdisjoint(current)
+    assert set(original) & set(v3) == {"seed15_diff5", "seed21_diff5"}
+    assert set(v3) - set(current) == {
+        "seed15_diff5",
+        "seed21_diff5",
+        "seed29_diff3",
+        "seed3_diff4",
+    }
+    assert set(current) - set(v3) == {
+        "seed111_diff3",
+        "seed630238_diff4",
+        "seed610696_diff5",
+        "seed611761_diff5",
+    }
     assert Counter(
         len(env.current_task.scoring_inputs["benchmark_task"].truth_planets)
         for env in original.values()
@@ -181,7 +203,7 @@ def test_original_level_one_is_available_only_by_explicit_selector(tmp_path):
         for level in manifest["levels"].values()
         for row in level["tasks"]
     }
-    assert bundled_ids == official_ids | set(original)
+    assert bundled_ids == official_ids | set(original) | set(v3)
     assert manifest["inventory"] == {
         "synthetic_tasks": len(bundled_ids),
         "official_synthetic_tasks": len(official_ids),
@@ -210,10 +232,19 @@ def test_selected_rv_only_records_keep_observations_and_truth(tmp_path):
         },
     }
     for level, expected in rv_only_ids.items():
+        if level == 1:
+            history = manifest["historical_selections"]["level_1_v3"]
+            selector = DEFAULT_DATA_ROOT / history["selector"]
+            rows = history["tasks"]
+        else:
+            selector = None
+            rows = manifest["levels"][str(level)]["tasks"]
         environments = create_environments(
-            development_mode=True, level=level, work_dir=tmp_path / str(level)
+            development_mode=True,
+            level=level,
+            selector_path=selector,
+            work_dir=tmp_path / str(level),
         )
-        rows = manifest["levels"][str(level)]["tasks"]
         assert {row["task_id"] for row in rows} == set(environments)
         assert expected <= set(environments)
         for task_id in expected:
@@ -420,7 +451,7 @@ def test_official_execution_requires_worker(tmp_path):
 
     if permissions.enabled():
         pytest.skip("already restricted")
-    environment = create_environments(work_dir=tmp_path)["seed15_diff5"]
+    environment = create_environments(work_dir=tmp_path)["seed611761_diff5"]
     with pytest.raises(RuntimeError, match="restricted Docker"):
         environment.initial_event(execution_id="unsafe")
 
@@ -540,7 +571,7 @@ async def test_arms_reject_cross_setting_resume(tmp_path):
             work_dir=tmp_path / str(assisted),
             development_mode=True,
             analysis_assistance=assisted,
-        )["seed15_diff5"]
+        )["seed611761_diff5"]
         for assisted in (False, True)
     ]
     assert (

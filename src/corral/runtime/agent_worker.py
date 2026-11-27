@@ -50,6 +50,9 @@ _METHODS = frozenset(
         "inspect_subagent",
         "import_subagent_context",
         "fork_branch",
+        "checkpoint_environment",
+        "checkpoint_branch",
+        "restore_branch_state",
         "promote_artifacts",
         "shutdown_jobs",
     }
@@ -76,7 +79,8 @@ _ARGUMENTS = {
 
 
 def _json(value: Any) -> Any:
-    return TypeAdapter(type(value)).dump_python(value, mode="json")
+    # Immutable projection containers are list/dict subclasses, not Pydantic schemas.
+    return TypeAdapter(Any).dump_python(value, mode="json")
 
 
 def _snapshot(session: AgentSession) -> dict[str, Any]:
@@ -287,6 +291,8 @@ async def run_agent(agent: Any, session: AgentSession) -> AgentOutcome:
     handle = secrets.token_hex(16)
     sessions = {handle: session}
     tasks: set[asyncio.Task[Any]] = set()
+    # References are capabilities: workers must not restore a JSON file they
+    # authored as if it were a trusted snapshot of hidden environment state.
 
     async def serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         task = asyncio.current_task()
@@ -318,6 +324,15 @@ async def run_agent(agent: Any, session: AgentSession) -> AgentOutcome:
                         "node workspaces must belong to the calling agent"
                     )
                 arguments["workspace_parent"] = workspace
+            elif method == "restore_branch_state":
+                checkpoint = arguments.get("checkpoint", {})
+                checkpoint_refs = session.state.runtime.metadata.get(
+                    "branch_checkpoints", ()
+                )
+                if checkpoint.get("blob_ref") not in checkpoint_refs:
+                    raise PermissionError(
+                        "branch restoration requires an issued checkpoint"
+                    )
             elif method == "promote_artifacts":
                 reference = arguments.get("source_workspace")
                 prefix = "corral-branch:"

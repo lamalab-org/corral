@@ -110,13 +110,6 @@ def _spectra_prompt(env: Environment, state: ExecutionState) -> str:
         dep_prompt = env.group_tasks[ref.task_id].description
         prompt += f"For '{dep_prompt}' ({ref.task_id}), the earlier result was: {resolved[input_name]}\n"
 
-    # Display initial input data
-    if task.initial_input:
-        prompt += "\nHere are the inputs I have:\n"
-        for key, value in task.initial_input.items():
-            if key != "work_dir":
-                prompt += f"- {key}: {value}\n"
-
     event(
         "DEBUG",
         "environment.prompt_generated",

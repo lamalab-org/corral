@@ -130,6 +130,7 @@ SCRATCH_PREFIX = ".corral-runtime-"
 NODE_WORKSPACE_DIR = ".corral-nodes"
 RESOURCE_WORKSPACE_DIR = "resources"
 _enabled = False
+_guardrails_disabled = False
 _identities = itertools.count(20000)
 _groups: dict[Path, int] = {}
 _node_parents: dict[Path, Path] = {}
@@ -464,9 +465,14 @@ def enabled() -> bool:
     return _enabled
 
 
-def configure(checkpoints: Path) -> None:
-    """Enable confinement in the trusted, container-only entry point."""
-    global _enabled, _root  # noqa: PLW0603 - one trusted policy per trial process
+def guardrails_disabled() -> bool:
+    """Whether the trusted Docker bootstrap selected the unconfined ablation."""
+    return _guardrails_disabled
+
+
+def configure(checkpoints: Path, *, guardrails: bool = True) -> None:
+    """Select confinement in the trusted, container-only entry point."""
+    global _enabled, _root, _guardrails_disabled  # noqa: PLW0603 - one trusted policy per trial process
     if sys.platform != "linux" or os.geteuid() != 0:
         raise RuntimeError(
             "Docker permission enforcement requires a root Linux controller"
@@ -484,6 +490,12 @@ def configure(checkpoints: Path) -> None:
         raise RuntimeError(
             "Docker image has not been prepared for Unix worker permissions"
         )
+    # Runtime policy comes from this launch, never a recovered ledger's scaffold.
+    # Keep image validation above active for both modes.
+    _guardrails_disabled = not guardrails
+    if not guardrails:
+        _enabled = False
+        return
     # /tmp and shared memory otherwise provide writable paths outside workspace.
     for private in (Path("/tmp"), Path("/dev/shm")):
         os.chown(private, 0, 0)

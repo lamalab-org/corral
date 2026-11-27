@@ -1,3 +1,5 @@
+"""Validate data-root resolution, artifact publication, and workspace isolation."""
+
 import importlib.util
 import json
 import shutil

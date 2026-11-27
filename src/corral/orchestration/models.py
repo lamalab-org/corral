@@ -9,7 +9,7 @@ from enum import Enum
 from pathlib import PurePosixPath
 from typing import Any
 
-RUNTIME_PROTOCOL_VERSION = "5"
+RUNTIME_PROTOCOL_VERSION = "6"
 
 
 class SandboxMode(str, Enum):
@@ -60,9 +60,13 @@ class DockerSandboxSpec:
     runtime_protocol_version: str = RUNTIME_PROTOCOL_VERSION
     # Read-only controller inputs, mounted outside every worker filesystem.
     private_directories: tuple[str, ...] = ()
+    # Disable both worker confinement and native SDK sandboxing for ablations.
+    guardrails: str = "on"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "retention", SandboxRetention(self.retention).value)
+        if self.guardrails not in {"on", "off"}:
+            raise ValueError("Docker sandbox guardrails must be 'on' or 'off'")
         if not self.image.strip():
             raise ValueError("Docker sandbox image cannot be empty")
         if (
@@ -272,8 +276,11 @@ class RunTaskInput:
     agent_runtime: AgentRuntimeDefinition | None = None
     environment_runtime: EnvironmentRuntimeDefinition | None = None
     continuation: ContinuationSource | None = None
+    evaluation_awareness: str = "off"
 
     def __post_init__(self) -> None:
+        if self.evaluation_awareness not in ("on", "off"):
+            raise ValueError("evaluation_awareness must be 'on' or 'off'")
         if not self.execution_id:
             raise ValueError("execution_id cannot be empty")
         if self.trial_index < 0:
@@ -362,8 +369,11 @@ class BenchmarkInput:
         default_factory=dict
     )
     continuation_by_task: dict[str, ContinuationSource] = field(default_factory=dict)
+    evaluation_awareness: str = "off"
 
     def __post_init__(self) -> None:
+        if self.evaluation_awareness not in ("on", "off"):
+            raise ValueError("evaluation_awareness must be 'on' or 'off'")
         if not self.benchmark_run_id:
             raise ValueError("benchmark_run_id cannot be empty")
         if not self.task_ids:

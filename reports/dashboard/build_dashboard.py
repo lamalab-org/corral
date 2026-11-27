@@ -1,11 +1,13 @@
 """Build a standalone HTML dashboard of the benchmark reports.
 
-Reads every ``<reports>/<environment>/trials.csv`` (AFM is left out by
-default; ``<reports>`` is this repository's ``reports/`` unless ``--reports``
+Reads full-run ``<reports>/<environment>/full/trials.csv`` (``<reports>`` is this
+repository's ``reports/`` unless ``--reports``
 names another folder, such as one filled by ``fetch_trials.py``) and writes one self-contained page with the trial data embedded: leaderboard,
 pass@k and pass^k curves, consistency, cost, per-level heatmap, native agent
 vs ReAct, and passing vs failing trials. The page loads d3 from a CDN; nothing
 else needs a network.
+
+Mini subset collections are never included.
 
 The page code is the same as the claude.ai dashboard's: ``page.html``,
 ``calcs.js`` and ``charts.js``, run through ``dash_shim.js``, which stands in
@@ -66,17 +68,22 @@ TRIAL_COLUMNS = [
 
 
 def read_trials(reports_dir: Path, exclude: set[str]) -> list[list]:
-    paths = sorted(reports_dir.glob("*/trials.csv"))
+    paths = sorted(reports_dir.glob("*/full/trials.csv"))
     if not paths:
         sys.exit(
-            f"No <environment>/trials.csv under {reports_dir}; run fetch_trials.py first"
+            f"No <environment>/full/trials.csv under {reports_dir}; run fetch_trials.py first"
         )
     rows = []
     for path in paths:
-        if path.parent.name in exclude:
+        if path.parent.parent.name in exclude:
             continue
         with path.open(newline="", encoding="utf-8") as f:
             for r in csv.DictReader(f):
+                if "-mini-" in r.get("run_id", ""):
+                    raise ValueError(
+                        f"{path} contains mini runs; the full-run dashboard needs "
+                        "full-benchmark trials in <environment>/full/trials.csv"
+                    )
                 key = (r["agent"], r["model"])
                 rows.append(
                     [
@@ -167,13 +174,13 @@ def main() -> None:
         "--reports",
         type=Path,
         default=REPORTS_DIR,
-        help="folder with <environment>/trials.csv (default: reports/)",
+        help="folder with <environment>/full/trials.csv (default: reports/)",
     )
     parser.add_argument(
         "--exclude",
         nargs="*",
-        default=["afm"],
-        help="environments to leave out (default: afm)",
+        default=[],
+        help="environments to leave out (default: include all)",
     )
     args = parser.parse_args()
     html = build(args.reports, set(args.exclude))

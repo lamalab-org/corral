@@ -45,3 +45,16 @@ def test_transactions_share_finite_inventory_and_ignore_failed_calls(tmp_path) -
     store.path.unlink()
     with pytest.raises(RuntimeError, match="refusing to replenish"):
         store.read()
+
+
+def test_main_and_cloned_branches_resolve_to_one_inventory(tmp_path) -> None:
+    from wetlab.shared_inventory import inventory_path
+
+    from corral.runtime.permissions import NODE_WORKSPACE_DIR
+
+    trial = tmp_path / "trial"
+    main = inventory_path(str(trial))
+    assert inventory_path(str(trial / NODE_WORKSPACE_DIR / "first")) == main
+    assert inventory_path(str(trial / NODE_WORKSPACE_DIR / "clone")) == main
+    assert inventory_path(str(tmp_path / "other-trial")) != main
+    assert not main.is_relative_to(trial)

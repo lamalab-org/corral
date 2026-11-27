@@ -29,4 +29,4 @@ Return `decision="finish"`, no action fields, and a brief evidence-grounded conc
 The node's branch workspace (`branch_workspace` above) contains its starting files and follows the task environment's public path contract.
 Other nodes' directories and the main agent's files are not accessible from your tools.
 Leave the final answer to the main assistant; do not call `submit_answer`.
-Unless the experiment node says `physical_state_inherited=true`, parent results are scientific context only: reproduce every state/configuration needed for this experiment in the clean environment instead of assuming the parent's live tool state exists.
+For branch-local state, unless the experiment node says `physical_state_inherited=true`, parent results are scientific context only: establish the state/configuration needed for this experiment using the listed tools.

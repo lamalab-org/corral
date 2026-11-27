@@ -184,7 +184,7 @@ def number(value):
     return float(value) if value not in (None, "") else None
 
 
-def load_index(reports: Path):
+def load_index(reports: Path, collection: str = "full"):
     reports = reports.resolve()
     traces = []
     locations = {}
@@ -200,7 +200,7 @@ def load_index(reports: Path):
         "execution_id",
         "run_id",
     }
-    for index in sorted(reports.glob("*/trials.csv")):
+    for index in sorted(reports.glob(f"*/{collection}/trials.csv")):
         with index.open(newline="", encoding="utf-8") as source:
             if source.read(len(LFS_POINTER)) == LFS_POINTER.decode():
                 sys.stderr.write(
@@ -233,7 +233,7 @@ def load_index(reports: Path):
                                 else "available"
                             )
                 trace_id = hashlib.sha256(
-                    f"{index.parent.name}/{row['report_file']}:{row['task_id']}:{row['trial']}".encode()
+                    f"{index.parent.parent.name}/{row['report_file']}:{row['task_id']}:{row['trial']}".encode()
                 ).hexdigest()[:24]
                 trace = {
                     "id": trace_id,
@@ -341,8 +341,8 @@ def message_presentation(messages, agent):
 
 
 class TraceStore:
-    def __init__(self, reports):
-        self.traces, self.locations = load_index(reports)
+    def __init__(self, reports, collection="full"):
+        self.traces, self.locations = load_index(reports, collection)
         self.agents = {trace["id"]: trace["agent"] for trace in self.traces}
         self.index = json.dumps({"traces": self.traces}, ensure_ascii=False).encode()
         self.cache = OrderedDict()
@@ -470,14 +470,20 @@ def main():
         "--reports",
         type=Path,
         default=ROOT / "reports",
-        help="Reports root containing */trials.csv",
+        help="Reports root containing <environment>/<collection>/trials.csv",
+    )
+    parser.add_argument(
+        "--collection",
+        choices=("full", "mini-v1", "mini-v2"),
+        default="full",
+        help="report collection to browse (default: full)",
     )
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument(
         "--open", action="store_true", help="Open the browser automatically"
     )
     args = parser.parse_args()
-    store = TraceStore(args.reports.resolve())
+    store = TraceStore(args.reports.resolve(), args.collection)
     if not store.traces:
         parser.error(
             f"No readable trials found in trials.csv indexes under {args.reports}. "

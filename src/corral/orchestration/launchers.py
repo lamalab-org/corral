@@ -78,6 +78,11 @@ import json
 import os
 from pathlib import Path
 root = Path('/corral-state')
+request = json.loads((root / 'request.json').read_text())
+if request.get('evaluation_awareness', 'off') != 'off':
+    from corral.orchestration.models import RunTaskInput
+    if 'evaluation_awareness' not in RunTaskInput.__dataclass_fields__:
+        raise RuntimeError('Docker image lacks evaluation-awareness support; rebuild the image')
 missing = json.loads((root / 'checkpoint-import.json').read_text())['missing_sidecars']
 for name in ('commits.sqlite3-wal', 'commits.sqlite3-shm'):
     if name in missing:
@@ -184,6 +189,7 @@ class LocalTaskLauncher:
         scaffold_metadata: dict[str, Any] = {
             "name": type(agent).__name__,
             "enable_surrender": request.enable_surrender,
+            "evaluation_awareness": request.evaluation_awareness,
             "sandbox": self.scaffold_sandbox,
         }
         if request.sandbox.docker is not None:
@@ -191,6 +197,7 @@ class LocalTaskLauncher:
             scaffold_metadata.update(
                 sandbox_image_digest=docker.image_digest,
                 sandbox_network=docker.network,
+                sandbox_guardrails=docker.guardrails,
                 sandbox_resources={
                     "cpus": docker.cpus,
                     "memory": docker.memory,
@@ -654,6 +661,7 @@ class DockerTaskLauncher:
             "corral.execution_id": request.execution_id,
             "corral.image_digest": docker.image_digest or "unresolved",
             "corral.runtime_protocol_version": docker.runtime_protocol_version,
+            "corral.guardrails": docker.guardrails,
         }
         volume_arguments = [self.docker_executable, "volume", "create"]
         for key, value in labels.items():
@@ -825,7 +833,10 @@ class DockerTaskLauncher:
                 "benchmark_run_id": request.benchmark_run_id,
                 "container_id": container_id,
                 "container_name": container_name,
-                "permissions_policy": "workspace-root-v1",
+                "permissions_policy": (
+                    "workspace-root-v1" if docker.guardrails == "on" else "disabled"
+                ),
+                "guardrails": docker.guardrails,
                 "cpus": docker.cpus,
                 "gpus": docker.gpus,
                 "execution_id": request.execution_id,

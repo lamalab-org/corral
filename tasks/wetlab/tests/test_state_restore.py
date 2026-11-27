@@ -116,6 +116,7 @@ def test_loader_binds_wetlab_scratch_per_execution(tmp_path, monkeypatch) -> Non
     template = environments[task_id]
     assert template.base_work_dir == str(tmp_path)
     assert template.workspace_path is None
+    assert template.shared_inventory
     registry = RuntimeRegistry(agents={}, environments=environments)
     try:
         first = registry.environment(task_id, "trial-1")
@@ -123,6 +124,7 @@ def test_loader_binds_wetlab_scratch_per_execution(tmp_path, monkeypatch) -> Non
         assert first.workspace_path != second.workspace_path
         for environment in (first, second):
             assert isinstance(environment, QualitativeAnalysisEnvironment)
+            assert environment.shared_inventory
             assert Path(environment.workspace_path).parent == tmp_path
             assert environment.toolset.workspace_factory is None
             assert environment.tools.keys() == template.tools.keys()
@@ -260,10 +262,14 @@ async def test_action_replay_and_checkpoint_restore_are_deterministic(tmp_path) 
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("shared_inventory", [False, True])
 async def test_chained_task_receives_inventory_through_dependency_output(
     tmp_path,
+    shared_inventory,
 ) -> None:
-    upstream_environment = _environment()
+    upstream_environment = _environment(
+        str(tmp_path / "workspace"), shared_inventory=shared_inventory
+    ).for_task("upstream")
     submit = Action(
         id="submit-1",
         name="submit_answer",
@@ -301,12 +307,14 @@ async def test_chained_task_receives_inventory_through_dependency_output(
     downstream_environment = QualitativeAnalysisEnvironment(
         "wetlab-state-test-next",
         downstream_task,
+        base_work_dir=str(tmp_path / "workspace"),
         toolset=Toolset(pool=create_tools(), workspace_factory=None),
         group_tasks={
             "wetlab-state-test": upstream_task,
             "wetlab-state-test-next": downstream_task,
         },
-    )
+        shared_inventory=shared_inventory,
+    ).for_task("downstream")
     async with SQLiteCommitStore(
         tmp_path / "downstream.sqlite3", "downstream"
     ) as store:
@@ -401,9 +409,13 @@ async def test_shared_inventory_limits_all_scientist_branches(tmp_path) -> None:
                 )
             )
         ).success
-        output = main.environment.get_task_output(await store.materialize("main"))
+        submitted = await store.materialize("main")
+        output = main.environment.get_task_output(submitted)
         assert output is not None
         assert output.metadata["wetlab"]["inventory"]["sample"]["volume"] == 0
+        # Reading a durable result must also work on an unbound definition.
+        assert environment.workspace_path is None
+        assert environment.get_task_output(submitted) == output
 
     downstream_task = replace(
         environment.current_task,

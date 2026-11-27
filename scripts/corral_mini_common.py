@@ -1,7 +1,7 @@
 """Shared loading, task selection and scoring for corral-mini.
 
 Terms used throughout:
-- stratum: one (environment, level), scored with Pass@5 per task and agent.
+- stratum: one (environment, level), scored with Pass@5 or Pass^5 per task and agent.
 - agent: one agent/model combination ("subject" in the report tables).
 - material loss: a pair of agents at least MATERIAL_GAP apart on the full
   stratum that ties or flips order on the mini subset.
@@ -32,7 +32,7 @@ MATERIAL_GAP = 0.05
 @dataclass
 class Stratum:
     tasks: np.ndarray  # task IDs
-    passes: np.ndarray  # Pass@5, tasks x agents
+    passes: np.ndarray  # selected pass metric, tasks x agents
     costs: np.ndarray  # estimated USD for five trials, tasks x agents
     solved: np.ndarray  # solved in at least one of five trials, tasks x agents
 
@@ -102,6 +102,17 @@ def load_afm_strata(
     score_column: str = "pass_hat_5",
 ) -> dict:
     """Load the newer AFM reports as five-trial Pass^5 or Pass@5 strata."""
+    return load_report_strata(trials_csv, prices_path, agents, score_column, "afm")
+
+
+def load_report_strata(
+    trials_csv: Path,
+    prices_path: Path,
+    agents: list[str],
+    score_column: str = "pass_hat_5",
+    environment: str = "afm",
+) -> dict:
+    """Load five-trial strata from an environment's trials.csv."""
     if score_column not in {"pass_hat_5", "pass_at_5"}:
         raise ValueError(f"unknown score column: {score_column}")
     data = pd.read_csv(trials_csv)
@@ -115,7 +126,9 @@ def load_afm_strata(
         passes=("success", "sum"), trials=("success", "size"), usd=("usd", "sum")
     )
     if (grouped.trials != 5).any():
-        raise ValueError("AFM reports must have five trials per task and agent")
+        raise ValueError(
+            f"{environment} reports must have five trials per task and agent"
+        )
     grouped["pass_hat_5"] = (grouped.passes / 5) ** 5
     grouped["pass_at_5"] = 1 - (1 - grouped.passes / 5) ** 5
     strata = {}
@@ -124,8 +137,8 @@ def load_afm_strata(
         costs = group.pivot_table("usd", "task_id", "agent_model")
         solved = group.pivot_table("passes", "task_id", "agent_model") > 0
         if list(scores.columns) != agents or scores.isna().any().any():
-            raise ValueError(f"AFM level {level}: missing agent data")
-        strata[("afm", int(level))] = Stratum(
+            raise ValueError(f"{environment} level {level}: missing agent data")
+        strata[(environment, int(level))] = Stratum(
             scores.index.to_numpy(),
             scores.to_numpy(float),
             costs.to_numpy(float),

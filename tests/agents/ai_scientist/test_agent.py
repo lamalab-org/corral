@@ -200,9 +200,13 @@ async def test_branch_checkpoint_restores_workspace_without_repeating_tools(tmp_
             lambda: source.execute(Action(name="measure", arguments={"value": 1}))
         )
         assert response.success
+        saved_environment = sessions.session(
+            source.execution_id
+        ).state.environment.values
         snapshot = await anyio.to_thread.run_sync(
             lambda: sessions.checkpoint(source.execution_id)
         )
+        assert "environment" not in snapshot
         Path(parent.workspace, "stale.txt").write_text("stale", encoding="utf-8")
         restored = await anyio.to_thread.run_sync(
             lambda: sessions.restore_branch(snapshot)
@@ -212,7 +216,7 @@ async def test_branch_checkpoint_restores_workspace_without_repeating_tools(tmp_
     assert calls == [1]
     assert Path(restored.workspace, "result.txt").read_text() == "measured"
     assert not Path(restored.workspace, "stale.txt").exists()
-    assert restored_state.environment.values == snapshot["environment"]
+    assert restored_state.environment.values == saved_environment
     assert "result.txt" in restored_state.workspace.files
 
 
@@ -568,6 +572,8 @@ async def test_final_actions_are_hidden_from_the_search():
 
     names = {tool["function"]["name"] for tool in agent._search_tools(session)}
     assert "measure" not in names
+    assert "submit_answer" not in names
+    assert "submit_answer" in {tool["function"]["name"] for tool in session.tools}
     assert "measure" in {tool["function"]["name"] for tool in session.tools}
 
 
@@ -597,7 +603,26 @@ async def test_final_actions_run_on_the_main_session_in_order():
     assert session.state.tool_statistics == {"measure": 2}
 
 
-def test_without_final_actions_the_search_sees_every_tool():
-    from corral.agents.ai_scientist.config import AIScientistConfig
+@pytest.mark.anyio
+async def test_without_final_actions_search_excludes_only_submit_answer():
+    agent = AIScientistAgent(model="test-model")
+    session = await make_session([], agent=agent)
+    assert agent.config.final_actions == ()
+    all_names = {tool["function"]["name"] for tool in session.tools}
+    search_names = {tool["function"]["name"] for tool in agent._search_tools(session)}
+    assert search_names == all_names - {"submit_answer"}
 
-    assert AIScientistConfig().final_actions == ()
+
+@pytest.mark.anyio
+async def test_environment_checkpoint_captures_shared_state_without_main_tools(
+    monkeypatch,
+):
+    session = await make_session([])
+    monkeypatch.setattr(
+        session.environment,
+        "capture_environment",
+        lambda values: {**values, "shared_usage": {"used": 7}},
+    )
+    await session.checkpoint_environment()
+    assert session.state.environment.values["shared_usage"] == {"used": 7}
+    assert session.state.tool_statistics == {}
