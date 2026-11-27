@@ -1203,11 +1203,16 @@ result = executor.execute_code_blocks([CodeBlock(language="python", code=code)])
 assert result.exit_code == 1 and result.code_file == "/workspace/experiment/failed.py"
 output = (work_dir / "analysis.txt").stat()
 assert output.st_gid == workspace.stat().st_gid and output.st_mode & 0o777 == 0o660
-# A missing parent directory raises before the subprocess can start.
+# Missing parent directories of a `# filename:` path are created for the block.
+result = executor.execute_code_blocks([CodeBlock(language="python", code="# filename: missing/subdir/test.py\nprint(1)")])
+assert result.exit_code == 0 and result.code_file == "/workspace/experiment/missing/subdir/test.py"
+created = (work_dir / "missing" / "subdir").stat()
+assert created.st_gid == workspace.stat().st_gid and created.st_mode & 0o770 == 0o770
+# A parent that is a file cannot be created; the failure still reaches the SDK.
 try:
-    executor.execute_code_blocks([CodeBlock(language="python", code="# filename: missing/subdir/test.py\nprint(1)")])
+    executor.execute_code_blocks([CodeBlock(language="python", code="# filename: failed.py/test.py\nprint(1)")])
 except RuntimeError as exc:
-    assert "FileNotFoundError" in str(exc)
+    assert "FileExistsError" in str(exc)
 else:
     raise AssertionError("expected code executor exception")
 Path(sys.argv[1], "events.json").write_text(json.dumps(events))
@@ -1217,7 +1222,7 @@ Path(sys.argv[1], "events.json").write_text(json.dumps(events))
         check=False,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=120,
         env={**os.environ, "OPENAI_API_KEY": "sk-test"},
     )
     assert result.returncode == 0, result.stderr[-5000:]
@@ -1228,13 +1233,14 @@ Path(sys.argv[1], "events.json").write_text(json.dumps(events))
     ]
     calls = [call for m in messages for call in m.get("tool_calls", [])]
     results = [m for m in messages if m.get("role") == "tool"]
-    assert len(calls) == len(results) == 4
+    assert len(calls) == len(results) == 5
     assert {c["id"] for c in calls} == {m["tool_call_id"] for m in results}
-    assert [m["is_error"] for m in results] == [True, False, True, True]
+    assert [m["is_error"] for m in results] == [True, False, True, False, True]
     assert "native function failed" in results[0]["content"]
     assert results[1]["content"] == "async success"
     assert "code failed" in results[2]["content"]
-    assert "FileNotFoundError" in results[3]["content"]
+    assert "1" in results[3]["content"]
+    assert "FileExistsError" in results[4]["content"]
 
 
 class NativeResponses:

@@ -45,6 +45,7 @@ class DenarioCodeExecutor:
     @staticmethod
     def execute(*, blocks, work_dir, timeout, execution_policies):
         from autogen.coding import CodeBlock, LocalCommandLineCodeExecutor
+        from autogen.coding.utils import _get_file_name_from_content
 
         root = Path.cwd()
         directory = (root / work_dir).resolve()
@@ -54,6 +55,20 @@ class DenarioCodeExecutor:
             work_dir=directory, timeout=timeout, execution_policies=execution_policies
         )
         try:
+            # The SDK executor saves each block to the path in its
+            # `# filename:` comment without creating parent directories, so a
+            # name like `scripts/run.py` fails before the code can run, and
+            # the failure ends the Denario run. Create them here, as a file
+            # write tool would. The parser rejects paths outside `directory`;
+            # the executor reports those itself.
+            directory.mkdir(parents=True, exist_ok=True)
+            for block in blocks:
+                try:
+                    name = _get_file_name_from_content(block["code"], directory)
+                except ValueError:
+                    continue
+                if name is not None:
+                    (directory / name).parent.mkdir(parents=True, exist_ok=True)
             result = executor.execute_code_blocks(
                 [CodeBlock(**block) for block in blocks]
             )
