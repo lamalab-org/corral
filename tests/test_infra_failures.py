@@ -161,3 +161,17 @@ def test_iteration_limit_with_refusal_and_empty_response():
         "agent_limit",
         "empty_response",
     }
+
+
+def test_denario_model_request_budget_is_an_agent_limit():
+    trial = {
+        "error_message": (
+            "Denario exhausted the model-request budget (including planning and execution)."
+        ),
+        "token_usage": {"llm_calls": 5},
+    }
+
+    (finding,) = infra.trial_findings(trial)
+    assert finding["category"] == "agent_limit"
+    assert not infra.is_rerun(finding | {"success": "False"})
+    assert not infra.is_review(finding | {"success": "False"})
