@@ -100,16 +100,51 @@ def install_native_hooks(bridge: Bridge):
             module.get_task_result = get_task_result
 
     original_solve = cmb.CMBAgent.solve
+    completed_result = None
+
+    class PlanAlreadyFinished(Exception):
+        """Stop the SDK's fixed step loop after it saves the completed step."""
 
     @wraps(original_solve)
     def solve(instance, *args, **kwargs):
+        nonlocal completed_result
+        if instance.mode != "planning_and_control_context_carryover":
+            return original_solve(instance, *args, **kwargs)
+        if completed_result is not None:
+            raise PlanAlreadyFinished
+
+        # The SDK copies the controller's next role and instructions but
+        # overwrites its step number with the outer loop counter.
+        previous = workflow.final_context
+        if previous.get("current_status") == "in progress":
+            next_step = previous["current_plan_step_number"]
+            if kwargs["step"] < next_step <= previous["number_of_steps_in_plan"]:
+                kwargs["step"] = next_step
+                kwargs["shared_context"]["current_plan_step_number"] = next_step
+
         result = original_solve(instance, *args, **kwargs)
-        if instance.mode == "planning_and_control_context_carryover":
-            workflow.final_context = instance.final_context.to_dict()
-            bridge.event("native_step_finished", context=workflow.final_context)
+        context = instance.final_context
+        workflow.final_context = context.to_dict()
+        bridge.event("native_step_finished", context=workflow.final_context)
+        if completed_context(context):
+            completed_result = {
+                "chat_history": instance.chat_result.chat_history,
+                "final_context": context,
+            }
         return result
 
     cmb.CMBAgent.solve = solve
+    sdk = importlib.import_module("cmbagent")
+    original_control = sdk.planning_and_control_context_carryover
+
+    @wraps(original_control)
+    def control(*args, **kwargs):
+        try:
+            return original_control(*args, **kwargs)
+        except PlanAlreadyFinished:
+            return completed_result
+
+    sdk.planning_and_control_context_carryover = control
     original_reply = ConversableAgent.generate_reply
 
     @wraps(original_reply)

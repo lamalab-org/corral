@@ -1243,6 +1243,14 @@ class NativeResponses:
     def __init__(self, model="gpt-6.1-sol", scenario="success"):
         self.model = model
         self.scenario = scenario
+        self.final_step = 3 if scenario == "skip_to_final" else 2
+        self.plan = PLAN
+        if scenario == "skip_to_final":
+            self.plan = PLAN.replace(
+                "- Step 2:",
+                "- Step 2:\n\t* sub-task: Repeat if needed\n\t* agent in charge: engineer\n"
+                "\t* instructions:\n\t\t- Repeat an inconclusive measurement.\n- Step 3:",
+            )
         self.injected_roles = set()
         self.batch_tail = False
         self.requests = []
@@ -1336,7 +1344,10 @@ class NativeResponses:
         if "record_plan" in names:
             name, arguments = (
                 "record_plan",
-                {"plan_suggestion": PLAN, "number_of_steps_in_plan": 2},
+                {
+                    "plan_suggestion": self.plan,
+                    "number_of_steps_in_plan": self.final_step,
+                },
             )
         elif "record_review" in names:
             name, arguments = (
@@ -1365,7 +1376,9 @@ class NativeResponses:
                     "current_status": "completed"
                     if self.researcher_done
                     else "in progress",
-                    "current_plan_step_number": 2 if self.engineer_done else 1,
+                    "current_plan_step_number": self.final_step
+                    if self.engineer_done
+                    else 1,
                     "current_sub_task": "Interpret and report"
                     if self.engineer_done
                     else "Measure and analyze",
@@ -1449,26 +1462,30 @@ class NativeResponses:
         )
         props = schema.get("properties", {})
         if "sub_tasks" in props:
-            content = json.dumps(
+            sub_tasks = [
                 {
-                    "sub_tasks": [
-                        {
-                            "sub_task": "Measure and analyze",
-                            "sub_task_agent": "engineer",
-                            "bullet_points": [
-                                "Measure sample a and analyze the observation."
-                            ],
-                        },
-                        {
-                            "sub_task": "Interpret and report",
-                            "sub_task_agent": "researcher",
-                            "bullet_points": [
-                                "Check the result, propose the final answer, and write the results."
-                            ],
-                        },
-                    ]
-                }
-            )
+                    "sub_task": "Measure and analyze",
+                    "sub_task_agent": "engineer",
+                    "bullet_points": ["Measure sample a and analyze the observation."],
+                },
+                {
+                    "sub_task": "Interpret and report",
+                    "sub_task_agent": "researcher",
+                    "bullet_points": [
+                        "Check the result, propose the final answer, and write the results."
+                    ],
+                },
+            ]
+            if self.scenario == "skip_to_final":
+                sub_tasks.insert(
+                    1,
+                    {
+                        "sub_task": "Repeat if needed",
+                        "sub_task_agent": "engineer",
+                        "bullet_points": ["Repeat an inconclusive measurement."],
+                    },
+                )
+            content = json.dumps({"sub_tasks": sub_tasks})
         elif "recommendations" in props:
             content = json.dumps(
                 {"recommendations": ["Proceed with real measurements."]}
@@ -1491,7 +1508,7 @@ class NativeResponses:
         elif "You are the engineer agent." in body["messages"][0]["content"]:
             content = "Measure and submit using Python.\n```python\n" + CODE + "```"
         else:
-            content = PLAN
+            content = self.plan
         return {"role": "assistant", "content": content}
 
 
@@ -1500,6 +1517,7 @@ class NativeResponses:
     ("model", "scenario"),
     [
         ("openai/gpt-6.1-sol", "success"),
+        ("openai/gpt-6.1-sol", "skip_to_final"),
         ("anthropic/claude-opus-5-5", "success"),
         ("openrouter/moonshotai/kimi-k3.1-pro", "success"),
         ("openai/gpt-6.1-sol", "retry_both"),
@@ -1785,7 +1803,9 @@ async def test_full_native_sdk_with_mock_provider(
         if m.get("name") == "denario.native_step_finished"
     ]
     assert steps[-1]["current_status"] == "completed"
-    assert steps[-1]["current_plan_step_number"] == 2
+    assert steps[-1]["current_plan_step_number"] == responses.final_step
+    if scenario == "skip_to_final":
+        assert [step["current_plan_step_number"] for step in steps] == [3, 3]
     assert "Step 1" in steps[-1]["previous_steps_execution_summary"]
     assert result.usage.llm_calls == len(responses.requests)
     assert result.usage.input_tokens == 10 * len(responses.requests)
