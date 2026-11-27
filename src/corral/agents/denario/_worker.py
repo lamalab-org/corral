@@ -71,6 +71,34 @@ def install_native_hooks(bridge: Bridge):
                 )
 
     cmb.register_functions_to_agents = register
+
+    def get_task_result(chat_history, name: str):
+        """Denario's lookup without its two crashes.
+
+        The SDK version indexes `obj["name"]` on every chat entry (some have no
+        name) and reads an unset variable when no entry matches. Both happen
+        when CMBagent stops after repeated failed attempts. Raise a clear error
+        instead of `KeyError: 'name'` or `UnboundLocalError: result`.
+        """
+        for obj in reversed(chat_history or []):
+            if isinstance(obj, dict) and obj.get("name") == name:
+                return obj.get("content")
+        raise RuntimeError(
+            f"CMBagent ended without a {name!r} message; it stops after "
+            "repeated failed attempts, so the step produced no result"
+        )
+
+    # The SDK modules import the helper by name, so replace every reference.
+    for module_name in (
+        "denario.utils",
+        "denario.experiment",
+        "denario.method",
+        "denario.idea",
+    ):
+        module = importlib.import_module(module_name)
+        if hasattr(module, "get_task_result"):
+            module.get_task_result = get_task_result
+
     original_solve = cmb.CMBAgent.solve
 
     @wraps(original_solve)
