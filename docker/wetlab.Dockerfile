@@ -14,6 +14,11 @@ RUN sed -e '/^  - pip:/,$d' -e 's/python>=3.10/python=3.12/' /tmp/wetlab-environ
     && conda clean --all --yes
 
 ENV PATH=/opt/conda/envs/wetlab/bin:$PATH
+# Build the system font cache now. Otherwise the first plot in a trial makes
+# conda's fontconfig write $HOME/.cache/fontconfig, including compatibility
+# symlinks (cache-9/10/11 -> cache-12), inside the workspace; Corral rejects
+# workspace symlinks and the trial container exits.
+RUN fc-cache -f -s
 
 WORKDIR /opt/corral
 COPY . /opt/corral
