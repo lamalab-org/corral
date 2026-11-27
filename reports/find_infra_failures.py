@@ -132,7 +132,7 @@ TERMINAL_PATTERNS = [
     (
         "agent_limit",
         r"maximum (?:number of )?iterations|iteration limit|interaction budget"
-        r"|LLM-call budget|error_max_turns"
+        r"|LLM-call budget|exhausted the model-request budget|error_max_turns"
         r"|without calling submit_answer|max_iterations",
     ),
 ]
@@ -448,7 +448,7 @@ def markdown(
 ) -> str:
     """Render the findings as Markdown tables, e.g. for a PR comment."""
     lines = [
-        "| Environment | Trials scanned | Might need rerun | To review | Iteration limit "
+        "| Environment | Trials scanned | Might need rerun | To review | Agent limit "
         "| Missing runs | Not scanned (LFS) |",
         "|---|---:|---:|---:|---:|---:|---:|",
     ]
@@ -518,8 +518,8 @@ def markdown(
         "or missing activity shows an infrastructure cause (credits, rate limit, "
         "provider error, timeout, policy, explicit terminal refusal, empty responses, "
         "environment crash). To review includes refusal signals in the transcript "
-        "and empty final responses at an agent limit. Iteration limit: "
-        "failed trials that ran out of iterations, turns or budget, or never "
+        "and empty final responses at an agent limit. Agent limit: "
+        "failed trials that ran out of iterations, turns or model requests, or never "
         "submitted. These and context-window overflows count as failures, not "
         "reruns. Missing runs: agent, model and level combinations of the "
         "standard seven agent and model pairs (18 for mini-v2) with no run "
