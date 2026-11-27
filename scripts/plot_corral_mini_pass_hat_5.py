@@ -45,11 +45,17 @@ def load_strata(tasks_parquet: Path) -> tuple[dict, list[str]]:
     strata, agents, _ = load(
         manifest["source"]["revision"], tasks_parquet, prices_path, "pass_hat_5"
     )
-    strata.update(load_afm_strata(ROOT / "reports/afm/trials.csv", prices_path, agents))
+    strata.update(
+        load_afm_strata(ROOT / "reports/afm/full/trials.csv", prices_path, agents)
+    )
     for environment, local in manifest.get("local_sources", {}).items():
+        # Released manifests retain their historical paths and source hashes.
+        trials_csv = ROOT / local["trials_csv"]
+        if not trials_csv.exists():
+            trials_csv = ROOT / "reports" / environment / "full/trials.csv"
         strata.update(
             load_report_strata(
-                ROOT / local["trials_csv"],
+                trials_csv,
                 prices_path,
                 agents,
                 "pass_hat_5",

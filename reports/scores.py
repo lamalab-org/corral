@@ -1,12 +1,12 @@
 """Tabulate the scores of every environment, agent, model and level.
 
 Run from the repository root:
-    git lfs pull --include='reports/*/runs.csv' --exclude=''
+    git lfs pull --include='reports/*/full/runs.csv' --exclude=''
     python reports/scores.py                      # every environment
     python reports/scores.py afm corral_md        # some environments
     python reports/scores.py --markdown out.md    # tables for a PR comment
 
-Reads only `reports/<environment>/runs.csv`. Download any Git LFS indexes first;
+Reads only `reports/<environment>/full/runs.csv`. Download any Git LFS indexes first;
 tabulation needs no network access or packages beyond the standard library.
 The overview shows pass@k
 (share of tasks solved in at least one of k trials) and pass^k (share of tasks
@@ -37,7 +37,7 @@ MISSING = "—"
 
 
 def environments() -> list[Path]:
-    return sorted(p.parent for p in REPORTS_DIR.glob("*/runs.csv"))
+    return sorted(p.parent for p in REPORTS_DIR.glob("*/full/runs.csv"))
 
 
 def read_runs(env_dir: Path) -> list[dict]:
@@ -167,14 +167,14 @@ def main() -> int:
 
     env_dirs = environments()
     if args.environments:
-        known = {p.name: p for p in env_dirs}
+        known = {p.parent.name: p for p in env_dirs}
         unknown = sorted(set(args.environments) - set(known))
         if unknown:
             sys.stderr.write(f"unknown environments: {', '.join(unknown)}\n")
             return 1
         env_dirs = [known[name] for name in args.environments]
 
-    results = [(d.name, read_runs(d)) for d in env_dirs]
+    results = [(d.parent.name, read_runs(d)) for d in env_dirs]
     text = markdown(results)
     if args.markdown:
         args.markdown.write_text(text, encoding="utf-8")

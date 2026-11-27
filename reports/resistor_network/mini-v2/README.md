@@ -4,7 +4,7 @@
 540 trials.
 These replace the corral-mini v1 batch-1 reports. Layout, names and index
 columns follow [`../../README.md`](../../README.md). The full-benchmark v4
-runs (October) are in [`../`](../).
+runs (October) are in [`../`](..).
 
 [Run index](runs.csv) · [Trial index with Langfuse links](trials.csv)
 

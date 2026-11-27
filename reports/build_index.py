@@ -1,10 +1,10 @@
 """Build runs.csv and trials.csv for one environment's benchmark reports.
 
-Reads every ``reports/<env>/level_<L>/<agent>__<model>/report.json.gz`` (or
+Reads every ``reports/<env>/full/level_<L>/<agent>__<model>/report.json.gz`` (or
 ``.json.xz``, used where gzip compresses a report far worse) and
-writes ``reports/<env>/runs.csv`` (one row per run) and
-``reports/<env>/trials.csv`` (one row per trial, with its Langfuse links).
-Anything under ``archive/`` or ``provenance/`` is ignored. corral-mini runs live
+writes ``reports/<env>/full/runs.csv`` (one row per run) and
+``reports/<env>/full/trials.csv`` (one row per trial, with its Langfuse links).
+Pass a collection folder explicitly. corral-mini runs live
 in ``reports/<env>/mini-v<N>/`` with their own indexes; build them by passing
 that folder (its ``environment`` column is still ``<env>``).
 
@@ -20,8 +20,8 @@ another session than the run's (for example trials reused from an earlier run).
 Legacy trace IDs may also be recorded in an adjacent ``langfuse-overrides.json``.
 
 Usage:
-    python reports/build_index.py reports/<env>
-    python reports/build_index.py reports/<env> --verify   # check traces exist in Langfuse
+    python reports/build_index.py reports/<env>/full
+    python reports/build_index.py reports/<env>/full --verify   # check traces exist in Langfuse
 """
 
 from __future__ import annotations
@@ -352,8 +352,8 @@ def verify(trials: list[dict]) -> list[str]:
 
 
 def environment_name(env_dir: Path) -> str:
-    """``reports/<env>`` and ``reports/<env>/mini-v<N>`` both belong to ``<env>``."""
-    if re.fullmatch(r"mini-v\d+", env_dir.name):
+    """Collection folders belong to their parent environment."""
+    if env_dir.name == "full" or re.fullmatch(r"mini-v\d+", env_dir.name):
         return env_dir.parent.name
     return env_dir.name
 

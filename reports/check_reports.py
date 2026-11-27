@@ -57,9 +57,7 @@ class Problems(list):
 
 def environments() -> list[Path]:
     return sorted(
-        p
-        for p in REPORTS_DIR.iterdir()
-        if p.is_dir() and p.name != "figures" and not p.name.startswith((".", "_"))
+        p for p in REPORTS_DIR.iterdir() if p.is_dir() and (p / "full").is_dir()
     )
 
 
@@ -296,7 +294,7 @@ def check_hf(env_dirs: list[Path], problems: Problems) -> None:
         all_runs += runs
         all_trials += trials
         for level in sorted({r["level"] for r in trials}):
-            config = f"{env_dir.name}-level_{level}"
+            config = f"{build_index.environment_name(env_dir)}-level_{level}"
             expected = sum(r["level"] == level for r in trials)
             if full.get(config) != expected:
                 problems.add(
@@ -326,7 +324,7 @@ def check_hf(env_dirs: list[Path], problems: Problems) -> None:
     hf_runs = {(r["environment"], r["run_id"]): r for r in table(SUMMARY_REPO, "runs")}
     for env_dir in env_dirs:
         for run in read_csv(env_dir / "runs.csv")[1]:
-            hf = hf_runs.get((env_dir.name, run["run_id"]))
+            hf = hf_runs.get((build_index.environment_name(env_dir), run["run_id"]))
             if hf is None or hf["report_sha256"] != run["report_sha256"]:
                 problems.add(
                     SUMMARY_REPO,
@@ -360,7 +358,9 @@ def main() -> int:
     if not env_dirs:
         problems.add("reports", "no environment folders found")
     # corral-mini runs in reports/<env>/mini-v<N>/ are checked like an environment.
-    folders = [d for e in env_dirs for d in (e, *sorted(e.glob("mini-v[0-9]*")))]
+    folders = [
+        d for e in env_dirs for d in (e / "full", *sorted(e.glob("mini-v[0-9]*")))
+    ]
     for env_dir in folders:
         reports = check_layout(env_dir, problems, warnings)
         if not (env_dir / "runs.csv").exists() or not (env_dir / "trials.csv").exists():
@@ -374,7 +374,7 @@ def main() -> int:
             + "\n"
         )
     if args.hf and not problems:
-        check_hf(env_dirs, problems)
+        check_hf([e / "full" for e in env_dirs], problems)
         if not problems:
             sys.stdout.write("Hugging Face datasets match the reports\n")
 
