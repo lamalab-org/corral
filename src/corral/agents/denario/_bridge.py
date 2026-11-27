@@ -104,6 +104,47 @@ def completion_event(body: bytes, *, streaming: bool) -> tuple[dict, dict]:
     return message, usage
 
 
+def drop_empty_tool_calls(body: bytes, *, streaming: bool) -> bytes:
+    """Remove `"tool_calls": []` from Chat Completions output.
+
+    Some providers (Anthropic's OpenAI-compatible endpoint) return an empty
+    list for a text-only turn. AG2's group tool executor treats the key's
+    presence as a tool-call turn, runs zero calls and then reads an unset
+    variable (`UnboundLocalError: tool_message`), which ends the Denario run.
+    """
+
+    def clean(choices) -> bool:
+        changed = False
+        for choice in choices or []:
+            for key in ("message", "delta"):
+                part = choice.get(key)
+                if isinstance(part, dict) and part.get("tool_calls") == []:
+                    del part["tool_calls"]
+                    changed = True
+        return changed
+
+    if not streaming:
+        try:
+            data = json.loads(body)
+        except ValueError:
+            return body
+        if isinstance(data, dict) and clean(data.get("choices")):
+            return json.dumps(data).encode()
+        return body
+    lines, changed = [], False
+    for line in body.decode().splitlines():
+        out = line
+        if line.startswith("data:") and line[5:].strip() != "[DONE]":
+            try:
+                data = json.loads(line[5:])
+            except ValueError:
+                data = None
+            if isinstance(data, dict) and clean(data.get("choices")):
+                out, changed = "data: " + json.dumps(data), True
+        lines.append(out)
+    return ("\n".join(lines) + "\n").encode() if changed else body
+
+
 class Bridge:
     """One authenticated loopback endpoint and serialized parent RPC channel."""
 
@@ -338,6 +379,10 @@ class Bridge:
                     "content": f"Invalid provider response: {type(exc).__name__}: {exc}",
                 }
                 usage = {}
+            if not failed:
+                content = drop_empty_tool_calls(content, streaming=streaming)
+                if message.get("tool_calls") == []:
+                    del message["tool_calls"]
         else:
             usage = {}
             message = {

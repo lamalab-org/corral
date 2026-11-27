@@ -23,7 +23,11 @@ from tests.agents.commit_session import start_session
 
 from corral import cli
 from corral.agents import DenarioAgent
-from corral.agents.denario._bridge import Bridge, completion_event
+from corral.agents.denario._bridge import (
+    Bridge,
+    completion_event,
+    drop_empty_tool_calls,
+)
 from corral.agents.denario._responses import (
     ResponsesAdapter,
     attributed_message,
@@ -1867,3 +1871,131 @@ async def test_full_native_sdk_with_mock_provider(
         "# filename: measure.py" in str(m["message"].get("content"))
         for m in sdk_messages
     )
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+def test_drop_empty_tool_calls(streaming):
+    calls = [
+        {"id": "c1", "type": "function", "function": {"name": "f", "arguments": "{}"}}
+    ]
+    if not streaming:
+        empty = json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "text",
+                            "tool_calls": [],
+                        }
+                    }
+                ]
+            }
+        ).encode()
+        cleaned = json.loads(drop_empty_tool_calls(empty, streaming=False))
+        assert cleaned["choices"][0]["message"] == {
+            "role": "assistant",
+            "content": "text",
+        }
+        full = json.dumps({"choices": [{"message": {"tool_calls": calls}}]}).encode()
+        assert drop_empty_tool_calls(full, streaming=False) == full
+        assert drop_empty_tool_calls(b"not json", streaming=False) == b"not json"
+    else:
+        body = (
+            b'data: {"choices": [{"index": 0, "delta": {"content": "hi", "tool_calls": []}}]}\n'
+            b"data: [DONE]\n"
+        )
+        lines = drop_empty_tool_calls(body, streaming=True).decode().splitlines()
+        assert json.loads(lines[0][5:])["choices"][0]["delta"] == {"content": "hi"}
+        assert lines[1] == "data: [DONE]"
+        untouched = b'data: {"choices": [{"delta": {"content": "x"}}]}\n'
+        assert drop_empty_tool_calls(untouched, streaming=True) == untouched
+
+
+def test_bridge_drops_empty_tool_calls_for_text_turns(monkeypatch):
+    # Anthropic's OpenAI-compatible endpoint can return "tool_calls": [] with
+    # a text reply; AG2's group tool executor then fails with
+    # UnboundLocalError: tool_message. The bridge must hand back no key.
+    bridge = Bridge(
+        {"provider": "anthropic", "model": "claude-opus-4-7", "model_settings": {}},
+        StringIO(),
+        StringIO(),
+    )
+    events = []
+
+    def respond(_request):
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "Retrying with a single thread.",
+                            "tool_calls": [],
+                        }
+                    }
+                ]
+            },
+        )
+
+    mock_provider_rpc(monkeypatch, bridge, events, respond)
+    try:
+        status, _content_type, content = bridge.model(
+            {"messages": [{"role": "user", "content": "Continue."}]}
+        )
+    finally:
+        bridge.server.server_close()
+    assert status == 200
+    message = json.loads(content)["choices"][0]["message"]
+    assert "tool_calls" not in message
+    assert message["content"] == "Retrying with a single thread."
+    (recorded,) = [fields["message"] for kind, fields in events if kind == "model_end"]
+    assert "tool_calls" not in recorded
+
+
+def test_native_get_task_result_tolerates_unnamed_entries(tmp_path):
+    if (
+        not os.getenv("CORRAL_TEST_DENARIO_NATIVE")
+        or importlib.util.find_spec("denario") is None
+    ):
+        pytest.skip("Run with CORRAL_TEST_DENARIO_NATIVE=1 in the Denario Docker image")
+    # Hooks are process-local; run them in a child so the SDK stays unpatched here.
+    program = r"""
+import importlib, sys
+from types import SimpleNamespace
+from corral.agents.denario._worker import install_native_hooks
+
+bridge = SimpleNamespace(
+    config={"model": "claude-opus-4-7", "tools": [], "project_dir": sys.argv[1]},
+    token="test", url="http://127.0.0.1:1", agent="", client_model="claude-opus-4-7",
+    rpc=lambda kind, **fields: None, event=lambda kind, **fields: None,
+)
+install_native_hooks(bridge)
+history = [
+    {"name": "researcher_response_formatter", "content": "old"},
+    {"role": "tool", "content": "no name"},
+    {"name": "researcher_response_formatter", "content": "latest"},
+    {"role": "user", "content": "also no name"},
+]
+for module in ("denario.utils", "denario.experiment", "denario.method", "denario.idea"):
+    lookup = importlib.import_module(module).get_task_result
+    assert lookup(history, "researcher_response_formatter") == "latest", module
+    try:
+        lookup([{"role": "user", "content": "x"}], "researcher_response_formatter")
+    except RuntimeError as exc:
+        assert "CMBagent ended without" in str(exc), exc
+    else:
+        raise AssertionError(f"{module}: expected RuntimeError")
+print("ok")
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", program, str(tmp_path)],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env={**os.environ, "OPENAI_API_KEY": "sk-test"},
+    )
+    assert result.returncode == 0, result.stderr[-5000:]
+    assert result.stdout.strip().endswith("ok")
