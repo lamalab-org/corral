@@ -245,11 +245,16 @@ reports with the expected 18 agent/model pairs per level. Full reports remain
 the default. Git LFS index pointers are reported as unscanned, with unknown
 trial counts; download them to include the affected environment.
 
-On a pull request, comment `/infra-failures [lfs] [mini-v2] [<environment> ...]` or add
-the `infra-failures` label to have the `Infra failures` workflow
-(`.github/workflows/infra-failures.yaml`) post the result as a comment; `lfs`
-also scans the reports stored in Git LFS. It can also be run from the Actions
-tab. Comment and Actions-tab runs need the workflow on the default branch.
+Add the `infra-failures` label to a same-repository pull request to scan its added and
+modified full and mini-v2 reports, including Git LFS reports. The workflow
+updates its PR comment when new commits arrive and attaches a CSV of findings.
+For a broader scan, comment `/infra-failures [lfs] [mini-v2] [<environment> ...]`
+or run the workflow from the Actions tab. Use `lfs` to include Git LFS reports
+in a comment-triggered scan.
+
+The scan flags terminal refusals and provider failures as rerun candidates.
+Refusals in the transcript and empty final assistant responses at an
+iteration limit are flagged for review.
 
 To tabulate pass@5 and pass^5 for every environment, agent, model and level
 from the `runs.csv` files:

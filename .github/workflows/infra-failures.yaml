@@ -5,18 +5,16 @@ name: Infra failures
 # Triggers:
 # - comment `/infra-failures [lfs] [mini-v2] [<environment> ...]` on a pull request
 #   (members and collaborators only)
-# - add the `infra-failures` label to a pull request
+# - add the `infra-failures` label to scan changed reports on a pull request
 # - run it from the Actions tab (workflow_dispatch)
 #
-# GitHub runs comment and workflow_dispatch triggers only from the workflow file
-# on the default branch; the label trigger also works before this file is merged.
-# Reports stored in Git LFS are skipped unless `lfs` is given, to save LFS
-# bandwidth.
+# The label trigger runs this workflow before it merges on same-repository PRs.
+# The comment trigger uses the scanner from the default branch.
 on:
   issue_comment:
     types: [created]
   pull_request:
-    types: [labeled]
+    types: [labeled, synchronize]
   workflow_dispatch:
     inputs:
       environments:
@@ -42,7 +40,10 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' &&
-        github.event.label.name == 'infra-failures') ||
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        (github.event.label.name == 'infra-failures' ||
+          (github.event.action == 'synchronize' &&
+            contains(github.event.pull_request.labels.*.name, 'infra-failures')))) ||
       (github.event_name == 'issue_comment' &&
         github.event.issue.pull_request &&
         startsWith(github.event.comment.body, '/infra-failures') &&
@@ -116,8 +117,13 @@ jobs:
 
       - uses: actions/checkout@v7
         with:
+          persist-credentials: false
+
+      - uses: actions/checkout@v7
+        with:
+          path: report-data
           ref: ${{ steps.args.outputs.ref }}
-          lfs: ${{ steps.args.outputs.lfs == 'true' }}
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v7
@@ -127,15 +133,38 @@ jobs:
       - name: Find infrastructure failures
         env:
           ENVS: ${{ steps.args.outputs.envs }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          LFS: ${{ steps.args.outputs.lfs }}
+          LFS_URL: ${{ github.server_url }}/${{ github.repository }}.git/info/lfs
+        working-directory: report-data
         # $ENVS holds validated names only and is split into arguments on purpose.
         run: |
-          python reports/find_infra_failures.py $ENVS \
-            --csv infra-failures.csv --markdown infra-failures.md
+          args=()
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            git diff --no-renames --name-only --diff-filter=AMT -z "$BASE_SHA...HEAD" -- reports > "$RUNNER_TEMP/changed-reports"
+            args=(--report)
+            includes=()
+            while IFS= read -r -d '' path; do
+              if [[ "$path" =~ ^(reports/[^/,]+/(full|mini-v2))/level_[0-9]+/[^/,]+/report\.json\.(gz|xz)$ ]]; then
+                args+=("$path")
+                includes+=("$path" "${BASH_REMATCH[1]}/trials.csv")
+              fi
+            done < "$RUNNER_TEMP/changed-reports"
+            if [ "${#includes[@]}" -gt 0 ]; then
+              include=$(IFS=,; printf '%s' "${includes[*]}")
+              git -c "lfs.url=$LFS_URL" lfs pull --include="$include" --exclude=""
+            fi
+          elif [ "$LFS" = true ]; then
+            git -c "lfs.url=$LFS_URL" lfs pull --include="reports/**" --exclude=""
+          fi
+          python ../reports/find_infra_failures.py $ENVS --reports-dir reports \
+            --csv ../infra-failures.csv --markdown ../infra-failures.md "${args[@]}"
 
       - name: Write the report
         env:
           ENVS: ${{ steps.args.outputs.envs }}
           LFS: ${{ steps.args.outputs.lfs }}
+          EVENT: ${{ github.event_name }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           {
@@ -143,8 +172,12 @@ jobs:
             echo "<!-- corral-infra-failures -->"
             echo "## Infrastructure failure analysis"
             echo
-            echo "Commit \`$(git rev-parse --short HEAD)\` · environments: ${ENVS:-all}" \
-              "· Git LFS reports: $([ "$LFS" = true ] && echo scanned || echo skipped)"
+            echo "Commit $(git -C report-data rev-parse --short HEAD)"
+            if [ "$EVENT" = pull_request ]; then
+              echo "Scope: reports changed by this pull request, including Git LFS"
+            else
+              echo "Environments: ${ENVS:-all} · Git LFS requested: $LFS"
+            fi
             echo
             cat infra-failures.md
             echo

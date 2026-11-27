@@ -46,7 +46,7 @@ def test_lfs_indexes_do_not_abort_other_environments(tmp_path, monkeypatch, caps
     )
 
     assert infra.main() == 0
-    assert "wetlab/full: 1 trials" in capsys.readouterr().out
+    assert "wetlab/full: 0 trials" in capsys.readouterr().out
     report = markdown.read_text()
     assert "| corral_md/full | unknown | — |" in report
     assert "corral_md/full/trials.csv" in report
@@ -112,3 +112,52 @@ def test_mini_v2_scan_uses_its_own_index_and_expected_pairs(
     runs = list(csv.DictReader((folder / "runs.csv").open()))
     write_csv(folder / "runs.csv", runs[:-1])
     assert infra.missing_runs(folder) == ["L2 react / kimi-k2-0905"]
+
+    monkeypatch.setattr("sys.argv", ["find_infra_failures.py", "--report", str(report)])
+    assert infra.main() == 0
+    output = capsys.readouterr().out
+    assert "afm/mini-v2: 1 trials, 1 failed" in output
+    assert "missing run" not in output
+
+
+def test_terminal_provider_errors_from_report_and_harness():
+    for category, error in (
+        ("credits", "This request would exceed your available credits."),
+        ("provider_error", "Provider returned error"),
+        ("refusal", "actor provider stopped the response (finish_reason='refusal')"),
+        (
+            "empty_response",
+            "actor returned 3 consecutive responses without public text",
+        ),
+    ):
+        trial = {"error_message": error, "token_usage": {"llm_calls": 3}}
+        assert [
+            (f["category"], f["confidence"]) for f in infra.trial_findings(trial)
+        ] == [(category, "high")]
+
+
+def test_iteration_limit_with_refusal_and_empty_response():
+    trial = {
+        "error_message": "Maximum iterations reached",
+        "messages": [
+            {"role": "assistant", "metadata": {"finish_reason": "refusal"}},
+            {"role": "assistant", "content": " "},
+        ],
+    }
+    assert {f["category"]: f["confidence"] for f in infra.trial_findings(trial)} == {
+        "agent_limit": "high",
+        "refusal": "review",
+        "empty_response": "review",
+    }
+
+    trial["messages"] = [
+        {"role": "user", "name": "empty_response_retry"},
+        {"role": "assistant", "tool_calls": [{"id": "call"}]},
+    ]
+    assert [f["category"] for f in infra.trial_findings(trial)] == ["agent_limit"]
+
+    trial["messages"].pop()
+    assert {f["category"] for f in infra.trial_findings(trial)} == {
+        "agent_limit",
+        "empty_response",
+    }
