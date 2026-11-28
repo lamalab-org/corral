@@ -178,3 +178,52 @@ traces. All 360 traces were found (`build_index.py --verify`).
   wall-clock durations are not comparable with other runs.
 - **Comparison with the October runs.** The October runs in [`../`](..) cover
   all tasks per level; compare per task only.
+
+## Denario (claude-opus-4-7)
+
+`denario__claude-opus-4-7` in each level folder (k = 5, 30 trials). The reports
+are `report.json.xz`: gzip compressed Denario's repetitive sessions about 50
+times worse.
+
+| Level | Passes (of 15) | Hit the 100-request limit |
+|---|---:|---:|
+| 1 | 10 | 2 |
+| 2 | 1 | 11 |
+
+11 of 30 trials pass; 13 ended at the model-request limit before submitting.
+Passes per task: `task_3` 5, `task_7` 4, `task_9` 1 on level 1; `task_1` 0,
+`task_2` 0, `task_7` 1 on level 2. The other failures: 5 answers the scorer
+rejected and 1 unscored trial (below).
+
+Settings: `--agent denario --model anthropic/claude-opus-4-7`, agent kwargs
+`{"reasoning_effort": "medium"}`, `--max-iterations 100` (Denario's
+model-request budget, including planning and review), surrender off, Docker
+sandbox (2 CPUs, 6 GB, 4096 PIDs, one GPU per trial; guardrails on, evaluation
+notice off). Single-trial runs merged with `scripts/merge_trial_reports.py`.
+
+Code and reruns: trials ran on `main` 9269652a4 merged with PR #482
+(b1a7783b8), image `corral-corral_md:denario-aed43bf` (mini-v2 package pins),
+on 2026-11-24/25. 7 of the 30 trials hit Denario bugs fixed since and were
+rerun on 2026-11-27/28 at `main` 96a2713ce (#482 merged, with #518 and #522),
+image `corral-corral_md:denario-96a2713`, same settings:
+
+- `KeyError: 'name'` (#518): `level_1_task_3` k1.
+- `record_status_starter` loop: the plan had finished, but Denario kept
+  stepping until the request limit (`level_1_task_3` k5, `level_2_task_1` k2,
+  `level_2_task_2` k4).
+- `FileNotFoundError` when a code block's `# filename:` names a new
+  directory such as `scripts/` (#522): `level_1_task_3` k3, k4,
+  `level_1_task_9` k1.
+
+5 of the 7 now pass; `level_2_task_1` k2 and `level_2_task_2` k4 hit the
+request limit mid-plan. No other trial's plan steps repeat or run past
+completion; `level_2_task_7` k3 retried its first step until the limit, which
+is the engineer failing that step, not the loop. Rerun trials keep their run
+IDs, so their Langfuse sessions also hold the first attempt; the trace IDs in
+the reports belong to the rerun.
+
+**Unscored trial.** `level_2_task_7` k1 cannot be scored: "Cannot identify the
+production samples in this log", the same scorer gap as the two trials under
+[Errors](#errors) (β = 9.48e-5 K⁻¹ against the reference 9.56e-5 K⁻¹). It is
+scored 0 (`merge_trial_reports.py --unscored-as-failure`) and listed in
+`provenance.json`.
