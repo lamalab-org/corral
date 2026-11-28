@@ -4,7 +4,7 @@
 evaluation-awareness notice (`--evaluation-awareness off|on`, #507). Baseline = the mini-v2 runs in
 `reports/<env>/mini-v2/` (guardrails on, notice off).
 
-Layout: `<arm>/<env>/level_<L>/claude-code__claude-opus-5-5/{report.json.gz,provenance.json}`,
+Layout: `<arm>/<env>/level_<L>/<agent>__<model>/{report.json.gz,provenance.json}`,
 merged from single-trial runs with `scripts/merge_trial_reports.py`. Run IDs
 `<env>-mini-v2-<arm>-l<L>-claude-code-claude-opus-5-5`.
 
@@ -19,17 +19,20 @@ merged from single-trial runs with `scripts/merge_trial_reports.py`. Run IDs
 | psychometrics | 1 | 12 | 13 | 14 | 12 |
 | psychometrics | 2 | 8 | 8 | 7 | 9 |
 | inference_opt | 1 | 15 | 15 | 15 | 15 |
-| inference_opt | 2 | 7 | pending | pending | pending |
-| **Total (excl. inference_opt L2)** | | **89/105** | **89/105** | **93/105** | **88/105** |
+| inference_opt | 2 | 7 | 5 | 6 | 0 |
+| **Total** | | **96/120** | **94/120** | **99/120** | **88/120** |
 
-inference_opt L2 is not included yet: 6 of 15 trials per arm finished before OpenRouter credit ran out
-(student models are served by OpenRouter); the remaining 27 will be added in a follow-up.
+inference_opt L2: 6 of 15 trials per arm ran on 2026-11-19/20 before OpenRouter credit ran out (student
+models are served by OpenRouter); the other 9 per arm ran on 2026-11-27/28 with the same commit, image
+and settings. L2 failures are mostly the agent's turn limit (`error_max_turns`: 5, 3 and 7 trials in the
+three arms; 2 in the baseline); the other 19 ended without an error and scored 0.
 
 ## Codex (gpt-6.1-sol): passes out of 15
 
 Same arms and settings (Codex, `gpt-6.1-sol`, reasoning effort medium; images
 `corral-<env>:abl-4d69b6378-codex`, openai-codex 0.1.0b3 / CLI 0.137.0a4, run 2026-11-20). Reports in
-`<arm>/<env>/level_<L>/codex__gpt-6.1-sol/`. inference_opt was not run (OpenRouter credit).
+`<arm>/<env>/level_<L>/codex__gpt-6.1-sol/`. inference_opt: image
+`corral-inference_opt:abl-4d69b6378-codex` (same openai-codex / CLI versions), run 2026-11-27/28.
 
 | Env | Level | Baseline (v2) | `eval-aware` | `guardrails-off` | `guardrails-off-eval-aware` |
 |---|---|---:|---:|---:|---:|
@@ -39,7 +42,12 @@ Same arms and settings (Codex, `gpt-6.1-sol`, reasoning effort medium; images
 | resistor_network | 2 | 13 | 13 | 11 | 13 |
 | psychometrics | 1 | 14 | 9 | 14 | 10 |
 | psychometrics | 2 | 9 | 7 | 7 | 5 |
-| **Total** | | **81/90** | **73/90** | **74/90** | **71/90** |
+| inference_opt | 1 | 1 | 1 | 6 | 2 |
+| inference_opt | 2 | 0 | 0 | 0 | 0 |
+| **Total** | | **82/120** | **74/120** | **80/120** | **73/120** |
+
+On inference_opt Codex mostly exhausts its 50 model-call budget, in the baseline too (13 of 15 trials at
+L1, 11 at L2). In the arms: L1 13, 9 and 13 trials; L2 12, 13 and 12.
 
 4 resistor `guardrails-off*` trials were rerun as infrastructure failures (originals kept outside the
 repo): 2 hit a race between the workspace snapshot and a still-running `pip install` writing into the
