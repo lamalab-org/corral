@@ -4,7 +4,8 @@
 runs cover only the four new tasks: `seed111_diff3`, `seed610696_diff5`,
 `seed611761_diff5` and `seed630238_diff4`. With the six unchanged tasks in
 [`../full/level_1`](../full/level_1), they give the v4 Level 1. The October
-reports in `../full/` stay on the v3 bank. Level 2 is unchanged.
+reports in `../full/` stay on the v3 bank. Level 2 is unchanged (apart from one
+technical rerun of a rate-limited trial; see `../full/README.md`).
 
 15 runs, 300 trials (4 tasks × k = 5 per run), **255 passes**, 1 error trial (an OpenHands kimi-k3
 trial at the iteration limit), no infrastructure failures.
@@ -41,9 +42,26 @@ ReAct claude-opus-5-5 had no empty or refused turns.
 
 AI Scientist ran with claude-opus-4-7 instead of claude-opus-5-5 (refusal risk
 on claude-opus-5-5). Its 7 failures are wrong answers; no trial errored or ran
-out of budget. The October AI Scientist runs on the six unchanged tasks used
-claude-opus-5-5, so a v4 Level 1 AI Scientist column built from both mixes the
-two models.
+out of budget.
+
+## v4 Level 1 columns (October agents)
+
+Each October agent/model has v4 Level 1 results from its October report on the
+six unchanged tasks plus these runs on the four new tasks:
+
+| Agent | Six unchanged tasks (October, `../full/level_1`) | Four new tasks (here) | v4 Level 1 label |
+|---|---|---|---|
+| claude-code | claude-opus-5-5 | claude-opus-5-5 | claude-opus-5-5 |
+| codex | gpt-5.6-sol | gpt-5.6-sol | gpt-5.6-sol |
+| react | gpt-5.6-sol | gpt-5.6-sol | gpt-5.6-sol |
+| react | claude-opus-5-5 | claude-opus-5-5 | claude-opus-5-5 |
+| openhands | kimi-k3 | kimi-k3 | kimi-k3 |
+| react | kimi-k3 | kimi-k3 | kimi-k3 |
+| ai-scientist | claude-opus-5-5 | claude-opus-4-7 | **mixed** (claude-opus-5-5 / claude-opus-4-7) |
+
+The AI Scientist column is labelled **mixed**: claude-opus-5-5 was replaced by
+claude-opus-4-7 for the four new tasks because of its refusal risk, so its v4
+Level 1 numbers combine two models and are not a single-model result.
 
 Kimi: the OpenHands failure hit the 50-iteration limit; the ReAct failure submitted a wrong answer. One
 OpenHands trial (`seed630238_diff4`, k3) stalled: a code-execution worker the agent started ran at 100%
