@@ -51,3 +51,19 @@ minimize(f, [0.0])
 ```
 
 Perhaps a warning would be more appropriate than an outright rejection, allowing the user to proceed with the cell execution while still being informed of potential conflicts.
+
+## Technical rerun (2026-11-28)
+
+One Level 2 trial ended on infrastructure and was replaced: OpenHands kimi-k3
+`seed176_diff9`, trial 0. Its run stopped on an OpenRouter 429 ("kimi-k3 is
+temporarily rate-limited upstream"). The replacement ran with the October
+settings (OpenRouter pinned to Together, reasoning effort `medium`, 50
+iterations, 8 GB) at `main` 9269652a4, and also scored 0, so the Level 2 numbers
+are unchanged (0/50). The original trial's summary and the reason are kept in
+the report metadata (`technical_reruns_20261128`); the replacement's Langfuse
+session is set in `run-metadata.json` (`langfuse_session_ids`).
+
+Two Codex gpt-5.6-sol Level 1 trials (`seed300025_diff1` trial 4, `seed8_diff4`
+trial 1) contain an OpenAI "no credits" error in their history, but the harness
+recovered and both passed. They are not infrastructure failures and are left
+unchanged.
