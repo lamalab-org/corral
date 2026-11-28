@@ -103,6 +103,16 @@ def before_sleep_loguru(retry_state):
     logger.warning(f"LLM call retry {attempt_label} after {cause}; waiting {wait}")
 
 
+# Provider stop reasons that mean the provider refused or filtered the response.
+# LiteLLM reports Anthropic's `stop_reason="refusal"` as `content_filter`.
+REFUSAL_FINISH_REASONS = frozenset({"content_filter", "refusal"})
+
+
+def refusal_error(finish_reason: str | None) -> str:
+    """Error text for a run ended by a provider refusal."""
+    return f"actor provider refused the response (finish_reason={finish_reason!r})"
+
+
 class LLMResponseMetadata(TypedDict, total=False):
     """Metadata for LLM responses"""
 
