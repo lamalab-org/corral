@@ -73,17 +73,23 @@ times worse.
 
 | Level | Passes (of 15) | Hit the 100-request limit |
 |---|---:|---:|
-| 1 | 1 | 5 |
-| 2 | 0 | 5 |
+| 1 | 1 | 4 |
+| 2 | 1 | 3 |
 
-1 of 30 trials pass; 10 ended at the model-request limit before
-submitting. One L1 trial ended with a Denario `UnboundLocalError`.
+2 of 30 trials pass; 7 ended at the model-request limit before
+submitting.
 
 Settings: `--agent denario --model anthropic/claude-opus-4-7`, agent kwargs
 `{"reasoning_effort": "medium"}`, `--max-iterations 100` (Denario's
 model-request budget, including planning and review), surrender off, Docker
-sandbox (2 CPUs, 6 GB, 4096 PIDs; guardrails on, evaluation notice off). Env kwarg `repl_timeout_minutes: 15`. Two `psy_l1_t01` trials ran with a 1 GiB worker-response limit (their sessions were about 281 MB).
-Code: `main` 9269652a4 merged with PR #482 (b1a7783b8), not merged to `main`.
-Worker-response limit 256 MiB (`CORRAL_MAX_WORKER_RESPONSE_BYTES`). Run
-2026-11-24/25; trials that crashed on infrastructure (a full disk, connection
-loss) were rerun. Single-trial runs merged with `scripts/merge_trial_reports.py`.
+sandbox (2 CPUs, 6 GB, 4096 PIDs; guardrails on, evaluation notice off). Env kwarg `repl_timeout_minutes: 15`. Two `psy_l1_t01` trials ran with a 1 GiB worker-response limit (their sessions were about 281 MB). The REPL's pandas thread error (#521) is kept, as in the other mini-v2 runs.
+Worker-response limit 256 MiB (`CORRAL_MAX_WORKER_RESPONSE_BYTES`).
+Single-trial runs merged with `scripts/merge_trial_reports.py`.
+
+Code and reruns: trials ran on `main` 9269652a4 merged with PR #482
+(b1a7783b8) on 2026-11-24/25; trials that crashed on infrastructure (a full
+disk, connection loss) were rerun then. 5 of the 30 trials hit Denario
+or image bugs fixed since (broken MoLFormer from an unpinned `transformers`,
+the `record_status_starter` loop, `KeyError: 'name'`, `UnboundLocalError`) and
+were rerun on 2026-11-27/28 at `main` 2bd3114b5 (#482 merged, with #518 and
+#519); their Langfuse sessions end in `-rerun`. The other trials are unchanged.

@@ -61,16 +61,22 @@ times worse.
 | Level | Passes (of 15) | Hit the 100-request limit |
 |---|---:|---:|
 | 2 | 3 | 5 |
-| 3 | 0 | 8 |
+| 3 | 0 | 6 |
 
-3 of 30 trials pass; 13 ended at the model-request limit before
+3 of 30 trials pass; 11 ended at the model-request limit before
 submitting.
 
 Settings: `--agent denario --model anthropic/claude-opus-4-7`, agent kwargs
 `{"reasoning_effort": "medium"}`, `--max-iterations 100` (Denario's
 model-request budget, including planning and review), surrender off, Docker
-sandbox (2 CPUs, 6 GB, 4096 PIDs; guardrails on, evaluation notice off). Trials started after 2026-11-25 10:30 UTC (19 of 30) used an image with a prebuilt fontconfig cache (`fc-cache -s`). Without it, plotting code makes fontconfig write cache symlinks into the workspace, which Corral rejects; the 5 trials that crashed this way were rerun. The other 11 used the original image.
-Code: `main` 9269652a4 merged with PR #482 (b1a7783b8), not merged to `main`.
-Worker-response limit 256 MiB (`CORRAL_MAX_WORKER_RESPONSE_BYTES`). Run
-2026-11-24/25; trials that crashed on infrastructure (a full disk, connection
-loss) were rerun. Single-trial runs merged with `scripts/merge_trial_reports.py`.
+sandbox (2 CPUs, 6 GB, 4096 PIDs; guardrails on, evaluation notice off). The original image adds a prebuilt fontconfig cache (`fc-cache -s`; on `main` since #519): without it, plotting code makes fontconfig write cache symlinks into the workspace, which Corral rejects.
+Worker-response limit 256 MiB (`CORRAL_MAX_WORKER_RESPONSE_BYTES`).
+Single-trial runs merged with `scripts/merge_trial_reports.py`.
+
+Code and reruns: trials ran on `main` 9269652a4 merged with PR #482
+(b1a7783b8) on 2026-11-24/25; trials that crashed on infrastructure (a full
+disk, connection loss) were rerun then. 5 of the 30 trials hit Denario
+or image bugs fixed since (broken MoLFormer from an unpinned `transformers`,
+the `record_status_starter` loop, `KeyError: 'name'`, `UnboundLocalError`) and
+were rerun on 2026-11-27/28 at `main` 2bd3114b5 (#482 merged, with #518 and
+#519); their Langfuse sessions end in `-rerun`. The other trials are unchanged.
