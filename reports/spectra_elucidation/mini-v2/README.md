@@ -123,3 +123,32 @@ ID (`spectra_elucidation-mini-v2-l<L>-<agent>-<model>`, in
   and stargazer pools; wall-clock durations are not comparable with other runs.
 - **Comparison with the October full runs.** The full runs cover all 20 tasks
   per level; compare per task only.
+
+## Denario (claude-opus-4-7)
+
+`denario__claude-opus-4-7` in each level folder (k = 5, 30 trials). The reports
+are `report.json.xz`: gzip compressed Denario's repetitive sessions about 50
+times worse.
+
+| Level | Passes (of 15) | Hit the 100-request limit |
+|---|---:|---:|
+| 1 | 1 | 0 |
+| 2 | 1 | 2 |
+
+2 of 30 trials pass; 2 ended at the model-request limit before
+submitting. Other errors: 4 trials where Denario's final researcher step did not confirm the answer, 2 where CMBagent gave up after repeated failed attempts, and 1 prompt over the 1M-token context.
+
+Settings: `--agent denario --model anthropic/claude-opus-4-7`, agent kwargs
+`{"reasoning_effort": "medium"}`, `--max-iterations 100` (Denario's
+model-request budget, including planning and review), surrender off, Docker
+sandbox (2 CPUs, 6 GB, 4096 PIDs; guardrails on, evaluation notice off). IR from the local xtbservice (`SPECTRA_IR_URL`).
+Worker-response limit 256 MiB (`CORRAL_MAX_WORKER_RESPONSE_BYTES`).
+Single-trial runs merged with `scripts/merge_trial_reports.py`.
+
+Code and reruns: trials ran on `main` 9269652a4 merged with PR #482
+(b1a7783b8) on 2026-11-24/25; trials that crashed on infrastructure (a full
+disk, connection loss) were rerun then. 22 of the 30 trials hit Denario
+or image bugs fixed since (broken MoLFormer from an unpinned `transformers`,
+the `record_status_starter` loop, `KeyError: 'name'`, `UnboundLocalError`) and
+were rerun on 2026-11-27/28 at `main` 2bd3114b5 (#482 merged, with #518 and
+#519); their Langfuse sessions end in `-rerun`. The other trials are unchanged.

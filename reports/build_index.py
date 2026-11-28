@@ -57,6 +57,7 @@ AGENTS = {
     "ai-scientist": "ai-scientist",
     "ai_scientist": "ai-scientist",
     "aiscientist": "ai-scientist",
+    "denario": "denario",
 }
 MODELS = {
     "claude-opus-5-5": ("claude-opus-5-5", "anthropic/claude-opus-5-5"),
