@@ -178,3 +178,34 @@ traces. All 360 traces were found (`build_index.py --verify`).
   wall-clock durations are not comparable with other runs.
 - **Comparison with the October runs.** The October runs in [`../`](..) cover
   all tasks per level; compare per task only.
+
+## AI Scientist (claude-opus-4-7)
+
+`ai-scientist__claude-opus-4-7` in each level folder (k = 5, 30 trials).
+
+| Level | Task | Passes (of 5) |
+|---|---|---:|
+| 1 | `level_1_task_3` | 4 |
+| 1 | `level_1_task_7` | 1 |
+| 1 | `level_1_task_9` | 5 |
+| 2 | `level_2_task_1` | 0 |
+| 2 | `level_2_task_2` | 0 |
+| 2 | `level_2_task_7` | 2 |
+
+12 of 30 trials pass (level 1: 10/15, level 2: 2/15). No trial had an error,
+and no trial state records a refused reply. All 30 submitted; none reached the
+100-call budget (14–78 LLM calls per trial). In 13 trials the search stopped
+after the preliminary stage ("Preliminary investigation did not produce an
+executable approach with sufficient valid primary evidence"; the default
+profile allows 3 preliminary nodes) and the agent submitted without the
+required artifacts; 2 of these (`level_2_task_7`) still pass.
+
+Settings: `--max-iterations 100` (the AI Scientist's LLM-call budget), agent
+kwargs `{"config_profile": "default", "config": {"max_tool_calls": 256,
+"max_actions_per_node": 256, "max_search_nodes": 8, "max_validation_nodes": 8},
+"reasoning_effort": "medium"}`, surrender off, Docker sandbox (2 CPUs, 6 GB,
+4096 PIDs, one GPU per trial; guardrails on, evaluation notice off), image
+built from `main` 9269652a4 with the mini-v2 package pins. Run 2026-11-23/24,
+16 trials at a time. These runs did not include the refusal-retry change used
+for the other environments' AI Scientist runs. Single-trial runs merged with
+`scripts/merge_trial_reports.py`.

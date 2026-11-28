@@ -118,3 +118,25 @@ their sessions (`build_index.py --verify`).
   wetlab and stargazer pools; wall-clock durations are not comparable with other runs.
 - **Comparison with the October full runs.** The full v4 runs cover all 10
   tasks per level; compare per task only.
+
+## AI Scientist (claude-opus-4-7)
+
+`ai-scientist__claude-opus-4-7` in each level folder (k = 5, 30 trials).
+
+| Level | Passes (of 15) |
+|---|---:|
+| 1 | 4 |
+| 2 | 2 |
+
+6 of 30 trials pass. No trial had a refused reply.
+
+Settings: `--max-iterations 100` (the AI Scientist's LLM-call budget), agent
+kwargs `{"config_profile": "default", "config": {"max_tool_calls": 256,
+"max_actions_per_node": 256, "max_search_nodes": 8, "max_validation_nodes": 8},
+"reasoning_effort": "medium"}`, surrender off, Docker sandbox (2 CPUs, 6 GB,
+4096 PIDs; guardrails on, evaluation notice off). `use_structured_output: false`. Run 2026-11-23/24 from
+`main` 375ba7750 plus a local refusal-retry change (not merged): an empty or
+refused reply (`finish_reason` `refusal`/`content_filter`) is resent after
+10/20/40/60/60 s and the trial ends after the fifth failed retry; refused
+replies are recorded as `<step>_refused_<finish_reason>`. It never triggered
+in these trials. Single-trial runs merged with `scripts/merge_trial_reports.py`.
