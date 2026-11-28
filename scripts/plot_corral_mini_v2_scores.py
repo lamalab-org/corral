@@ -33,6 +33,11 @@ def load_data(
     tasks_parquet: Path, score_column: str = "pass_hat_5"
 ) -> tuple[dict, dict, list[str]]:
     manifest = json.loads(MANIFEST.read_text())
+    # The comparison charts use the original October Stargazer bank and models.
+    if refresh := manifest.get("stargazer_refresh"):
+        manifest["tasks_by_environment"]["stargazer"]["level_1"] = refresh[
+            "previous_level_1"
+        ]
     prices = ROOT / "corral_mini/prices.json"
     strata, agents, source = load(
         manifest["source"]["revision"], tasks_parquet, prices, score_column
@@ -40,6 +45,8 @@ def load_data(
     if source["sha256"] != manifest["source"]["sha256"]:
         raise ValueError("tasks table does not match the v2 manifest")
     afm_path = ROOT / manifest["afm_source"]["trials_csv"]
+    if not afm_path.exists():
+        afm_path = ROOT / "reports/afm/full/trials.csv"
     if (
         hashlib.sha256(afm_path.read_bytes()).hexdigest()
         != manifest["afm_source"]["trials_csv_sha256"]
@@ -48,6 +55,8 @@ def load_data(
     strata.update(load_afm_strata(afm_path, prices, agents, score_column))
     for environment, local in manifest.get("local_sources", {}).items():
         trials_csv = ROOT / local["trials_csv"]
+        if not trials_csv.exists():
+            trials_csv = ROOT / "reports" / environment / "full/trials.csv"
         if (
             hashlib.sha256(trials_csv.read_bytes()).hexdigest()
             != local["trials_csv_sha256"]
