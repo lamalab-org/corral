@@ -1,9 +1,12 @@
-# AFM reports: corral-mini v2 — Claude, GPT and Kimi
+# AFM reports: corral-mini v2 — Claude, GPT, Kimi and AI Scientist
 
 36 runs (nine models × native agent/ReAct × two levels), with three tasks per
 level × five trials: **540 trials, 334 passes**. Claude contributes 145/180
 passes, GPT 129/180 and Kimi 60/180. All 36 planned configurations are represented;
 the generic provider failures described below remain provisional.
+Two supplementary AI Scientist/Opus 5.5 runs add **30 trials, 26 passes**.
+The complete collection contains **38 runs, 570 trials, 360 passes**. These
+supplementary runs use a different iteration budget, described below.
 Layout follows [`../../README.md`](../../README.md), matching the other mini-v2 collections.
 
 [Run index](runs.csv) · [Trial index with derived Langfuse links](trials.csv)
@@ -13,7 +16,7 @@ Layout follows [`../../README.md`](../../README.md), matching the other mini-v2 
 | Level | Tasks | Origin |
 |---|---|---|
 | 1 | 1, 4, 10 | New mini-v2 runs |
-| 2 | 5, 6, 10 | Eight reused mini-v1 runs and ten mini-v2 runs; the task IDs match |
+| 2 | 5, 6, 10 | Eight reused mini-v1 runs and eleven mini-v2 runs; the task IDs match |
 
 ## Results
 
@@ -40,10 +43,11 @@ across the three tasks; Pass^5 and token counts are available in the run index.
 | kimi-k2.5 | react | 1 | 0.2241 | 1 | 0.2241 |
 | kimi-k2-0905 | openhands | 1 | 0.2241 | 1 | 0.2241 |
 | kimi-k2-0905 | react | 1 | 0.2241 | 4 | 0.6148 |
+| claude-opus-5-5 | ai-scientist (supplementary) | 15 | 1.0000 | 11 | 0.9740 |
 
 ## Settings and provenance
 
-The saved configuration records 50 iterations, surrender off,
+The original 36 configurations record 50 iterations, surrender off,
 verbose reports, five trials per task, one parallel trial, and a local sandbox.
 These are Windows Nanosurf AFM runs using direct Anthropic/OpenAI routes and
 OpenRouter for Kimi (Modal for K3.1 Pro, Novita for K2.5/K2-0905, no fallbacks).
@@ -52,14 +56,23 @@ the extra request body; OpenHands/K3.1 Pro uses top-level reasoning_effort.
 K2-0905 leaves reasoning at the provider/SDK default. The OpenHands/K3.1 Pro
 reports do not record an explicit max_tokens; other Kimi reports redact that
 field as `[REDACTED]`, so its numeric value cannot be verified from metadata.
+
+The supplementary AI Scientist runs use OpenRouter/Anthropic Opus 5.5,
+100 iterations and the default config profile, with max_tool_calls=256,
+max_actions_per_node=256, max_search_nodes=8 and max_validation_nodes=8.
+They also record five trials per task, surrender off, verbose reports and a
+local sandbox. Reasoning effort is unspecified; temperature is 1.0. The
+max_tokens field is redacted, so the numeric cap cannot be verified.
+
 **Local instrument access is an exception to the shared Docker benchmark setup:**
 Docker CPU, memory and PID limits do not apply. Thread environment settings and
 Langfuse export success cannot be established from the supplied report files.
 
 Reports and launcher metadata were imported from the supplied
 `corral-mini-result/data` (Claude, subsequently renamed `data_claude`),
-`corral-mini-result/data_gpt` and `corral-mini-result/data_kimi` folders without changing their bytes (reports use
-lossless gzip compression). No trials were rescored, replaced or excluded.
+`corral-mini-result/data_gpt`, `corral-mini-result/data_kimi` and
+`corral-mini-result/data_aiscientist` folders without changing their bytes
+(reports use lossless gzip or XZ compression). No trials were rescored, replaced or excluded.
 Per-run `provenance.json` records source folder names, SHA-256 hashes, original
 subset versions and the target v2 manifest hash. Source Git commits were not
 recorded in the supplied files and are left unknown.
@@ -67,7 +80,7 @@ recorded in the supplied files and are left unknown.
 The 120 reused Level 2 trials (all six Claude runs, GPT-6.1-Sol/Codex and
 Kimi K3.1 Pro/OpenHands)
 retain their original v1 launcher metadata and run IDs. Their task coverage
-matches v2 exactly. The other 420 trials record v2 in launcher metadata. This reuse does not rename trials or invent new sessions.
+matches v2 exactly. The other 450 trials record v2 in launcher metadata. This reuse does not rename trials or invent new sessions.
 
 Original execution IDs and run IDs are preserved. The index builder derives
 Langfuse trace/session links using its configured host and project. These links
@@ -76,9 +89,9 @@ traces. This GitHub update has not been uploaded to Hugging Face.
 
 ## Errors and caveats
 
-33 terminal errors are preserved: 15 iteration limits, three context limits,
-three missing submissions, one missing FinishAction and 11 generic provider errors.
-All retain zero scores. The other 173 zero scores have no saved terminal error;
+34 terminal errors are preserved: 15 iteration limits, three context limits,
+three missing submissions, one missing FinishAction, 11 generic provider errors and one insufficient-credit error.
+All retain zero scores. The other 176 zero scores have no saved terminal error;
 individual scoring outcomes have not been independently audited. GPT-5/Codex
 Level 2 has zero passes out of 15 without saved terminal errors.
 
@@ -88,9 +101,15 @@ configuration showed Modal shared-pool rate limiting, but the report does not
 establish the cause of each failed trial. These are published unchanged for
 transparency, not classified as confirmed model-performance failures.
 
+**One AI Scientist Level 2 trial remains provisional:** task 6, trial index 4
+in `afm-mini-v2-opus55-aiscientist-openrouter-l2-004` failed because the
+request exceeded available OpenRouter credits given in-flight requests.
+Its original zero score and error are preserved; it needs an infrastructure
+rerun before treating it as a model-performance result.
+
 ## Validation
 
-Verified source hashes and decompressed byte equality, 540 unique execution IDs,
+Verified source hashes and decompressed byte equality, 570 unique execution IDs,
 three exact v2 task IDs per run, five trials per task, and index reconstruction
 using the repository's report checker. Full AFM reports remain unchanged.
 
