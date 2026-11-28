@@ -13,17 +13,18 @@ Each trial is checked for these signals:
 - `evaluation_error`, set when the scorer itself failed
 - no activity at all: no messages and no LLM calls, so the environment failed
   before the agent ran
+- explicit model refusals, and empty assistant turns that may explain a limit
 - tool results, matched only against specific phrases (provider error bodies,
   connection failures, out-of-memory), since tool output also holds data and code
 
 Infrastructure categories: credits, rate_limit, provider_error, timeout,
-policy, environment_crash, evaluation_error. Agent limits (iteration, turn or
+policy, refusal, empty_response, environment_crash, evaluation_error. Agent limits (iteration, turn or
 interaction budgets, no submitted answer) and context-window overflows are
 counted for context but are not infrastructure failures.
 
 Findings from the terminal error, the evaluation error or a trial with no
 activity have confidence `high`, as do tool results reporting exhausted
-credits. Other findings from tool results have confidence `review`: the event
+credits. Transcript signals and other findings from tool results have confidence `review`: the event
 happened during the trial but may not have decided its outcome, so check the
 evidence. A failed trial with a `high` infrastructure
 finding is a rerun candidate.
@@ -78,6 +79,8 @@ INFRA = (
     "provider_error",
     "timeout",
     "policy",
+    "refusal",
+    "empty_response",
     "environment_crash",
     "evaluation_error",
 )
@@ -90,8 +93,9 @@ TERMINAL_PATTERNS = [
         "credits",
         r"no credits remaining|insufficient_quota|credit_balance_exhausted"
         r"|insufficient (credits|funds|balance)|exceeded your current quota"
-        r"|payment required|requires more credits",
+        r"|payment required|requires more credits|exceed your available credits",
     ),
+    ("refusal", r"finish_reason\s*=\s*['\"]?refusal\b"),
     ("policy", r"invalid_prompt|usage policy|content[_ ]policy|content_filter"),
     (
         "context_window",
@@ -104,8 +108,14 @@ TERMINAL_PATTERNS = [
         r"InternalServerError|ServiceUnavailable|APIConnectionError|Bad Gateway"
         r"|Gateway Time-?out|overloaded|stream disconnected|upstream connect error"
         r"|Error code: 5\d\d|Server disconnected|RemoteProtocolError"
+        r"|^Provider returned error\b"
         # The provider rejected a request the harness built.
         r"|400 Bad Request|Invalid 'messages\[",
+    ),
+    (
+        "empty_response",
+        r"LLM stream returned no response chunks"
+        r"|actor returned \d+ consecutive responses without public text",
     ),
     (
         "timeout",
@@ -121,7 +131,8 @@ TERMINAL_PATTERNS = [
     ),
     (
         "agent_limit",
-        r"maximum iterations|interaction budget|LLM-call budget|error_max_turns"
+        r"maximum (?:number of )?iterations|iteration limit|interaction budget"
+        r"|LLM-call budget|exhausted the model-request budget|error_max_turns"
         r"|without calling submit_answer|max_iterations",
     ),
 ]
@@ -161,6 +172,11 @@ BENIGN = re.compile(
 
 TERMINAL = [(c, re.compile(p, re.IGNORECASE)) for c, p in TERMINAL_PATTERNS]
 TOOL = [(c, re.compile(p, re.IGNORECASE)) for c, p in TOOL_PATTERNS]
+REFUSAL_TEXT = re.compile(
+    r"^(?:I(?:'m| am) sorry,? (?:but )?)?I (?:cannot|can['\u2019]t|am unable to) "
+    r"(?:help with|assist with|comply with|fulfill) (?:this|that|your) request\b",
+    re.IGNORECASE,
+)
 
 FIELDS = [
     "environment",
@@ -180,11 +196,6 @@ FIELDS = [
     "evidence",
     "langfuse_trace_url",
 ]
-
-
-def environments(mini_v2: bool = False) -> list[Path]:
-    pattern = "*/mini-v2/trials.csv" if mini_v2 else "*/full/trials.csv"
-    return sorted(p.parent for p in REPORTS_DIR.glob(pattern))
 
 
 def is_lfs_pointer(path: Path) -> bool:
@@ -221,6 +232,35 @@ def terminal_errors(trial: dict) -> list[str]:
     return [e for e in errors if not BENIGN.search(e)]
 
 
+def response_findings(messages: list[dict], hit_limit: bool) -> list[tuple[str, str]]:
+    """Find recorded refusal signals and an empty response at the end of a run."""
+    refusal = ""
+    empty_response = False
+    for message in messages:
+        if message.get("name") == "empty_response_retry":
+            empty_response = True
+        if message.get("role") != "assistant":
+            continue
+        metadata = message.get("metadata") or {}
+        finish_reason = message.get("finish_reason") or metadata.get("finish_reason")
+        if finish_reason in ("refusal", "content_filter"):
+            refusal = f"Assistant finish reason: {finish_reason}"
+        elif message.get("refusal") or metadata.get("refusal"):
+            refusal = "The provider marked an assistant response as a refusal."
+        content = str(message.get("content") or "").strip()
+        if match := REFUSAL_TEXT.match(content):
+            refusal = match[0]
+        empty_response = not (message.get("tool_calls") or content)
+    findings = []
+    if refusal:
+        findings.append(("refusal", refusal))
+    if hit_limit and empty_response:
+        findings.append(
+            ("empty_response", "The final assistant response was empty or retried.")
+        )
+    return findings
+
+
 def trial_findings(trial: dict) -> list[dict]:
     """Return one finding per category found in this trial."""
     findings: dict[str, dict] = {}
@@ -253,7 +293,13 @@ def trial_findings(trial: dict) -> list[dict]:
         found = classify(error, TERMINAL)
         if found:
             add(found[0], "high", "error", found[1])
-    if errors and not findings:
+    for category, evidence in response_findings(
+        trial.get("messages") or [], "agent_limit" in findings
+    ):
+        add(category, "review", "assistant", evidence)
+    if errors and not any(
+        finding["source"] == "error" for finding in findings.values()
+    ):
         # An error no pattern knows: report it so new failure modes are seen.
         add("unclassified_error", "review", "error", " ".join(errors[0].split()))
     for call in trial.get("tool_calls") or []:
@@ -267,25 +313,54 @@ def trial_findings(trial: dict) -> list[dict]:
     return list(findings.values())
 
 
-def scan(env_dir: Path) -> tuple[list[dict], list[str]]:
-    """Return the findings and the reports that are Git LFS pointers."""
-    with (env_dir / "trials.csv").open(newline="", encoding="utf-8") as f:
-        index = {row["execution_id"]: row for row in csv.DictReader(f)}
-    rows, skipped = [], []
-    for report in sorted(env_dir.glob("level_*/*/report.json.[gx]z")):
+def scan(
+    env_dir: Path,
+    reports: list[Path] | None = None,
+    *,
+    ablation: str | None = None,
+) -> tuple[list[dict], list[str], int]:
+    """Return findings, skipped Git LFS paths, and the number of trials scanned."""
+    index = None
+    if ablation is None:
+        with (env_dir / "trials.csv").open(newline="", encoding="utf-8") as f:
+            index = {row["execution_id"]: row for row in csv.DictReader(f)}
+    rows, skipped, scanned = [], [], 0
+    if reports is None:
+        reports = list(env_dir.glob("level_*/*/report.json.[gx]z"))
+    for report in sorted(reports):
         if is_lfs_pointer(report):
             skipped.append(report.relative_to(env_dir).as_posix())
             continue
         data = load_report(report)
-        for task in data["task_results"].values():
-            for trial in task["trials"]:
-                row = index[trial["trial_id"]]
+        if index is None:
+            agent, model = report.parent.name.split("__", 1)
+            run = {
+                "environment": ablation,
+                "level": report.parents[1].name.removeprefix("level_"),
+                "agent": agent,
+                "model": model,
+                "run_id": data["metadata"]["benchmark_run_id"],
+            }
+        for task_id, task in data["task_results"].items():
+            for slot, trial in enumerate(task["trials"]):
+                execution_id = trial["trial_id"]
+                if index is None:
+                    row = run | {
+                        "task_id": task_id,
+                        "trial": slot,
+                        "execution_id": execution_id,
+                        "score": trial.get("score", ""),
+                        "success": str(trial.get("success")),
+                    }
+                else:
+                    row = index[execution_id]
+                scanned += 1
                 rows.extend(
                     {key: row.get(key, "") for key in FIELDS} | finding
                     for finding in trial_findings(trial)
                 )
         del data
-    return rows, skipped
+    return rows, skipped, scanned
 
 
 def missing_runs(env_dir: Path) -> list[str]:
@@ -352,12 +427,15 @@ def finding_table(rows: list[dict]) -> list[str]:
         "| Environment | Level | Run | Task | Trial | Cause | Evidence | Trace |",
         "|---|---:|---|---|---:|---|---|---|",
     ]
-    lines.extend(
-        f"| {r['environment']} | {r['level']} | {r['agent']} / {r['model']} "
-        f"| {cell(r['task_id'])} | {r['trial']} | {r['category']} "
-        f"| {cell(r['evidence'], 140)} | [trace]({r['langfuse_trace_url']}) |"
-        for r in rows[:MARKDOWN_ROWS]
-    )
+    for row in rows[:MARKDOWN_ROWS]:
+        url = row["langfuse_trace_url"]
+        trace = f"[trace]({url})" if url else "—"
+        lines.append(
+            f"| {cell(row['environment'])} | {row['level']} "
+            f"| {cell(row['agent'])} / {cell(row['model'])} "
+            f"| {cell(row['task_id'])} | {row['trial']} | {row['category']} "
+            f"| {cell(row['evidence'], 140)} | {trace} |"
+        )
     if len(rows) > MARKDOWN_ROWS:
         lines.append(
             f"\n{len(rows) - MARKDOWN_ROWS} more rows are in the CSV artifact."
@@ -370,7 +448,7 @@ def markdown(
 ) -> str:
     """Render the findings as Markdown tables, e.g. for a PR comment."""
     lines = [
-        "| Environment | Trials | Might need rerun | To review | Iteration limit "
+        "| Environment | Trials scanned | Might need rerun | To review | Agent limit "
         "| Missing runs | Not scanned (LFS) |",
         "|---|---:|---:|---:|---:|---:|---:|",
     ]
@@ -413,7 +491,7 @@ def markdown(
         lines += [
             "",
             "<details><summary>To review: "
-            f"{len(reviews)} findings from tool results or unknown errors</summary>",
+            f"{len(reviews)} findings with uncertain impact on the outcome</summary>",
             "",
             *finding_table(reviews),
             "",
@@ -438,8 +516,10 @@ def markdown(
         "",
         "Might need rerun: failed trials whose terminal error, evaluation error "
         "or missing activity shows an infrastructure cause (credits, rate limit, "
-        "provider error, timeout, policy, environment crash). Iteration limit: "
-        "failed trials that ran out of iterations, turns or budget, or never "
+        "provider error, timeout, policy, explicit terminal refusal, empty responses, "
+        "environment crash). To review includes refusal signals in the transcript "
+        "and empty final responses at an agent limit. Agent limit: "
+        "failed trials that ran out of iterations, turns or model requests, or never "
         "submitted. These and context-window overflows count as failures, not "
         "reruns. Missing runs: agent, model and level combinations of the "
         "standard seven agent and model pairs (18 for mini-v2) with no run "
@@ -460,9 +540,30 @@ def main() -> int:
     parser.add_argument(
         "--markdown", type=Path, help="write summary tables to this Markdown file"
     )
+    parser.add_argument("--reports-dir", type=Path, default=REPORTS_DIR)
+    parser.add_argument(
+        "--report", nargs="*", type=Path, help="scan only these report files"
+    )
     args = parser.parse_args()
 
-    env_dirs = environments(args.mini_v2)
+    reports_dir = args.reports_dir.resolve()
+    selected = collections.defaultdict(list)
+    if args.report is not None:
+        if args.environments or args.mini_v2:
+            parser.error("--report cannot be combined with environments or --mini-v2")
+        for report in sorted({path.resolve() for path in args.report}):
+            if not report.is_relative_to(reports_dir) or not re.fullmatch(
+                r"(?:[^/]+/(?:full|mini-v2)|ablations/mini-v2/[^/]+/[^/]+)"
+                r"/level_\d+/[^/]+/report\.json\.(?:gz|xz)",
+                report.relative_to(reports_dir).as_posix(),
+            ):
+                parser.error(f"invalid report path: {report}")
+            selected[report.parents[2]].append(report)
+
+    variant = "mini-v2" if args.mini_v2 else "full"
+    env_dirs = sorted(p.parent for p in reports_dir.glob(f"*/{variant}/trials.csv"))
+    if args.report is not None:
+        env_dirs = sorted(selected)
     if args.environments:
         known = {p.parent.name: p for p in env_dirs}
         unknown = sorted(set(args.environments) - set(known))
@@ -472,15 +573,18 @@ def main() -> int:
         env_dirs = [known[name] for name in args.environments]
 
     sys.stdout.write(
-        "Failed trials by category; `review` findings come from tool results\n"
+        "Failed trials by category; `review` findings need manual confirmation\n"
     )
     all_rows, results = [], []
     for env_dir in env_dirs:
-        name = env_dir.relative_to(REPORTS_DIR).as_posix()
+        relative = env_dir.relative_to(reports_dir)
+        name = relative.as_posix()
+        ablation = name if len(relative.parts) == 4 else None
+        indexes = ("trials.csv", "runs.csv") if args.report is None else ("trials.csv",)
+        if ablation is not None:
+            indexes = ()
         index_pointers = [
-            filename
-            for filename in ("trials.csv", "runs.csv")
-            if is_lfs_pointer(env_dir / filename)
+            filename for filename in indexes if is_lfs_pointer(env_dir / filename)
         ]
         if index_pointers:
             sys.stdout.write(
@@ -491,10 +595,8 @@ def main() -> int:
             # Unknown coverage must not be presented as zero infrastructure failures.
             results.append((name, "unknown", [], index_pointers, []))
             continue
-        rows, skipped = scan(env_dir)
-        with (env_dir / "trials.csv").open(newline="", encoding="utf-8") as f:
-            trials = sum(1 for _ in csv.DictReader(f))
-        missing = missing_runs(env_dir)
+        rows, skipped, trials = scan(env_dir, selected.get(env_dir), ablation=ablation)
+        missing = missing_runs(env_dir) if args.report is None else []
         summarize(name, rows, trials, skipped)
         for run in missing:
             sys.stdout.write(f"  missing run: {run}\n")
@@ -502,7 +604,8 @@ def main() -> int:
         results.append((name, trials, rows, skipped, missing))
 
     if args.markdown:
-        args.markdown.write_text(markdown(results), encoding="utf-8")
+        summary = markdown(results) if results else "No reports matched the scan.\n"
+        args.markdown.write_text(summary, encoding="utf-8")
         sys.stdout.write(f"\nMarkdown summary written to {args.markdown}\n")
 
     if args.csv:
