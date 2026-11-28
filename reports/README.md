@@ -25,7 +25,8 @@ Mini versions identify subset releases, separate from the full benchmark:
 inference optimization, Psychometrics, resistor network, retrosynthesis,
 spectra elucidation and wetlab. AFM additionally includes two supplementary
 AI Scientist runs (30 trials), bringing its mini-v2 collection to 38 runs /
-570 trials. Stargazer mini-v2 reports are not yet present.
+570 trials. The [Stargazer mini-v2 collection](stargazer/mini-v2/) uses the
+refreshed Level 1 bank.
 Run dates and source commits belong in metadata and provenance, not collection names.
 
 Each mini version has its own Hugging Face datasets, not the October ones:

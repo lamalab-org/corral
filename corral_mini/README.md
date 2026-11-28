@@ -134,6 +134,29 @@ selects three unsaturated tasks per level, with Spearman 1.000 (L1) and 0.991
 The v2 figures use these reports; the original v1 analysis and saturation
 figures describe the original October data.
 
+## Stargazer Level 1 refresh (2026-11-28)
+
+The v4 task bank replaced all three Level 1 tasks in the original mini. The
+selection uses ten current tasks, combining October reports for the six
+retained tasks with the [four replacement tasks](../reports/stargazer/l1-v4-additions/).
+The AI Scientist column uses Opus 5.5 on retained tasks and Opus 4.7 on
+replacements. Cost uses each trial's actual model, with $5 input and $25 output
+per million tokens for Opus 4.7. [Anthropic pricing](https://platform.claude.com/docs/en/models/opus-4-7/overview)
+
+| Level | Selected tasks | Eligible sets | Best-rank ties | After cost |
+|---|---|---:|---:|---:|
+| 1 | `seed300025_diff1`, `seed611761_diff5`, `seed630238_diff4` | 120 | 4 | 1 |
+| 2 | `seed122_diff10`, `seed176_diff9`, `seed1_diff8` | 120 | 120 | 1 |
+
+Every Level 1 task was solved at least once by each selection column, so all
+three-task sets were eligible. The winning set has Spearman 0.927426. Level 2
+keeps the previous selection. All seven Level 2 columns scored zero on the
+full bank, so the selection comes down to cost.
+
+Run `python scripts/check_stargazer_mini_v2.py` to reproduce both selections
+from the trial indexes recorded in the manifest. The benchmark comparison
+figures and tie CSV below use the original Stargazer Level 1 bank.
+
 ## Methods
 
 **v2 selection.** In each level, choose three tasks. Prefer tasks that at least

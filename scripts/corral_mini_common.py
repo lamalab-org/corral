@@ -113,10 +113,27 @@ def load_report_strata(
     environment: str = "afm",
 ) -> dict:
     """Load five-trial strata from an environment's trials.csv."""
+    return report_strata(
+        pd.read_csv(trials_csv), prices_path, agents, score_column, environment
+    )
+
+
+def report_strata(
+    data: pd.DataFrame,
+    prices_path: Path,
+    agents: list[str],
+    score_column: str,
+    environment: str,
+    *,
+    agent_columns: dict[str, str] | None = None,
+) -> dict:
+    """Group report trials by selection column, pricing their actual models."""
     if score_column not in {"pass_hat_5", "pass_at_5"}:
         raise ValueError(f"unknown score column: {score_column}")
-    data = pd.read_csv(trials_csv)
+    data = data.copy()
     data["agent_model"] = data.agent + "__" + data.model
+    if agent_columns:
+        data["agent_model"] = data.agent_model.replace(agent_columns)
     prices = json.loads(prices_path.read_text())
     data["usd"] = (
         data.input_tokens * data.model.map(lambda m: prices[m]["input"])
